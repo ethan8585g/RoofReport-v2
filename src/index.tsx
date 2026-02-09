@@ -161,7 +161,7 @@ function getMainPageHTML(mapsApiKey: string) {
       </nav>
     </div>
   </header>
-  <main class="max-w-5xl mx-auto px-4 py-8">
+  <main class="max-w-6xl mx-auto px-4 py-8">
     <div id="app-root"></div>
   </main>
   <footer class="bg-gray-800 text-gray-400 text-center py-6 mt-12">

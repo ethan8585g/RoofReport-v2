@@ -1,6 +1,7 @@
 // ============================================================
 // Reuse Canada - Roofing Measurement Tool
-// Main Order Form Application
+// Main Order Form Application v2.1
+// Two-Phase Address Selection + Satellite Roof Pinning
 // ============================================================
 
 const API = '';
@@ -9,6 +10,8 @@ const API = '';
 const state = {
   currentStep: 1,
   totalSteps: 5,
+  // Step 2 has two phases: 'address' (autocomplete + form) and 'pin' (satellite roof targeting)
+  addressPhase: 'address',
   formData: {
     // Step 1: Service Tier
     service_tier: '',
@@ -18,9 +21,11 @@ const state = {
     property_city: '',
     property_province: 'Alberta',
     property_postal_code: '',
+    property_country: 'Canada',
     latitude: null,
     longitude: null,
     pinPlaced: false,
+    addressConfirmed: false,
     // Step 3: Homeowner
     homeowner_name: '',
     homeowner_phone: '',
@@ -35,8 +40,12 @@ const state = {
     notes: ''
   },
   customerCompanies: [],
-  map: null,
-  marker: null,
+  // Map instances (separate for each phase)
+  addressMap: null,
+  addressMarker: null,
+  autocomplete: null,
+  pinMap: null,
+  pinMarker: null,
   geocoder: null,
   dbInitialized: false,
   submitting: false
@@ -88,27 +97,50 @@ function render() {
 
     <!-- Navigation -->
     <div class="flex justify-between items-center max-w-2xl mx-auto mt-8">
-      ${state.currentStep > 1 ? `
-        <button onclick="prevStep()" class="px-6 py-3 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg font-medium transition-colors">
-          <i class="fas fa-arrow-left mr-2"></i>Back
-        </button>
-      ` : '<div></div>'}
-      ${state.currentStep < state.totalSteps ? `
-        <button onclick="nextStep()" id="nextBtn" class="px-6 py-3 bg-brand-600 hover:bg-brand-700 text-white rounded-lg font-medium transition-colors shadow-md">
-          Next<i class="fas fa-arrow-right ml-2"></i>
-        </button>
-      ` : `
-        <button onclick="submitOrder()" id="submitBtn" class="px-8 py-3 bg-accent-500 hover:bg-accent-600 text-white rounded-lg font-bold text-lg transition-colors shadow-lg ${state.submitting ? 'opacity-50 cursor-not-allowed' : ''}">
-          ${state.submitting ? '<span class="spinner mr-2"></span>Processing...' : '<i class="fas fa-check-circle mr-2"></i>Place Order & Pay'}
-        </button>
-      `}
+      ${renderNavButtons()}
     </div>
   `;
 
-  // Initialize map if on step 2
+  // Initialize maps after DOM is rendered
   if (state.currentStep === 2) {
-    setTimeout(() => initMap(), 100);
+    setTimeout(() => {
+      if (state.addressPhase === 'address') {
+        initAddressMap();
+      } else {
+        initPinMap();
+      }
+    }, 100);
   }
+}
+
+function renderNavButtons() {
+  // Step 2 has special back logic (pin phase goes back to address phase)
+  const showBack = state.currentStep > 1;
+  let backAction = 'prevStep()';
+  if (state.currentStep === 2 && state.addressPhase === 'pin') {
+    backAction = 'backToAddressPhase()';
+  }
+
+  // Step 2 address phase: "Next" is replaced by "Confirm & Pin Roof" inside the step
+  const hideNext = (state.currentStep === 2);
+
+  return `
+    ${showBack ? `
+      <button onclick="${backAction}" class="px-6 py-3 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg font-medium transition-colors">
+        <i class="fas fa-arrow-left mr-2"></i>Back
+      </button>
+    ` : '<div></div>'}
+    ${state.currentStep < state.totalSteps && !hideNext ? `
+      <button onclick="nextStep()" id="nextBtn" class="px-6 py-3 bg-brand-600 hover:bg-brand-700 text-white rounded-lg font-medium transition-colors shadow-md">
+        Next<i class="fas fa-arrow-right ml-2"></i>
+      </button>
+    ` : ''}
+    ${state.currentStep === state.totalSteps ? `
+      <button onclick="submitOrder()" id="submitBtn" class="px-8 py-3 bg-accent-500 hover:bg-accent-600 text-white rounded-lg font-bold text-lg transition-colors shadow-lg ${state.submitting ? 'opacity-50 cursor-not-allowed' : ''}">
+        ${state.submitting ? '<span class="spinner mr-2"></span>Processing...' : '<i class="fas fa-check-circle mr-2"></i>Place Order & Pay'}
+      </button>
+    ` : ''}
+  `;
 }
 
 // ============================================================
@@ -190,7 +222,7 @@ function renderStep1() {
     </div>
     <div class="grid md:grid-cols-3 gap-6 max-w-4xl mx-auto">
       ${tiers.map(t => `
-        <div class="tier-card bg-white rounded-xl border-2 ${state.formData.service_tier === t.id ? 'border-brand-500 selected' : 'border-gray-200'} p-6 relative overflow-hidden"
+        <div class="tier-card bg-white rounded-xl border-2 ${state.formData.service_tier === t.id ? 'border-brand-500 selected' : 'border-gray-200'} p-6 relative overflow-hidden cursor-pointer"
              onclick="selectTier('${t.id}', ${t.price})">
           ${state.formData.service_tier === t.id ? '<div class="absolute top-3 right-3"><i class="fas fa-check-circle text-brand-500 text-xl"></i></div>' : ''}
           <div class="w-14 h-14 rounded-xl bg-gradient-to-br ${t.bgGrad} flex items-center justify-center mb-4">
@@ -224,79 +256,141 @@ function selectTier(tier, price) {
 }
 
 // ============================================================
-// STEP 2: PROPERTY ADDRESS + MAP PIN
+// STEP 2: TWO-PHASE PROPERTY LOCATION
+// Phase A: Address Selection (Google Places Autocomplete + form)
+// Phase B: Satellite Roof Pin Confirmation
 // ============================================================
 function renderStep2() {
+  if (state.addressPhase === 'pin') {
+    return renderStep2PinPhase();
+  }
+  return renderStep2AddressPhase();
+}
+
+// ---- PHASE A: Address Selection ----
+function renderStep2AddressPhase() {
+  const provinces = ['Alberta','British Columbia','Saskatchewan','Manitoba','Ontario','Quebec','New Brunswick','Nova Scotia','PEI','Newfoundland','Yukon','NWT','Nunavut'];
+
   return `
-    <div class="max-w-2xl mx-auto">
+    <div class="max-w-4xl mx-auto">
       <div class="text-center mb-6">
-        <h2 class="text-2xl font-bold text-gray-800">Property Location</h2>
-        <p class="text-gray-500 mt-2">Enter the address and pin the exact roof on the map</p>
+        <h2 class="text-2xl font-bold text-gray-800">
+          <i class="fas fa-search-location mr-2 text-brand-500"></i>Find the Property
+        </h2>
+        <p class="text-gray-500 mt-2">Search for the address or type it manually. We'll locate it on the map.</p>
       </div>
 
-      <!-- Address Search -->
-      <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
-        <div class="grid md:grid-cols-2 gap-4">
-          <div class="md:col-span-2">
-            <label class="block text-sm font-medium text-gray-700 mb-1">
-              <i class="fas fa-search mr-1 text-brand-500"></i>Search Address
-            </label>
-            <div class="flex gap-2">
-              <input type="text" id="addressSearch" placeholder="Start typing an address..."
-                class="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-                value="${state.formData.property_address}" onkeypress="if(event.key==='Enter'){searchAddress()}" />
-              <button onclick="searchAddress()" class="px-4 py-3 bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors">
-                <i class="fas fa-search"></i>
-              </button>
-            </div>
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">City</label>
-            <input type="text" id="propCity" value="${state.formData.property_city}"
-              oninput="state.formData.property_city=this.value"
-              class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">Province</label>
-            <select id="propProvince" onchange="state.formData.property_province=this.value"
-              class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
-              ${['Alberta','British Columbia','Saskatchewan','Manitoba','Ontario','Quebec','New Brunswick','Nova Scotia','PEI','Newfoundland','Yukon','NWT','Nunavut']
-                .map(p => `<option value="${p}" ${state.formData.property_province === p ? 'selected' : ''}>${p}</option>`).join('')}
-            </select>
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">Postal Code</label>
-            <input type="text" id="propPostal" value="${state.formData.property_postal_code}"
-              oninput="state.formData.property_postal_code=this.value"
-              class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-              placeholder="T5J 1A7" />
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">Coordinates</label>
-            <div class="px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-600">
-              ${state.formData.latitude ? `${state.formData.latitude.toFixed(6)}, ${state.formData.longitude.toFixed(6)}` : '<span class="text-gray-400">Pin not placed yet</span>'}
-            </div>
-          </div>
+      <!-- Phase indicator -->
+      <div class="flex items-center justify-center gap-3 mb-6">
+        <div class="flex items-center gap-2 px-4 py-2 bg-brand-100 text-brand-700 rounded-full text-sm font-semibold">
+          <i class="fas fa-search"></i> Step 1: Find Address
+        </div>
+        <i class="fas fa-arrow-right text-gray-300"></i>
+        <div class="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-400 rounded-full text-sm">
+          <i class="fas fa-crosshairs"></i> Step 2: Pin Roof
         </div>
       </div>
 
-      <!-- Map -->
-      <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-        <div class="flex items-center justify-between mb-3">
-          <p class="text-sm font-medium text-gray-700">
-            <i class="fas fa-map-pin text-red-500 mr-1"></i>
-            Click on the map to pin the exact roof
-          </p>
-          ${state.formData.pinPlaced ? '<span class="text-xs bg-brand-100 text-brand-700 px-3 py-1 rounded-full"><i class="fas fa-check mr-1"></i>Pin Placed</span>' : '<span class="text-xs bg-amber-100 text-amber-700 px-3 py-1 rounded-full"><i class="fas fa-exclamation-triangle mr-1"></i>Pin Required</span>'}
-        </div>
-        <div id="map" class="map-container w-full" style="height: 400px; background: #e5e7eb; display: flex; align-items: center; justify-content: center;">
-          <div class="text-center text-gray-400">
-            <i class="fas fa-map text-4xl mb-2"></i>
-            <p class="text-sm">Google Maps loads here</p>
-            <p class="text-xs mt-1">Configure your Google Maps API key in Settings</p>
-            <button onclick="loadMapFallback()" class="mt-3 px-4 py-2 bg-brand-600 text-white rounded-lg text-sm hover:bg-brand-700">
-              Use Interactive Pin Selector
+      <!-- Split layout: Form + Map -->
+      <div class="grid lg:grid-cols-5 gap-6">
+        <!-- Left: Address Form (like the Google widget) -->
+        <div class="lg:col-span-2 bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <div class="flex items-center gap-2 mb-5">
+            <img src="https://fonts.gstatic.com/s/i/googlematerialicons/location_pin/v5/24px.svg" alt="" class="w-5 h-5">
+            <span class="font-semibold text-gray-800">Address Selection</span>
+          </div>
+
+          <div class="space-y-4">
+            <!-- Autocomplete Address Input -->
+            <div>
+              <label class="block text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">Street Address</label>
+              <input type="text" id="autocomplete-input" placeholder="Start typing an address..."
+                class="w-full px-4 py-3 border-b-2 border-gray-300 focus:border-brand-500 outline-none text-sm font-medium transition-colors bg-gray-50 rounded-t-lg"
+                value="${state.formData.property_address}" />
+            </div>
+
+            <!-- City -->
+            <div>
+              <label class="block text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">City</label>
+              <input type="text" id="city-input" placeholder="City"
+                class="w-full px-4 py-2.5 border-b-2 border-gray-200 focus:border-brand-500 outline-none text-sm transition-colors"
+                value="${state.formData.property_city}"
+                oninput="state.formData.property_city=this.value" />
+            </div>
+
+            <!-- Province + Postal -->
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">Province</label>
+                <select id="province-input" onchange="state.formData.property_province=this.value"
+                  class="w-full px-3 py-2.5 border-b-2 border-gray-200 focus:border-brand-500 outline-none text-sm transition-colors bg-white">
+                  ${provinces.map(p => `<option value="${p}" ${state.formData.property_province === p ? 'selected' : ''}>${p}</option>`).join('')}
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">Postal Code</label>
+                <input type="text" id="postal-input" placeholder="T5J 1A7"
+                  class="w-full px-3 py-2.5 border-b-2 border-gray-200 focus:border-brand-500 outline-none text-sm transition-colors"
+                  value="${state.formData.property_postal_code}"
+                  oninput="state.formData.property_postal_code=this.value" />
+              </div>
+            </div>
+
+            <!-- Country -->
+            <div>
+              <label class="block text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">Country</label>
+              <input type="text" id="country-input" placeholder="Country"
+                class="w-full px-4 py-2.5 border-b-2 border-gray-200 focus:border-brand-500 outline-none text-sm transition-colors"
+                value="${state.formData.property_country}"
+                oninput="state.formData.property_country=this.value" />
+            </div>
+
+            <!-- Coordinates display -->
+            <div class="pt-2 border-t border-gray-100">
+              <div class="flex items-center justify-between text-xs text-gray-500">
+                <span><i class="fas fa-map-pin mr-1"></i>Coordinates</span>
+                <span class="${state.formData.latitude ? 'text-brand-600 font-medium' : 'text-gray-400'}">
+                  ${state.formData.latitude ? `${state.formData.latitude.toFixed(6)}, ${state.formData.longitude.toFixed(6)}` : 'Not located yet'}
+                </span>
+              </div>
+            </div>
+
+            <!-- Confirm & Proceed Button -->
+            <button onclick="confirmAddressAndProceed()" id="confirm-address-btn"
+              class="w-full mt-2 px-4 py-3 rounded-lg font-semibold text-sm transition-all shadow-md flex items-center justify-center gap-2
+                ${state.formData.latitude ? 'bg-brand-600 hover:bg-brand-700 text-white' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}"
+              ${!state.formData.latitude ? 'disabled' : ''}>
+              <i class="fas fa-crosshairs"></i>
+              Confirm Address & Pin Exact Roof
+              <i class="fas fa-arrow-right"></i>
             </button>
+          </div>
+        </div>
+
+        <!-- Right: Map Preview -->
+        <div class="lg:col-span-3 bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+          <div class="bg-gray-50 px-4 py-2 border-b border-gray-200 flex items-center justify-between">
+            <span class="text-xs font-medium text-gray-500 uppercase tracking-wide">
+              <i class="fas fa-map mr-1"></i> Map Preview
+            </span>
+            ${state.formData.latitude ? `
+              <span class="text-xs bg-brand-100 text-brand-700 px-2 py-0.5 rounded-full">
+                <i class="fas fa-check-circle mr-1"></i>Location Found
+              </span>
+            ` : `
+              <span class="text-xs bg-gray-100 text-gray-400 px-2 py-0.5 rounded-full">
+                Search an address to preview
+              </span>
+            `}
+          </div>
+          <div id="address-map" style="height: 480px; background: #f3f4f6;">
+            <div class="h-full flex items-center justify-center text-gray-400">
+              <div class="text-center">
+                <i class="fas fa-map-marked-alt text-5xl mb-3 text-gray-300"></i>
+                <p class="text-sm font-medium">Type an address to see the map</p>
+                <p class="text-xs mt-1">Google Maps will locate the property</p>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -304,154 +398,417 @@ function renderStep2() {
   `;
 }
 
-// Map initialization (works with or without Google Maps API key)
-function initMap() {
-  const mapDiv = document.getElementById('map');
-  if (!mapDiv) return;
+// ---- PHASE B: Satellite Roof Pinning ----
+function renderStep2PinPhase() {
+  return `
+    <div class="max-w-4xl mx-auto">
+      <div class="text-center mb-4">
+        <h2 class="text-2xl font-bold text-gray-800">
+          <i class="fas fa-crosshairs mr-2 text-red-500"></i>Pin the Exact Roof
+        </h2>
+        <p class="text-gray-500 mt-2">Click on the satellite image to place a pin on the <strong>exact roof</strong> to be measured</p>
+      </div>
 
-  // Check if Google Maps is available (loaded via callback or already ready)
-  if (typeof google !== 'undefined' && google.maps) {
-    initGoogleMap(mapDiv);
-  } else if (typeof googleMapsReady !== 'undefined' && !googleMapsReady) {
-    // Maps script is loading but not ready yet — wait for the callback
-    console.log('[Maps] Waiting for Google Maps API to load...');
-  }
-  // Otherwise show fallback (already rendered in HTML)
+      <!-- Phase indicator -->
+      <div class="flex items-center justify-center gap-3 mb-4">
+        <div class="flex items-center gap-2 px-4 py-2 bg-brand-100 text-brand-700 rounded-full text-sm">
+          <i class="fas fa-check-circle"></i> Address Found
+        </div>
+        <i class="fas fa-arrow-right text-gray-300"></i>
+        <div class="flex items-center gap-2 px-4 py-2 bg-red-100 text-red-700 rounded-full text-sm font-semibold">
+          <i class="fas fa-crosshairs"></i> Step 2: Pin Roof
+        </div>
+      </div>
+
+      <!-- Address summary bar -->
+      <div class="bg-white rounded-lg border border-gray-200 px-4 py-3 mb-4 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class="w-8 h-8 bg-brand-100 rounded-full flex items-center justify-center">
+            <i class="fas fa-map-marker-alt text-brand-600 text-sm"></i>
+          </div>
+          <div>
+            <p class="text-sm font-semibold text-gray-800">${state.formData.property_address}</p>
+            <p class="text-xs text-gray-500">${state.formData.property_city}${state.formData.property_province ? ', ' + state.formData.property_province : ''} ${state.formData.property_postal_code}</p>
+          </div>
+        </div>
+        <button onclick="backToAddressPhase()" class="text-xs text-brand-600 hover:text-brand-700 font-medium">
+          <i class="fas fa-edit mr-1"></i>Change Address
+        </button>
+      </div>
+
+      <!-- Satellite Map for roof pinning -->
+      <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+        <div class="bg-gray-800 px-4 py-2.5 flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <div class="w-2 h-2 rounded-full ${state.formData.pinPlaced ? 'bg-green-400' : 'bg-red-400 animate-pulse'}"></div>
+            <span class="text-xs font-medium text-gray-300 uppercase tracking-wide">
+              <i class="fas fa-satellite mr-1"></i> Satellite View — Roof Targeting
+            </span>
+          </div>
+          <div class="flex items-center gap-3">
+            ${state.formData.pinPlaced ? `
+              <span class="text-xs bg-green-500/20 text-green-400 px-3 py-1 rounded-full font-medium">
+                <i class="fas fa-check-circle mr-1"></i>Pin Placed — ${state.formData.latitude.toFixed(6)}, ${state.formData.longitude.toFixed(6)}
+              </span>
+            ` : `
+              <span class="text-xs bg-amber-500/20 text-amber-400 px-3 py-1 rounded-full font-medium animate-pulse">
+                <i class="fas fa-hand-pointer mr-1"></i>Click on the roof to place pin
+              </span>
+            `}
+          </div>
+        </div>
+        <div id="pin-map" style="height: 500px; cursor: crosshair; background: #1a1a2e;"></div>
+      </div>
+
+      <!-- Instructions + Confirm -->
+      <div class="mt-4 flex items-center justify-between">
+        <div class="flex items-center gap-4 text-xs text-gray-500">
+          <span><i class="fas fa-mouse-pointer mr-1"></i>Click = Place pin</span>
+          <span><i class="fas fa-hand-rock mr-1"></i>Drag pin = Adjust</span>
+          <span><i class="fas fa-search-plus mr-1"></i>Scroll = Zoom</span>
+        </div>
+        <button onclick="confirmPinAndProceed()" id="confirm-pin-btn"
+          class="px-6 py-3 rounded-lg font-semibold text-sm transition-all shadow-md flex items-center gap-2
+            ${state.formData.pinPlaced ? 'bg-brand-600 hover:bg-brand-700 text-white' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}"
+          ${!state.formData.pinPlaced ? 'disabled' : ''}>
+          <i class="fas fa-check-circle"></i>
+          Confirm Roof Location
+          <i class="fas fa-arrow-right"></i>
+        </button>
+      </div>
+    </div>
+  `;
 }
 
-function initGoogleMap(mapDiv) {
+// ============================================================
+// PHASE A: Address Map Initialization
+// ============================================================
+function initAddressMap() {
+  const mapDiv = document.getElementById('address-map');
+  if (!mapDiv || typeof google === 'undefined' || !google.maps) return;
+
   const center = state.formData.latitude
     ? { lat: state.formData.latitude, lng: state.formData.longitude }
     : { lat: 53.5461, lng: -113.4938 }; // Edmonton default
 
-  state.map = new google.maps.Map(mapDiv, {
+  state.addressMap = new google.maps.Map(mapDiv, {
     center,
-    zoom: 18,
-    mapTypeId: 'satellite',
-    tilt: 0,
-    mapTypeControl: true,
-    streetViewControl: false,
+    zoom: state.formData.latitude ? 17 : 11,
+    mapTypeId: 'roadmap',
     fullscreenControl: true,
+    streetViewControl: true,
+    zoomControl: true,
+    mapTypeControl: false,
   });
 
   state.geocoder = new google.maps.Geocoder();
 
-  // Place existing marker
+  // Place marker if we already have coordinates
   if (state.formData.latitude) {
-    placeGoogleMarker({ lat: state.formData.latitude, lng: state.formData.longitude });
+    placeAddressMarker({ lat: state.formData.latitude, lng: state.formData.longitude });
   }
 
-  // Click to place pin
-  state.map.addListener('click', (e) => {
+  // Initialize Places Autocomplete
+  initAutocomplete();
+}
+
+function initAutocomplete() {
+  const input = document.getElementById('autocomplete-input');
+  if (!input || typeof google === 'undefined') return;
+
+  state.autocomplete = new google.maps.places.Autocomplete(input, {
+    fields: ['address_components', 'geometry', 'name', 'formatted_address'],
+    types: ['address'],
+    componentRestrictions: { country: 'ca' }
+  });
+
+  state.autocomplete.addListener('place_changed', () => {
+    const place = state.autocomplete.getPlace();
+    if (!place.geometry) {
+      showToast(`No details available for: '${place.name}'`, 'warning');
+      return;
+    }
+
+    // Extract address components
+    fillFormFromPlace(place);
+
+    // Update map
+    const loc = place.geometry.location;
+    state.formData.latitude = loc.lat();
+    state.formData.longitude = loc.lng();
+
+    state.addressMap.setCenter(loc);
+    state.addressMap.setZoom(17);
+    placeAddressMarker({ lat: loc.lat(), lng: loc.lng() });
+
+    // Update the button state
+    updateConfirmButton();
+  });
+
+  // Also handle manual search on Enter
+  input.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      manualGeocode();
+    }
+  });
+}
+
+function fillFormFromPlace(place) {
+  const SHORT_NAMES = new Set(['street_number', 'administrative_area_level_1', 'postal_code']);
+
+  function getComponent(type) {
+    for (const comp of place.address_components || []) {
+      if (comp.types.includes(type)) {
+        return SHORT_NAMES.has(type) ? comp.short_name : comp.long_name;
+      }
+    }
+    return '';
+  }
+
+  // Build street address
+  const streetNumber = getComponent('street_number');
+  const route = getComponent('route');
+  const streetAddress = `${streetNumber} ${route}`.trim();
+
+  // Fill form fields
+  state.formData.property_address = streetAddress || place.formatted_address || '';
+  state.formData.property_city = getComponent('locality') || getComponent('sublocality_level_1') || '';
+  state.formData.property_province = getComponent('administrative_area_level_1') || 'Alberta';
+  state.formData.property_postal_code = getComponent('postal_code') || '';
+  state.formData.property_country = getComponent('country') || 'Canada';
+
+  // Update DOM inputs
+  const cityInput = document.getElementById('city-input');
+  const postalInput = document.getElementById('postal-input');
+  const countryInput = document.getElementById('country-input');
+  const provinceInput = document.getElementById('province-input');
+
+  if (cityInput) cityInput.value = state.formData.property_city;
+  if (postalInput) postalInput.value = state.formData.property_postal_code;
+  if (countryInput) countryInput.value = state.formData.property_country;
+  if (provinceInput) provinceInput.value = state.formData.property_province;
+}
+
+function manualGeocode() {
+  const input = document.getElementById('autocomplete-input');
+  const addr = input?.value;
+  if (!addr || !state.geocoder) return;
+
+  state.formData.property_address = addr;
+
+  state.geocoder.geocode({ address: addr + ', Canada' }, (results, status) => {
+    if (status === 'OK' && results[0]) {
+      const loc = results[0].geometry.location;
+      state.formData.latitude = loc.lat();
+      state.formData.longitude = loc.lng();
+
+      // Extract components
+      const comps = results[0].address_components;
+      comps.forEach(c => {
+        if (c.types.includes('locality')) state.formData.property_city = c.long_name;
+        if (c.types.includes('administrative_area_level_1')) state.formData.property_province = c.short_name;
+        if (c.types.includes('postal_code')) state.formData.property_postal_code = c.short_name;
+        if (c.types.includes('country')) state.formData.property_country = c.long_name;
+      });
+
+      state.addressMap.setCenter(loc);
+      state.addressMap.setZoom(17);
+      placeAddressMarker({ lat: loc.lat(), lng: loc.lng() });
+
+      // Update form
+      const cityInput = document.getElementById('city-input');
+      const postalInput = document.getElementById('postal-input');
+      const countryInput = document.getElementById('country-input');
+      if (cityInput) cityInput.value = state.formData.property_city;
+      if (postalInput) postalInput.value = state.formData.property_postal_code;
+      if (countryInput) countryInput.value = state.formData.property_country;
+
+      updateConfirmButton();
+    } else {
+      showToast('Could not find that address. Try being more specific.', 'warning');
+    }
+  });
+}
+
+function placeAddressMarker(pos) {
+  if (state.addressMarker) state.addressMarker.setMap(null);
+  state.addressMarker = new google.maps.Marker({
+    position: pos,
+    map: state.addressMap,
+    animation: google.maps.Animation.DROP,
+    icon: {
+      url: 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23059669" width="40" height="40"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>'),
+      scaledSize: new google.maps.Size(40, 40),
+    }
+  });
+}
+
+function updateConfirmButton() {
+  const btn = document.getElementById('confirm-address-btn');
+  if (btn && state.formData.latitude) {
+    btn.disabled = false;
+    btn.className = 'w-full mt-2 px-4 py-3 rounded-lg font-semibold text-sm transition-all shadow-md flex items-center justify-center gap-2 bg-brand-600 hover:bg-brand-700 text-white';
+  }
+  // Update coordinates display
+  const coordDisplay = document.querySelector('[data-coord-display]');
+  if (coordDisplay) {
+    coordDisplay.textContent = `${state.formData.latitude.toFixed(6)}, ${state.formData.longitude.toFixed(6)}`;
+    coordDisplay.className = 'text-brand-600 font-medium';
+  }
+}
+
+// ============================================================
+// PHASE B: Satellite Pin Map
+// ============================================================
+function initPinMap() {
+  const mapDiv = document.getElementById('pin-map');
+  if (!mapDiv || typeof google === 'undefined' || !google.maps) return;
+
+  const center = { lat: state.formData.latitude, lng: state.formData.longitude };
+
+  state.pinMap = new google.maps.Map(mapDiv, {
+    center,
+    zoom: 20,
+    mapTypeId: 'satellite',
+    tilt: 0,
+    fullscreenControl: true,
+    streetViewControl: false,
+    zoomControl: true,
+    mapTypeControl: true,
+    mapTypeControlOptions: {
+      style: google.maps.MapTypeControlStyle.DROPDOWN_MENU,
+      mapTypeIds: ['satellite', 'hybrid']
+    }
+  });
+
+  // Place existing pin if returning to this phase
+  if (state.formData.pinPlaced) {
+    placePinMarker({ lat: state.formData.latitude, lng: state.formData.longitude });
+  }
+
+  // Click to place/move roof pin
+  state.pinMap.addListener('click', (e) => {
     const lat = e.latLng.lat();
     const lng = e.latLng.lng();
     state.formData.latitude = lat;
     state.formData.longitude = lng;
     state.formData.pinPlaced = true;
-    placeGoogleMarker({ lat, lng });
-    render();
+    placePinMarker({ lat, lng });
+
+    // Update UI without full re-render (avoid destroying the map)
+    updatePinUI();
   });
 }
 
-function placeGoogleMarker(pos) {
-  if (state.marker) state.marker.setMap(null);
-  state.marker = new google.maps.Marker({
+function placePinMarker(pos) {
+  if (state.pinMarker) state.pinMarker.setMap(null);
+
+  state.pinMarker = new google.maps.Marker({
     position: pos,
-    map: state.map,
+    map: state.pinMap,
     draggable: true,
+    animation: google.maps.Animation.DROP,
     icon: {
-      url: 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23ef4444" width="36" height="36"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>'),
-      scaledSize: new google.maps.Size(36, 36),
+      url: 'data:image/svg+xml,' + encodeURIComponent(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">' +
+        '<circle cx="24" cy="24" r="22" fill="none" stroke="%23ef4444" stroke-width="3" stroke-dasharray="6,3"/>' +
+        '<circle cx="24" cy="24" r="4" fill="%23ef4444"/>' +
+        '<line x1="24" y1="2" x2="24" y2="14" stroke="%23ef4444" stroke-width="2"/>' +
+        '<line x1="24" y1="34" x2="24" y2="46" stroke="%23ef4444" stroke-width="2"/>' +
+        '<line x1="2" y1="24" x2="14" y2="24" stroke="%23ef4444" stroke-width="2"/>' +
+        '<line x1="34" y1="24" x2="46" y2="24" stroke="%23ef4444" stroke-width="2"/>' +
+        '</svg>'
+      ),
+      scaledSize: new google.maps.Size(48, 48),
+      anchor: new google.maps.Point(24, 24),
     }
   });
-  state.marker.addListener('dragend', (e) => {
+
+  state.pinMarker.addListener('dragend', (e) => {
     state.formData.latitude = e.latLng.lat();
     state.formData.longitude = e.latLng.lng();
-    render();
+    updatePinUI();
   });
 }
 
-function searchAddress() {
-  const addr = document.getElementById('addressSearch')?.value;
-  if (!addr) return;
-  state.formData.property_address = addr;
+function updatePinUI() {
+  // Update the pin status bar without re-rendering the whole page
+  const statusBar = document.querySelector('[data-pin-status]');
+  if (statusBar) {
+    statusBar.innerHTML = state.formData.pinPlaced
+      ? `<span class="text-xs bg-green-500/20 text-green-400 px-3 py-1 rounded-full font-medium">
+           <i class="fas fa-check-circle mr-1"></i>Pin Placed — ${state.formData.latitude.toFixed(6)}, ${state.formData.longitude.toFixed(6)}
+         </span>`
+      : `<span class="text-xs bg-amber-500/20 text-amber-400 px-3 py-1 rounded-full font-medium animate-pulse">
+           <i class="fas fa-hand-pointer mr-1"></i>Click on the roof to place pin
+         </span>`;
+  }
 
-  if (state.geocoder) {
-    state.geocoder.geocode({ address: addr }, (results, status) => {
-      if (status === 'OK' && results[0]) {
-        const loc = results[0].geometry.location;
-        state.formData.latitude = loc.lat();
-        state.formData.longitude = loc.lng();
-        state.formData.pinPlaced = true;
-        state.map.setCenter(loc);
-        state.map.setZoom(20);
-        placeGoogleMarker({ lat: loc.lat(), lng: loc.lng() });
+  // Update confirm button
+  const btn = document.getElementById('confirm-pin-btn');
+  if (btn && state.formData.pinPlaced) {
+    btn.disabled = false;
+    btn.className = 'px-6 py-3 rounded-lg font-semibold text-sm transition-all shadow-md flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white';
+  }
 
-        // Try to extract city/province from geocoded result
-        const comps = results[0].address_components;
-        comps.forEach(c => {
-          if (c.types.includes('locality')) state.formData.property_city = c.long_name;
-          if (c.types.includes('administrative_area_level_1')) state.formData.property_province = c.long_name;
-          if (c.types.includes('postal_code')) state.formData.property_postal_code = c.long_name;
-        });
-        render();
-      }
-    });
-  } else {
-    showToast('Google Maps not configured. Enter coordinates manually or use the pin selector.', 'warning');
+  // Update the status dot
+  const dot = document.querySelector('[data-pin-dot]');
+  if (dot) {
+    dot.className = state.formData.pinPlaced ? 'w-2 h-2 rounded-full bg-green-400' : 'w-2 h-2 rounded-full bg-red-400 animate-pulse';
   }
 }
 
-// Fallback interactive pin selector (no Google Maps needed)
-function loadMapFallback() {
-  const mapDiv = document.getElementById('map');
-  if (!mapDiv) return;
+// ============================================================
+// PHASE TRANSITIONS
+// ============================================================
+function confirmAddressAndProceed() {
+  // Validate address is filled
+  const addr = document.getElementById('autocomplete-input')?.value;
+  if (addr) state.formData.property_address = addr;
 
-  const defaultLat = state.formData.latitude || 53.5461;
-  const defaultLng = state.formData.longitude || -113.4938;
-
-  mapDiv.innerHTML = `
-    <div class="w-full h-full relative bg-gray-800" id="fallbackMap" style="cursor: crosshair;">
-      <div class="absolute top-3 left-3 bg-white rounded-lg shadow-md p-3 z-10 max-w-xs">
-        <p class="text-xs font-medium text-gray-700 mb-2">Manual Coordinates</p>
-        <div class="flex gap-2 mb-2">
-          <input type="number" step="0.000001" id="manLat" value="${defaultLat}" placeholder="Latitude"
-            class="w-full px-2 py-1 text-xs border rounded" oninput="updateManualPin()" />
-          <input type="number" step="0.000001" id="manLng" value="${defaultLng}" placeholder="Longitude"
-            class="w-full px-2 py-1 text-xs border rounded" oninput="updateManualPin()" />
-        </div>
-        <button onclick="confirmManualPin()" class="w-full px-3 py-1.5 bg-brand-600 text-white rounded text-xs font-medium hover:bg-brand-700">
-          <i class="fas fa-map-pin mr-1"></i>Confirm Pin Location
-        </button>
-      </div>
-      <div class="absolute inset-0 flex items-center justify-center">
-        <div class="text-center">
-          <iframe src="https://www.openstreetmap.org/export/embed.html?bbox=${defaultLng-0.005}%2C${defaultLat-0.003}%2C${defaultLng+0.005}%2C${defaultLat+0.003}&amp;layer=mapnik&amp;marker=${defaultLat}%2C${defaultLng}"
-            style="width: 100%; height: 400px; border: 0;" loading="lazy"></iframe>
-        </div>
-      </div>
-    </div>
-  `;
-}
-
-function updateManualPin() {
-  const lat = parseFloat(document.getElementById('manLat')?.value);
-  const lng = parseFloat(document.getElementById('manLng')?.value);
-  if (!isNaN(lat) && !isNaN(lng)) {
-    state.formData.latitude = lat;
-    state.formData.longitude = lng;
+  if (!state.formData.property_address) {
+    showToast('Please enter a property address', 'error');
+    return;
   }
+
+  if (!state.formData.latitude) {
+    showToast('Please search for an address to locate it on the map', 'error');
+    return;
+  }
+
+  state.formData.addressConfirmed = true;
+  state.addressPhase = 'pin';
+  render();
 }
 
-function confirmManualPin() {
-  const lat = parseFloat(document.getElementById('manLat')?.value);
-  const lng = parseFloat(document.getElementById('manLng')?.value);
-  if (!isNaN(lat) && !isNaN(lng)) {
-    state.formData.latitude = lat;
-    state.formData.longitude = lng;
-    state.formData.pinPlaced = true;
-    showToast('Pin location confirmed!', 'success');
-    render();
+function backToAddressPhase() {
+  state.addressPhase = 'address';
+  render();
+}
+
+function confirmPinAndProceed() {
+  if (!state.formData.pinPlaced) {
+    showToast('Please click on the satellite map to pin the exact roof', 'error');
+    return;
+  }
+
+  // Proceed to step 3
+  state.currentStep = 3;
+  render();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// Fallback for non-Google Maps environments
+function initMap() {
+  // Called by the global onGoogleMapsReady callback
+  // Determine which sub-map to initialize
+  if (state.currentStep === 2) {
+    if (state.addressPhase === 'address') {
+      initAddressMap();
+    } else {
+      initPinMap();
+    }
   }
 }
 
@@ -639,10 +996,11 @@ function renderStep5() {
             <div><span class="text-gray-500">Province:</span> <span class="font-medium">${state.formData.property_province}</span></div>
             <div><span class="text-gray-500">Postal:</span> <span class="font-medium">${state.formData.property_postal_code || '-'}</span></div>
             <div class="md:col-span-2">
-              <span class="text-gray-500">Coordinates:</span>
+              <span class="text-gray-500">Roof Pin:</span>
               <span class="font-medium ${state.formData.pinPlaced ? 'text-brand-600' : 'text-red-500'}">
                 ${state.formData.pinPlaced ? `${state.formData.latitude?.toFixed(6)}, ${state.formData.longitude?.toFixed(6)}` : 'Pin not placed!'}
               </span>
+              ${state.formData.pinPlaced ? ' <i class="fas fa-check-circle text-brand-500 text-xs"></i>' : ''}
             </div>
           </div>
         </div>
@@ -710,6 +1068,10 @@ function nextStep() {
     showToast(error, 'error');
     return;
   }
+
+  // Step 2 is handled by its own confirm buttons
+  if (state.currentStep === 2) return;
+
   if (state.currentStep < state.totalSteps) {
     state.currentStep++;
     render();
@@ -718,8 +1080,19 @@ function nextStep() {
 }
 
 function prevStep() {
+  if (state.currentStep === 2 && state.addressPhase === 'pin') {
+    backToAddressPhase();
+    return;
+  }
+
   if (state.currentStep > 1) {
-    state.currentStep--;
+    // When going back to step 2, reset to the appropriate phase
+    if (state.currentStep === 3) {
+      state.currentStep = 2;
+      state.addressPhase = state.formData.pinPlaced ? 'pin' : 'address';
+    } else {
+      state.currentStep--;
+    }
     render();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
@@ -732,6 +1105,7 @@ function validateStep(step) {
       break;
     case 2:
       if (!state.formData.property_address) return 'Please enter the property address';
+      if (!state.formData.pinPlaced) return 'Please pin the exact roof on the satellite map';
       break;
     case 3:
       if (!state.formData.homeowner_name) return 'Please enter the homeowner name';
@@ -753,6 +1127,7 @@ async function submitOrder() {
   const errors = [];
   if (!state.formData.service_tier) errors.push('Service tier not selected');
   if (!state.formData.property_address) errors.push('Property address required');
+  if (!state.formData.pinPlaced) errors.push('Roof pin not placed');
   if (!state.formData.homeowner_name) errors.push('Homeowner name required');
   if (!state.formData.requester_name) errors.push('Requester name required');
 
@@ -784,18 +1159,18 @@ async function submitOrder() {
 
     if (!payRes.ok) throw new Error(payData.error || 'Payment failed');
 
-    // 3. Generate report (mock)
+    // 3. Generate report (real Solar API or mock)
     const reportRes = await fetch(API + `/api/reports/${orderData.order.id}/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' }
     });
 
-    showToast('Order placed successfully!', 'success');
+    showToast('Order placed successfully! Generating roof report...', 'success');
 
     // Redirect to confirmation page
     setTimeout(() => {
       window.location.href = `/order/${orderData.order.id}`;
-    }, 1000);
+    }, 1200);
 
   } catch (err) {
     showToast('Error: ' + err.message, 'error');
