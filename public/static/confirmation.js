@@ -1,12 +1,11 @@
 // ============================================================
-// Order Confirmation Page
+// Order Confirmation Page - with 3D Roof Area Display
 // ============================================================
 
 document.addEventListener('DOMContentLoaded', async () => {
   const root = document.getElementById('confirmation-root');
   if (!root) return;
 
-  // Get order ID from URL
   const pathParts = window.location.pathname.split('/');
   const orderId = pathParts[pathParts.length - 1];
 
@@ -23,12 +22,25 @@ document.addEventListener('DOMContentLoaded', async () => {
   `;
 
   try {
-    const res = await fetch(`/api/orders/${orderId}`);
-    const data = await res.json();
+    // Load order + report data
+    const [orderRes, reportRes] = await Promise.all([
+      fetch('/api/orders/' + orderId),
+      fetch('/api/reports/' + orderId).catch(() => null)
+    ]);
+    const orderData = await orderRes.json();
+    if (!orderData.order) throw new Error('Order not found');
 
-    if (!data.order) throw new Error('Order not found');
+    let reportData = null;
+    if (reportRes && reportRes.ok) {
+      const rData = await reportRes.json();
+      // Parse the full report from api_response_raw if available
+      if (rData.report?.api_response_raw) {
+        try { reportData = JSON.parse(rData.report.api_response_raw); } catch(e) {}
+      }
+      if (!reportData) reportData = rData.report;
+    }
 
-    const order = data.order;
+    const order = orderData.order;
     const tierInfo = {
       immediate: { name: 'Immediate', time: 'Under 5 minutes', color: 'red', icon: 'fa-rocket', bg: 'from-red-500 to-red-600' },
       urgent: { name: 'Urgent', time: '15-30 minutes', color: 'amber', icon: 'fa-bolt', bg: 'from-amber-500 to-amber-600' },
@@ -91,8 +103,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             Payment: ${order.payment_status.toUpperCase()}
           </span>
         </div>
-
-        <!-- Progress Steps -->
         <div class="flex items-center space-x-2 mt-4">
           ${renderProgressStep('Order Placed', true)}
           <div class="flex-1 h-0.5 ${['paid','processing','completed'].includes(order.status) ? 'bg-green-500' : 'bg-gray-200'}"></div>
@@ -120,44 +130,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         </div>
       </div>
 
-      <!-- Report Data (if available) -->
-      ${order.roof_area_sqft ? `
-        <div class="bg-white rounded-xl border border-gray-200 p-6 mb-6">
-          <h3 class="font-semibold text-gray-700 mb-4 flex items-center">
-            <i class="fas fa-chart-bar text-brand-500 mr-2"></i>Roof Measurement Report
-          </h3>
-          <div class="grid md:grid-cols-4 gap-4">
-            <div class="bg-gray-50 rounded-lg p-4 text-center">
-              <p class="text-2xl font-bold text-brand-600">${Math.round(order.roof_area_sqft).toLocaleString()}</p>
-              <p class="text-xs text-gray-500 mt-1">Total Area (sq ft)</p>
-            </div>
-            <div class="bg-gray-50 rounded-lg p-4 text-center">
-              <p class="text-2xl font-bold text-brand-600">${order.roof_pitch_degrees || '-'}&deg;</p>
-              <p class="text-xs text-gray-500 mt-1">Roof Pitch</p>
-            </div>
-            <div class="bg-gray-50 rounded-lg p-4 text-center">
-              <p class="text-2xl font-bold text-brand-600">${order.roof_azimuth_degrees || '-'}&deg;</p>
-              <p class="text-xs text-gray-500 mt-1">Azimuth</p>
-            </div>
-            <div class="bg-gray-50 rounded-lg p-4 text-center">
-              <p class="text-2xl font-bold text-accent-600">${Math.round(order.max_sunshine_hours || 0).toLocaleString()}</p>
-              <p class="text-xs text-gray-500 mt-1">Sun Hours/Year</p>
-            </div>
-          </div>
-          ${order.num_panels_possible ? `
-            <div class="mt-4 bg-brand-50 rounded-lg p-4">
-              <h4 class="text-sm font-semibold text-brand-700 mb-2"><i class="fas fa-solar-panel mr-1"></i>Solar Potential</h4>
-              <div class="grid md:grid-cols-2 gap-2 text-sm">
-                <p class="text-gray-600">Panels Possible: <span class="font-bold text-brand-700">${order.num_panels_possible}</span></p>
-                <p class="text-gray-600">Yearly Energy: <span class="font-bold text-brand-700">${Math.round(order.yearly_energy_kwh || 0).toLocaleString()} kWh</span></p>
-              </div>
-            </div>
-          ` : ''}
-        </div>
-      ` : ''}
+      <!-- ============================================================ -->
+      <!-- ROOF MEASUREMENT REPORT — 3D Area Display                    -->
+      <!-- Shows both flat footprint AND true surface area              -->
+      <!-- ============================================================ -->
+      ${reportData ? renderRoofReport(reportData) : ''}
 
       <!-- Actions -->
-      <div class="flex flex-wrap gap-3 justify-center">
+      <div class="flex flex-wrap gap-3 justify-center mt-8">
         <a href="/" class="px-6 py-3 bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors font-medium">
           <i class="fas fa-plus mr-2"></i>New Order
         </a>
@@ -183,6 +163,146 @@ document.addEventListener('DOMContentLoaded', async () => {
     `;
   }
 });
+
+// ============================================================
+// ROOF REPORT RENDERER — Key distinction: Footprint vs True Area
+// ============================================================
+function renderRoofReport(r) {
+  // Support both old format (roof_area_sqft) and new format (total_true_area_sqft)
+  const trueArea = r.total_true_area_sqft || r.roof_area_sqft || 0;
+  const footprint = r.total_footprint_sqft || Math.round(trueArea * 0.88) || 0; // estimate if not available
+  const trueAreaSqm = r.total_true_area_sqm || r.roof_area_sqm || Math.round(trueArea * 0.0929);
+  const multiplier = r.area_multiplier || (footprint > 0 ? (trueArea / footprint) : 1);
+  const pitchRatio = r.roof_pitch_ratio || '';
+  const pitchDeg = r.roof_pitch_degrees || 0;
+  const segments = r.segments || [];
+  const provider = r.metadata?.provider || 'unknown';
+
+  return `
+    <div class="bg-white rounded-xl border border-gray-200 p-6 mb-6">
+      <div class="flex items-center justify-between mb-6">
+        <h3 class="font-semibold text-gray-700 flex items-center">
+          <i class="fas fa-ruler-combined text-brand-500 mr-2"></i>Roof Measurement Report
+        </h3>
+        <span class="text-xs px-2 py-1 bg-gray-100 text-gray-500 rounded-full">
+          Source: ${provider === 'mock' ? 'Simulated Data' : 'Google Solar API'}
+        </span>
+      </div>
+
+      <!-- ============================================================ -->
+      <!-- THE CRITICAL DISTINCTION: Footprint vs True 3D Area          -->
+      <!-- This is what separates a professional report from a bad one   -->
+      <!-- ============================================================ -->
+      <div class="bg-gradient-to-r from-brand-50 to-blue-50 border border-brand-200 rounded-xl p-6 mb-6">
+        <div class="grid md:grid-cols-3 gap-6">
+          <!-- Flat Footprint -->
+          <div class="text-center">
+            <div class="w-12 h-12 mx-auto mb-2 bg-blue-100 rounded-full flex items-center justify-center">
+              <i class="fas fa-vector-square text-blue-600"></i>
+            </div>
+            <p class="text-xs text-gray-500 uppercase tracking-wider">Flat Footprint</p>
+            <p class="text-xs text-gray-400">(view from above)</p>
+            <p class="text-2xl font-bold text-blue-700 mt-1">${footprint.toLocaleString()}</p>
+            <p class="text-sm text-gray-500">sq ft</p>
+          </div>
+
+          <!-- Arrow / Multiplier -->
+          <div class="text-center flex flex-col items-center justify-center">
+            <div class="w-12 h-12 mx-auto mb-2 bg-accent-100 rounded-full flex items-center justify-center">
+              <i class="fas fa-times text-accent-600"></i>
+            </div>
+            <p class="text-xs text-gray-500 uppercase tracking-wider">Pitch Multiplier</p>
+            <p class="text-2xl font-bold text-accent-700 mt-1">${multiplier.toFixed(3)}x</p>
+            <p class="text-xs text-gray-500">
+              Roof is <strong>${Math.round((multiplier - 1) * 100)}% larger</strong> than footprint
+            </p>
+          </div>
+
+          <!-- True 3D Surface Area -->
+          <div class="text-center">
+            <div class="w-12 h-12 mx-auto mb-2 bg-brand-100 rounded-full flex items-center justify-center">
+              <i class="fas fa-cube text-brand-600"></i>
+            </div>
+            <p class="text-xs text-gray-500 uppercase tracking-wider">True Surface Area</p>
+            <p class="text-xs text-gray-400">(what you actually shingle)</p>
+            <p class="text-3xl font-bold text-brand-700 mt-1">${Math.round(trueArea).toLocaleString()}</p>
+            <p class="text-sm text-gray-500">sq ft <span class="text-xs text-gray-400">(${trueAreaSqm} m&sup2;)</span></p>
+          </div>
+        </div>
+
+        <div class="mt-4 bg-white/60 rounded-lg p-3 text-center">
+          <p class="text-xs text-gray-600">
+            <i class="fas fa-info-circle text-brand-500 mr-1"></i>
+            <strong>Why the difference?</strong> A flat satellite view shows ${footprint.toLocaleString()} sq ft.
+            But roofs are slanted — at ${pitchDeg}&deg; pitch${pitchRatio ? ` (${pitchRatio})` : ''},
+            the actual surface area is <strong>${Math.round(trueArea).toLocaleString()} sq ft</strong>.
+            Use the true surface area for material estimates, shingle orders, and contractor quotes.
+          </p>
+        </div>
+      </div>
+
+      <!-- Pitch & Orientation -->
+      <div class="grid md:grid-cols-4 gap-4 mb-6">
+        <div class="bg-gray-50 rounded-lg p-4 text-center">
+          <p class="text-2xl font-bold text-brand-600">${pitchDeg}&deg;</p>
+          <p class="text-xs text-gray-500 mt-1">Pitch (degrees)</p>
+        </div>
+        <div class="bg-gray-50 rounded-lg p-4 text-center">
+          <p class="text-2xl font-bold text-brand-600">${pitchRatio || 'N/A'}</p>
+          <p class="text-xs text-gray-500 mt-1">Pitch (rise:run)</p>
+        </div>
+        <div class="bg-gray-50 rounded-lg p-4 text-center">
+          <p class="text-2xl font-bold text-brand-600">${r.roof_azimuth_degrees || 0}&deg;</p>
+          <p class="text-xs text-gray-500 mt-1">Azimuth</p>
+        </div>
+        <div class="bg-gray-50 rounded-lg p-4 text-center">
+          <p class="text-2xl font-bold text-accent-600">${(r.max_sunshine_hours || 0).toLocaleString()}</p>
+          <p class="text-xs text-gray-500 mt-1">Sun Hours/Year</p>
+        </div>
+      </div>
+
+      <!-- Segment Breakdown -->
+      ${segments.length > 0 ? `
+        <h4 class="text-sm font-semibold text-gray-700 mb-3"><i class="fas fa-layer-group mr-1 text-brand-500"></i>Roof Segments</h4>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-gray-50">
+              <tr>
+                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">Segment</th>
+                <th class="px-3 py-2 text-right text-xs font-medium text-gray-500">Footprint</th>
+                <th class="px-3 py-2 text-right text-xs font-medium text-gray-500 bg-brand-50">True Area</th>
+                <th class="px-3 py-2 text-center text-xs font-medium text-gray-500">Pitch</th>
+                <th class="px-3 py-2 text-center text-xs font-medium text-gray-500">Direction</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+              ${segments.map(s => `
+                <tr>
+                  <td class="px-3 py-2 font-medium text-gray-700">${s.name}</td>
+                  <td class="px-3 py-2 text-right text-gray-500">${(s.footprint_area_sqft || s.area_sqft || 0).toLocaleString()} ft&sup2;</td>
+                  <td class="px-3 py-2 text-right font-semibold text-brand-700 bg-brand-50">${(s.true_area_sqft || s.area_sqft || 0).toLocaleString()} ft&sup2;</td>
+                  <td class="px-3 py-2 text-center text-gray-600">${s.pitch_degrees || s.pitch || 0}&deg; ${s.pitch_ratio ? `(${s.pitch_ratio})` : ''}</td>
+                  <td class="px-3 py-2 text-center text-gray-600">${s.azimuth_direction || ''} ${(s.azimuth_degrees || s.azimuth || 0)}&deg;</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      ` : ''}
+
+      <!-- Solar Potential -->
+      ${r.num_panels_possible ? `
+        <div class="mt-6 bg-accent-50 rounded-lg p-4">
+          <h4 class="text-sm font-semibold text-accent-800 mb-2"><i class="fas fa-solar-panel mr-1"></i>Solar Potential</h4>
+          <div class="grid md:grid-cols-2 gap-2 text-sm">
+            <p class="text-gray-600">Panels Possible: <span class="font-bold text-accent-700">${r.num_panels_possible}</span></p>
+            <p class="text-gray-600">Yearly Energy: <span class="font-bold text-accent-700">${Math.round(r.yearly_energy_kwh || 0).toLocaleString()} kWh</span></p>
+          </div>
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
 
 function renderProgressStep(label, done) {
   return `

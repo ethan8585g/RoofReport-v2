@@ -1,5 +1,13 @@
 // ============================================================
-// Settings Page - API Keys & Company Configuration
+// Settings Page - Company Configuration & API Key Status
+// ============================================================
+// SECURITY MODEL:
+// - API keys are stored in Cloudflare environment variables
+//   (.dev.vars for local dev, wrangler secrets for production)
+// - Keys are NEVER stored in the database
+// - Keys are NEVER exposed to frontend JavaScript
+// - This page shows configuration STATUS only (set/not set)
+// - Pricing and company profile are stored in DB (non-sensitive)
 // ============================================================
 
 const settingsState = {
@@ -7,6 +15,7 @@ const settingsState = {
   activeSection: 'company',
   masterCompany: null,
   settings: [],
+  envStatus: null,
   saving: false
 };
 
@@ -18,14 +27,17 @@ document.addEventListener('DOMContentLoaded', async () => {
 async function loadSettings() {
   settingsState.loading = true;
   try {
-    const [compRes, settRes] = await Promise.all([
+    const [compRes, settRes, envRes] = await Promise.all([
       fetch('/api/companies/master'),
-      fetch('/api/settings')
+      fetch('/api/settings'),
+      fetch('/api/health')
     ]);
     const compData = await compRes.json();
     settingsState.masterCompany = compData.company;
     const settData = await settRes.json();
     settingsState.settings = settData.settings || [];
+    const envData = await envRes.json();
+    settingsState.envStatus = envData.env_configured || {};
   } catch (e) {
     console.error('Settings load error:', e);
   }
@@ -171,7 +183,7 @@ async function saveMasterCompany() {
     });
     if (res.ok) {
       const el = document.getElementById('compSaveStatus');
-      if (el) { el.textContent = 'Saved!'; el.className = 'text-sm text-green-600'; }
+      if (el) { el.textContent = 'Saved successfully!'; el.className = 'text-sm text-green-600'; }
       setTimeout(() => { if (el) el.textContent = ''; }, 3000);
     }
   } catch (e) {
@@ -180,92 +192,129 @@ async function saveMasterCompany() {
 }
 
 // ============================================================
-// API KEYS
+// API KEYS — Environment Variable Status (Read-Only)
+// Keys are NEVER stored in the database.
+// Keys are NEVER entered through the web UI.
+// This section shows whether each key is configured server-side.
 // ============================================================
 function renderApiKeysSection() {
-  const getVal = (key) => {
-    const s = settingsState.settings.find(s => s.setting_key === key);
-    return s ? s.setting_value : '';
-  };
-  const hasVal = (key) => {
-    const s = settingsState.settings.find(s => s.setting_key === key);
-    return s && s.setting_value && s.setting_value !== '****';
-  };
+  const env = settingsState.envStatus || {};
 
   const keys = [
     {
-      key: 'google_solar_api_key',
+      envVar: 'GOOGLE_SOLAR_API_KEY',
       label: 'Google Solar API Key',
-      desc: 'Required for roof measurement data. Get from Google Cloud Console > Solar API.',
+      desc: 'Required for real roof measurement data from Google. Powers the core measurement engine.',
       icon: 'fa-sun',
       color: 'amber',
-      link: 'https://console.cloud.google.com/apis/library/solar.googleapis.com'
+      configured: env.GOOGLE_SOLAR_API_KEY,
+      setupCmd: 'npx wrangler pages secret put GOOGLE_SOLAR_API_KEY',
+      localFile: '.dev.vars',
+      getUrl: 'https://console.cloud.google.com/apis/library/solar.googleapis.com'
     },
     {
-      key: 'google_maps_api_key',
+      envVar: 'GOOGLE_MAPS_API_KEY',
       label: 'Google Maps API Key',
-      desc: 'Required for interactive map and geocoding. Enable Maps JavaScript API + Geocoding API.',
+      desc: 'Required for interactive satellite map and address geocoding. Loaded server-side into the page.',
       icon: 'fa-map',
       color: 'blue',
-      link: 'https://console.cloud.google.com/apis/library/maps-backend.googleapis.com'
+      configured: env.GOOGLE_MAPS_API_KEY,
+      setupCmd: 'npx wrangler pages secret put GOOGLE_MAPS_API_KEY',
+      localFile: '.dev.vars',
+      getUrl: 'https://console.cloud.google.com/apis/library/maps-backend.googleapis.com'
     },
     {
-      key: 'stripe_secret_key',
+      envVar: 'STRIPE_SECRET_KEY',
       label: 'Stripe Secret Key',
-      desc: 'For payment processing. Starts with sk_test_ (test) or sk_live_ (production).',
-      icon: 'fa-credit-card',
+      desc: 'Server-side only. Used for creating payment intents and processing charges. NEVER exposed to frontend.',
+      icon: 'fa-lock',
       color: 'purple',
-      link: 'https://dashboard.stripe.com/apikeys'
+      configured: env.STRIPE_SECRET_KEY,
+      setupCmd: 'npx wrangler pages secret put STRIPE_SECRET_KEY',
+      localFile: '.dev.vars',
+      getUrl: 'https://dashboard.stripe.com/apikeys'
     },
     {
-      key: 'stripe_publishable_key',
+      envVar: 'STRIPE_PUBLISHABLE_KEY',
       label: 'Stripe Publishable Key',
-      desc: 'Frontend payment key. Starts with pk_test_ or pk_live_.',
+      desc: 'Safe for frontend use. Used by Stripe.js to tokenize card details (never touches your server).',
       icon: 'fa-credit-card',
       color: 'purple',
-      link: 'https://dashboard.stripe.com/apikeys'
+      configured: env.STRIPE_PUBLISHABLE_KEY,
+      setupCmd: 'npx wrangler pages secret put STRIPE_PUBLISHABLE_KEY',
+      localFile: '.dev.vars',
+      getUrl: 'https://dashboard.stripe.com/apikeys'
     }
   ];
 
   return `
-    <div class="bg-white rounded-xl border border-gray-200 p-6">
+    <div class="bg-white rounded-xl border border-gray-200 p-6 mb-6">
       <h3 class="text-lg font-semibold text-gray-800 mb-1">
-        <i class="fas fa-key mr-2 text-accent-500"></i>API Keys Configuration
+        <i class="fas fa-shield-alt mr-2 text-brand-500"></i>API Key Configuration
       </h3>
-      <p class="text-sm text-gray-500 mb-6">
-        Configure the API keys that power the roof measurement and payment features.
-        Keys are stored securely and masked after saving.
+      <p class="text-sm text-gray-500 mb-2">
+        API keys are stored as <strong>environment variables</strong> for security.
+        They are never stored in the database or exposed to frontend code.
       </p>
 
-      <div class="space-y-6">
+      <!-- Security Notice -->
+      <div class="bg-brand-50 border border-brand-200 rounded-lg p-4 mb-6">
+        <h4 class="text-sm font-semibold text-brand-800 flex items-center">
+          <i class="fas fa-shield-alt mr-2"></i>Security Architecture
+        </h4>
+        <ul class="mt-2 text-xs text-brand-700 space-y-1">
+          <li><i class="fas fa-check mr-1"></i> API keys live in environment variables, not in code or database</li>
+          <li><i class="fas fa-check mr-1"></i> Secret keys (Solar API, Stripe Secret) are server-side only</li>
+          <li><i class="fas fa-check mr-1"></i> Google Maps key is injected server-side into the HTML (referrer-restricted)</li>
+          <li><i class="fas fa-check mr-1"></i> Frontend JavaScript never has access to secret keys</li>
+          <li><i class="fas fa-check mr-1"></i> For production, use <code class="bg-brand-100 px-1 rounded">wrangler pages secret put</code></li>
+        </ul>
+      </div>
+
+      <!-- Key Status Cards -->
+      <div class="space-y-4">
         ${keys.map(k => `
-          <div class="border border-gray-200 rounded-lg p-4">
-            <div class="flex items-center justify-between mb-2">
-              <div class="flex items-center space-x-2">
-                <div class="w-8 h-8 bg-${k.color}-100 rounded-lg flex items-center justify-center">
-                  <i class="fas ${k.icon} text-${k.color}-500 text-sm"></i>
+          <div class="border ${k.configured ? 'border-green-200 bg-green-50' : 'border-yellow-200 bg-yellow-50'} rounded-lg p-4">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center space-x-3">
+                <div class="w-10 h-10 bg-${k.color}-100 rounded-lg flex items-center justify-center">
+                  <i class="fas ${k.icon} text-${k.color}-500"></i>
                 </div>
                 <div>
                   <h4 class="text-sm font-semibold text-gray-800">${k.label}</h4>
                   <p class="text-xs text-gray-500">${k.desc}</p>
                 </div>
               </div>
-              ${hasVal(k.key) ? '<span class="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full"><i class="fas fa-check mr-0.5"></i>Configured</span>' : '<span class="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full"><i class="fas fa-exclamation-triangle mr-0.5"></i>Not Set</span>'}
+              ${k.configured
+                ? '<span class="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium"><i class="fas fa-check-circle mr-1"></i>Active</span>'
+                : '<span class="px-3 py-1 bg-yellow-100 text-yellow-700 rounded-full text-xs font-medium"><i class="fas fa-exclamation-triangle mr-1"></i>Not Set</span>'
+              }
             </div>
-            <div class="flex gap-2 mt-3">
-              <input type="password" id="key_${k.key}" placeholder="Enter your API key..."
-                value="${getVal(k.key)}"
-                class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-brand-500" />
-              <button onclick="toggleKeyVisibility('key_${k.key}')" class="px-3 py-2 bg-gray-100 rounded-lg text-gray-500 hover:bg-gray-200">
-                <i class="fas fa-eye"></i>
-              </button>
-              <button onclick="saveApiKey('${k.key}')" class="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm hover:bg-brand-700">
-                Save
-              </button>
-            </div>
-            <a href="${k.link}" target="_blank" class="text-xs text-brand-600 hover:underline mt-2 inline-block">
-              <i class="fas fa-external-link-alt mr-0.5"></i>Get this key
-            </a>
+
+            ${!k.configured ? `
+              <div class="mt-3 bg-white rounded border border-gray-200 p-3">
+                <p class="text-xs font-medium text-gray-700 mb-2">How to configure:</p>
+                <div class="space-y-2 text-xs text-gray-600">
+                  <div>
+                    <span class="font-medium">Local development:</span>
+                    <code class="bg-gray-100 px-1.5 py-0.5 rounded text-xs ml-1">Add to <strong>${k.localFile}</strong></code>
+                    <pre class="mt-1 bg-gray-800 text-green-400 p-2 rounded text-xs overflow-x-auto">${k.envVar}=your_key_here</pre>
+                  </div>
+                  <div>
+                    <span class="font-medium">Production:</span>
+                    <pre class="mt-1 bg-gray-800 text-green-400 p-2 rounded text-xs overflow-x-auto">${k.setupCmd}</pre>
+                  </div>
+                  <a href="${k.getUrl}" target="_blank" class="inline-block text-brand-600 hover:underline mt-1">
+                    <i class="fas fa-external-link-alt mr-0.5"></i>Get this API key
+                  </a>
+                </div>
+              </div>
+            ` : `
+              <div class="mt-2 text-xs text-green-600">
+                <i class="fas fa-info-circle mr-1"></i>
+                Environment variable <code class="bg-green-100 px-1 rounded">${k.envVar}</code> is configured and active.
+              </div>
+            `}
           </div>
         `).join('')}
       </div>
@@ -273,38 +322,8 @@ function renderApiKeysSection() {
   `;
 }
 
-function toggleKeyVisibility(inputId) {
-  const input = document.getElementById(inputId);
-  if (input) {
-    input.type = input.type === 'password' ? 'text' : 'password';
-  }
-}
-
-async function saveApiKey(key) {
-  const input = document.getElementById(`key_${key}`);
-  if (!input || !input.value) {
-    alert('Please enter a value');
-    return;
-  }
-
-  try {
-    const res = await fetch(`/api/settings/${key}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ value: input.value, encrypted: true })
-    });
-    if (res.ok) {
-      alert(`${key} saved successfully!`);
-      await loadSettings();
-      renderSettings();
-    }
-  } catch (e) {
-    alert('Failed to save: ' + e.message);
-  }
-}
-
 // ============================================================
-// PRICING SETTINGS
+// PRICING SETTINGS (stored in DB — these are not secrets)
 // ============================================================
 function renderPricingSection() {
   const getVal = (key) => {
@@ -317,7 +336,7 @@ function renderPricingSection() {
       <h3 class="text-lg font-semibold text-gray-800 mb-1">
         <i class="fas fa-dollar-sign mr-2 text-green-500"></i>Pricing Configuration
       </h3>
-      <p class="text-sm text-gray-500 mb-6">Configure pricing for each service tier</p>
+      <p class="text-sm text-gray-500 mb-6">Configure pricing for each service tier (stored in database, not sensitive)</p>
 
       <div class="space-y-4">
         <div class="grid md:grid-cols-3 gap-4">

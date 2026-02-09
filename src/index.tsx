@@ -5,10 +5,7 @@ import { companiesRoutes } from './routes/companies'
 import { settingsRoutes } from './routes/settings'
 import { reportsRoutes } from './routes/reports'
 import { adminRoutes } from './routes/admin'
-
-type Bindings = {
-  DB: D1Database
-}
+import type { Bindings } from './types'
 
 const app = new Hono<{ Bindings: Bindings }>()
 
@@ -24,16 +21,52 @@ app.route('/api/admin', adminRoutes)
 
 // Health check
 app.get('/api/health', (c) => {
-  return c.json({ status: 'ok', service: 'Reuse Canada Roofing Measurement Tool', timestamp: new Date().toISOString() })
+  // Report which env vars are configured (true/false only — never expose values)
+  return c.json({
+    status: 'ok',
+    service: 'Reuse Canada Roofing Measurement Tool',
+    timestamp: new Date().toISOString(),
+    env_configured: {
+      GOOGLE_SOLAR_API_KEY: !!c.env.GOOGLE_SOLAR_API_KEY,
+      GOOGLE_MAPS_API_KEY: !!c.env.GOOGLE_MAPS_API_KEY,
+      STRIPE_SECRET_KEY: !!c.env.STRIPE_SECRET_KEY,
+      STRIPE_PUBLISHABLE_KEY: !!c.env.STRIPE_PUBLISHABLE_KEY,
+      DB: !!c.env.DB
+    }
+  })
 })
 
 // ============================================================
-// PAGES - Full HTML served from Hono
+// SERVER-SIDE CONFIG ENDPOINT
+// Returns ONLY publishable/safe values to the frontend.
+// Secret keys (Google Solar, Stripe Secret) stay server-side.
+// ============================================================
+app.get('/api/config/client', (c) => {
+  // Only expose keys that are designed to be public (publishable keys)
+  // Google Maps JS API key is loaded via script tag — that's how Google designed it
+  // Stripe publishable key is designed for frontend use
+  return c.json({
+    google_maps_key: c.env.GOOGLE_MAPS_API_KEY || '',
+    stripe_publishable_key: c.env.STRIPE_PUBLISHABLE_KEY || '',
+    // Feature flags based on which keys are configured
+    features: {
+      google_maps: !!c.env.GOOGLE_MAPS_API_KEY,
+      google_solar: !!c.env.GOOGLE_SOLAR_API_KEY,
+      stripe_payments: !!c.env.STRIPE_SECRET_KEY && !!c.env.STRIPE_PUBLISHABLE_KEY
+    }
+  })
+})
+
+// ============================================================
+// PAGES - Full HTML served from Hono (server-side rendering)
+// Google Maps API key is injected server-side into the script tag.
+// Secret keys (Solar API, Stripe Secret) are NEVER in HTML.
 // ============================================================
 
 // Landing / Order Form page
 app.get('/', (c) => {
-  return c.html(getMainPageHTML())
+  const mapsKey = c.env.GOOGLE_MAPS_API_KEY || ''
+  return c.html(getMainPageHTML(mapsKey))
 })
 
 // Admin Dashboard
@@ -57,16 +90,8 @@ export default app
 // HTML Templates
 // ============================================================
 
-function getMainPageHTML() {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Roof Measurement Tool - Reuse Canada</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
-  <script>
+function getTailwindConfig() {
+  return `<script>
     tailwind.config = {
       theme: {
         extend: {
@@ -77,11 +102,34 @@ function getMainPageHTML() {
         }
       }
     }
-  </script>
-  <link rel="stylesheet" href="/static/style.css">
+  </script>`
+}
+
+function getHeadTags() {
+  return `<meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
+  ${getTailwindConfig()}
+  <link rel="stylesheet" href="/static/style.css">`
+}
+
+function getMainPageHTML(mapsApiKey: string) {
+  // Google Maps script tag — only included if key is configured server-side.
+  // The key appears in the HTML <script src> which is how Google designed Maps JS API.
+  // This is NOT a secret key. Google Maps JS API keys are restricted by HTTP referrer.
+  const mapsScript = mapsApiKey
+    ? `<script src="https://maps.googleapis.com/maps/api/js?key=${mapsApiKey}&libraries=places&callback=onGoogleMapsReady" async defer></script>`
+    : '<!-- Google Maps: No API key configured. Using fallback map. Configure in .dev.vars or wrangler secrets. -->'
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  ${getHeadTags()}
+  <title>Roof Measurement Tool - Reuse Canada</title>
+  ${mapsScript}
 </head>
 <body class="bg-gray-50 min-h-screen">
-  <!-- Header -->
   <header class="bg-brand-800 text-white shadow-lg">
     <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
       <div class="flex items-center space-x-3">
@@ -99,18 +147,13 @@ function getMainPageHTML() {
       </nav>
     </div>
   </header>
-
-  <!-- Main Content -->
   <main class="max-w-5xl mx-auto px-4 py-8">
     <div id="app-root"></div>
   </main>
-
-  <!-- Footer -->
   <footer class="bg-gray-800 text-gray-400 text-center py-6 mt-12">
     <p class="text-sm">&copy; 2026 Reuse Canada. All rights reserved.</p>
     <p class="text-xs mt-1">Professional Roof Measurement Reports</p>
   </footer>
-
   <script src="/static/app.js"></script>
 </body>
 </html>`
@@ -120,24 +163,8 @@ function getAdminPageHTML() {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  ${getHeadTags()}
   <title>Admin Dashboard - Roof Measurement Tool</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            brand: { 50:'#ecfdf5',100:'#d1fae5',200:'#a7f3d0',300:'#6ee7b7',400:'#34d399',500:'#10b981',600:'#059669',700:'#047857',800:'#065f46',900:'#064e3b' },
-            accent: { 50:'#fffbeb',100:'#fef3c7',200:'#fde68a',300:'#fcd34d',400:'#fbbf24',500:'#f59e0b',600:'#d97706',700:'#b45309',800:'#92400e',900:'#78350f' }
-          }
-        }
-      }
-    }
-  </script>
-  <link rel="stylesheet" href="/static/style.css">
 </head>
 <body class="bg-gray-50 min-h-screen">
   <header class="bg-brand-800 text-white shadow-lg">
@@ -169,12 +196,8 @@ function getOrderConfirmationHTML() {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  ${getHeadTags()}
   <title>Order Confirmation - Roof Measurement Tool</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css">
 </head>
 <body class="bg-gray-50 min-h-screen">
   <header class="bg-brand-800 text-white shadow-lg">
@@ -203,24 +226,8 @@ function getSettingsPageHTML() {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  ${getHeadTags()}
   <title>Settings - Roof Measurement Tool</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            brand: { 50:'#ecfdf5',100:'#d1fae5',200:'#a7f3d0',300:'#6ee7b7',400:'#34d399',500:'#10b981',600:'#059669',700:'#047857',800:'#065f46',900:'#064e3b' },
-            accent: { 50:'#fffbeb',100:'#fef3c7',200:'#fde68a',300:'#fcd34d',400:'#fbbf24',500:'#f59e0b',600:'#d97706',700:'#b45309',800:'#92400e',900:'#78350f' }
-          }
-        }
-      }
-    }
-  </script>
-  <link rel="stylesheet" href="/static/style.css">
 </head>
 <body class="bg-gray-50 min-h-screen">
   <header class="bg-brand-800 text-white shadow-lg">

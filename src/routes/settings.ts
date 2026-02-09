@@ -1,6 +1,5 @@
 import { Hono } from 'hono'
-
-type Bindings = { DB: D1Database }
+import type { Bindings } from '../types'
 
 export const settingsRoutes = new Hono<{ Bindings: Bindings }>()
 
