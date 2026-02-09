@@ -1,0 +1,14 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "roofing-measurement-tool",
+  "compatibility_date": "2026-02-09",
+  "pages_build_output_dir": "./dist",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "roofing-production",
+      "database_id": "local-dev-placeholder"
+    }
+  ]
+}
