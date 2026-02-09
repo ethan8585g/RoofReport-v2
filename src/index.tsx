@@ -111,6 +111,7 @@ function getHeadTags() {
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
   ${getTailwindConfig()}
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <link rel="stylesheet" href="/static/style.css">`
 }
 
@@ -119,7 +120,20 @@ function getMainPageHTML(mapsApiKey: string) {
   // The key appears in the HTML <script src> which is how Google designed Maps JS API.
   // This is NOT a secret key. Google Maps JS API keys are restricted by HTTP referrer.
   const mapsScript = mapsApiKey
-    ? `<script src="https://maps.googleapis.com/maps/api/js?key=${mapsApiKey}&libraries=places&callback=onGoogleMapsReady" async defer></script>`
+    ? `<script>
+      // Global flag set when Google Maps JS API finishes loading.
+      // Defined here (before the Maps <script>) so the callback exists when it fires.
+      var googleMapsReady = false;
+      function onGoogleMapsReady() {
+        googleMapsReady = true;
+        console.log('[Maps] Google Maps API loaded successfully');
+        // If app.js already rendered step 2, initialize the map now
+        if (typeof initMap === 'function' && document.getElementById('map')) {
+          initMap();
+        }
+      }
+    </script>
+    <script src="https://maps.googleapis.com/maps/api/js?key=${mapsApiKey}&libraries=places&callback=onGoogleMapsReady" async defer></script>`
     : '<!-- Google Maps: No API key configured. Using fallback map. Configure in .dev.vars or wrangler secrets. -->'
 
   return `<!DOCTYPE html>

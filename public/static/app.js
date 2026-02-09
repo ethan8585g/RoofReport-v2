@@ -309,11 +309,14 @@ function initMap() {
   const mapDiv = document.getElementById('map');
   if (!mapDiv) return;
 
-  // Check if Google Maps is available
+  // Check if Google Maps is available (loaded via callback or already ready)
   if (typeof google !== 'undefined' && google.maps) {
     initGoogleMap(mapDiv);
+  } else if (typeof googleMapsReady !== 'undefined' && !googleMapsReady) {
+    // Maps script is loading but not ready yet — wait for the callback
+    console.log('[Maps] Waiting for Google Maps API to load...');
   }
-  // Otherwise show fallback (already rendered)
+  // Otherwise show fallback (already rendered in HTML)
 }
 
 function initGoogleMap(mapDiv) {
