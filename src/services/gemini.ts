@@ -14,6 +14,7 @@
 // ============================================================
 
 import type { AIMeasurementAnalysis, AIReportData } from '../types'
+import { getAccessToken, getProjectId } from './gcp-auth'
 
 // ============================================================
 // API Endpoint Configuration
@@ -70,40 +71,63 @@ async function callGemini(opts: GeminiCallOptions): Promise<any> {
     requestBody.systemInstruction = opts.systemInstruction
   }
 
-  // Try Vertex AI Platform first (production mode)
-  if (opts.accessToken && opts.project && opts.location) {
-    try {
-      const url = getVertexAIUrl(opts.project, opts.location, model, 'generateContent')
-      console.log(`[Gemini] Calling Vertex AI: ${model} via ${opts.location}`)
-      
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${opts.accessToken}`,
-          'Content-Type': 'application/json',
-          'X-Goog-User-Project': opts.project
-        },
-        body: JSON.stringify(requestBody)
-      })
+  // Priority 1: Bearer token auth (from service account or static token)
+  // Uses Generative Language API which works better with service accounts
+  if (opts.accessToken) {
+    const url = `${GEMINI_REST_BASE}/${model}:generateContent`
+    console.log(`[Gemini] Calling Generative Language API with Bearer token: ${model}`)
+    
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${opts.accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(requestBody)
+    })
 
-      if (response.ok) {
-        const data: any = await response.json()
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text
-        if (text) return text
-        throw new Error('Empty response from Vertex AI')
+    if (response.ok) {
+      const data: any = await response.json()
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text
+      if (text) return text
+      throw new Error('Empty response from Gemini (Bearer auth)')
+    }
+
+    const errText = await response.text()
+    console.warn(`[Gemini] Bearer auth failed (${response.status}): ${errText.substring(0, 200)}`)
+    
+    // If Bearer fails, try Vertex AI Platform endpoint as fallback
+    if (opts.project && opts.location) {
+      try {
+        const vertexUrl = getVertexAIUrl(opts.project, opts.location, model, 'generateContent')
+        console.log(`[Gemini] Trying Vertex AI Platform fallback: ${model} via ${opts.location}`)
+        
+        const vertexResponse = await fetch(vertexUrl, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${opts.accessToken}`,
+            'Content-Type': 'application/json',
+            'X-Goog-User-Project': opts.project
+          },
+          body: JSON.stringify(requestBody)
+        })
+
+        if (vertexResponse.ok) {
+          const data: any = await vertexResponse.json()
+          const text = data.candidates?.[0]?.content?.parts?.[0]?.text
+          if (text) return text
+        }
+        console.warn(`[Gemini] Vertex AI Platform also failed (${vertexResponse.status})`)
+      } catch (e: any) {
+        console.warn(`[Gemini] Vertex AI Platform error: ${e.message}`)
       }
-
-      const errText = await response.text()
-      console.warn(`[Gemini] Vertex AI failed (${response.status}), falling back to REST: ${errText.substring(0, 200)}`)
-    } catch (e: any) {
-      console.warn(`[Gemini] Vertex AI error, falling back to REST: ${e.message}`)
     }
   }
 
-  // Fallback: Gemini REST API with API key
+  // Priority 2: API key auth
   if (opts.apiKey) {
     const url = `${GEMINI_REST_BASE}/${model}:generateContent?key=${opts.apiKey}`
-    console.log(`[Gemini] Calling REST API: ${model}`)
+    console.log(`[Gemini] Calling REST API with API key: ${model}`)
     
     const response = await fetch(url, {
       method: 'POST',
@@ -122,7 +146,7 @@ async function callGemini(opts: GeminiCallOptions): Promise<any> {
     return text
   }
 
-  throw new Error('No Gemini API credentials available (need either API key or Vertex AI token)')
+  throw new Error('No Gemini API credentials available (need service account key, access token, or API key)')
 }
 
 // ============================================================
@@ -140,8 +164,21 @@ export async function analyzeRoofGeometry(
     accessToken?: string
     project?: string
     location?: string
+    serviceAccountKey?: string
   }
 ): Promise<AIMeasurementAnalysis | null> {
+  // Auto-generate access token from service account key if available
+  if (!env.accessToken && env.serviceAccountKey) {
+    try {
+      env.accessToken = await getAccessToken(env.serviceAccountKey)
+      if (!env.project) env.project = getProjectId(env.serviceAccountKey) || undefined
+      if (!env.location) env.location = 'us-central1'
+      console.log('[Gemini] Auto-generated access token from service account key')
+    } catch (e: any) {
+      console.warn('[Gemini] Service account token generation failed:', e.message)
+    }
+  }
+
   if (!env.apiKey && !env.accessToken) {
     console.warn('[Gemini] No credentials — skipping geometry analysis')
     return null
@@ -233,8 +270,20 @@ export async function generateAIRoofingReport(
     accessToken?: string
     project?: string
     location?: string
+    serviceAccountKey?: string
   }
 ): Promise<AIReportData | null> {
+  // Auto-generate access token from service account key if available
+  if (!env.accessToken && env.serviceAccountKey) {
+    try {
+      env.accessToken = await getAccessToken(env.serviceAccountKey)
+      if (!env.project) env.project = getProjectId(env.serviceAccountKey) || undefined
+      if (!env.location) env.location = 'us-central1'
+    } catch (e: any) {
+      console.warn('[Gemini] Service account token generation failed:', e.message)
+    }
+  }
+
   if (!env.apiKey && !env.accessToken) {
     console.warn('[Gemini] No credentials — skipping AI report')
     return null
@@ -290,6 +339,7 @@ export async function quickMeasure(
     project?: string
     location?: string
     mapsKey?: string
+    serviceAccountKey?: string
   }
 ): Promise<{ analysis: AIMeasurementAnalysis; satelliteUrl: string }> {
   const mapsKey = env.mapsKey || env.apiKey

@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import { getAccessToken, getProjectId, getServiceAccountEmail } from './services/gcp-auth'
 import { ordersRoutes } from './routes/orders'
 import { companiesRoutes } from './routes/companies'
 import { settingsRoutes } from './routes/settings'
@@ -35,57 +36,77 @@ app.get('/api/health', (c) => {
       GOOGLE_CLOUD_PROJECT: !!c.env.GOOGLE_CLOUD_PROJECT,
       GOOGLE_CLOUD_LOCATION: !!c.env.GOOGLE_CLOUD_LOCATION,
       GOOGLE_CLOUD_ACCESS_TOKEN: !!c.env.GOOGLE_CLOUD_ACCESS_TOKEN,
+      GCP_SERVICE_ACCOUNT_KEY: !!c.env.GCP_SERVICE_ACCOUNT_KEY,
       STRIPE_SECRET_KEY: !!c.env.STRIPE_SECRET_KEY,
       STRIPE_PUBLISHABLE_KEY: !!c.env.STRIPE_PUBLISHABLE_KEY,
       DB: !!c.env.DB
     },
     vertex_ai: {
-      mode: c.env.GOOGLE_CLOUD_ACCESS_TOKEN ? 'vertex_ai_platform' : (c.env.GOOGLE_VERTEX_API_KEY ? 'gemini_rest_api' : 'not_configured'),
-      project: c.env.GOOGLE_CLOUD_PROJECT || null,
-      location: c.env.GOOGLE_CLOUD_LOCATION || null
+      mode: c.env.GCP_SERVICE_ACCOUNT_KEY ? 'service_account_auto' :
+            c.env.GOOGLE_CLOUD_ACCESS_TOKEN ? 'vertex_ai_platform' :
+            (c.env.GOOGLE_VERTEX_API_KEY ? 'gemini_rest_api' : 'not_configured'),
+      project: c.env.GOOGLE_CLOUD_PROJECT || getProjectId(c.env.GCP_SERVICE_ACCOUNT_KEY || '') || null,
+      location: c.env.GOOGLE_CLOUD_LOCATION || 'us-central1',
+      service_account: getServiceAccountEmail(c.env.GCP_SERVICE_ACCOUNT_KEY || '') || null
     }
   })
 })
 
-// Diagnostic: Test Gemini API connectivity
+// Diagnostic: Test Gemini API connectivity (service account → access token → API key)
 app.get('/api/health/gemini', async (c) => {
-  const apiKey = c.env.GOOGLE_VERTEX_API_KEY || c.env.GOOGLE_MAPS_API_KEY
-  if (!apiKey) {
-    return c.json({ status: 'error', message: 'No Gemini API key configured', fix: 'Set GOOGLE_VERTEX_API_KEY in .dev.vars or wrangler secrets' }, 400)
-  }
-
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`
+    let authHeader = ''
+    let authMode = ''
+    let url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent'
+
+    // Priority 1: Service Account Key (auto-generates access token)
+    if (c.env.GCP_SERVICE_ACCOUNT_KEY) {
+      const token = await getAccessToken(c.env.GCP_SERVICE_ACCOUNT_KEY)
+      authHeader = `Bearer ${token}`
+      authMode = 'service_account_auto'
+    }
+    // Priority 2: Static access token
+    else if (c.env.GOOGLE_CLOUD_ACCESS_TOKEN) {
+      authHeader = `Bearer ${c.env.GOOGLE_CLOUD_ACCESS_TOKEN}`
+      authMode = 'access_token'
+    }
+    // Priority 3: API key
+    else if (c.env.GOOGLE_VERTEX_API_KEY) {
+      authMode = 'api_key'
+      url += `?key=${c.env.GOOGLE_VERTEX_API_KEY}`
+    }
+    else {
+      return c.json({ status: 'error', message: 'No Gemini credentials configured', fix: 'Set GCP_SERVICE_ACCOUNT_KEY, GOOGLE_CLOUD_ACCESS_TOKEN, or GOOGLE_VERTEX_API_KEY' }, 400)
+    }
+
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (authHeader) headers['Authorization'] = authHeader
+
     const response = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ contents: [{ parts: [{ text: 'Respond with exactly: OK' }] }] })
     })
 
     if (response.ok) {
       const data: any = await response.json()
       const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || ''
-      return c.json({ status: 'ok', model: 'gemini-2.0-flash', response: text.trim(), latency_note: 'API is active and responding' })
+      return c.json({
+        status: 'ok',
+        model: 'gemini-2.0-flash',
+        auth_mode: authMode,
+        response: text.trim(),
+        project: getProjectId(c.env.GCP_SERVICE_ACCOUNT_KEY || '') || c.env.GOOGLE_CLOUD_PROJECT || null,
+        service_account: getServiceAccountEmail(c.env.GCP_SERVICE_ACCOUNT_KEY || '') || null
+      })
     }
 
     const errData: any = await response.json().catch(() => ({}))
     const errMsg = errData?.error?.message || `HTTP ${response.status}`
-    const isDisabled = errMsg.includes('SERVICE_DISABLED') || errMsg.includes('not been used')
-
-    return c.json({
-      status: 'error',
-      http_status: response.status,
-      message: errMsg,
-      fix: isDisabled
-        ? 'Enable the Generative Language API in your GCP project'
-        : 'Check API key permissions',
-      activation_url: isDisabled
-        ? 'https://console.developers.google.com/apis/api/generativelanguage.googleapis.com/overview'
-        : null
-    }, response.status as any)
+    return c.json({ status: 'error', auth_mode: authMode, http_status: response.status, message: errMsg }, response.status as any)
 
   } catch (err: any) {
-    return c.json({ status: 'error', message: err.message, fix: 'Network error — check internet connectivity' }, 500)
+    return c.json({ status: 'error', message: err.message, fix: 'Network or auth error' }, 500)
   }
 })
 

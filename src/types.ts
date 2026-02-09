@@ -31,6 +31,7 @@ export type Bindings = {
   GOOGLE_CLOUD_PROJECT: string   // e.g. "helpful-passage-486204-h9"
   GOOGLE_CLOUD_LOCATION: string  // e.g. "global" or "us-central1"
   GOOGLE_CLOUD_ACCESS_TOKEN: string // OAuth2 token from 'gcloud auth print-access-token'
+  GCP_SERVICE_ACCOUNT_KEY: string   // Full JSON of GCP service account key file (auto-generates access tokens)
 
   // Stripe - stored as Cloudflare secrets, accessed server-side only
   STRIPE_SECRET_KEY: string

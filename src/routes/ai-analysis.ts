@@ -19,11 +19,12 @@ export const aiAnalysisRoutes = new Hono<{ Bindings: Bindings }>()
 // ============================================================
 function getGeminiEnv(c: any) {
   return {
-    apiKey: c.env.GOOGLE_VERTEX_API_KEY || c.env.GOOGLE_MAPS_API_KEY || c.env.GOOGLE_SOLAR_API_KEY,
+    apiKey: c.env.GOOGLE_VERTEX_API_KEY || undefined,
     accessToken: c.env.GOOGLE_CLOUD_ACCESS_TOKEN || undefined,
     project: c.env.GOOGLE_CLOUD_PROJECT || undefined,
     location: c.env.GOOGLE_CLOUD_LOCATION || undefined,
-    mapsKey: c.env.GOOGLE_MAPS_API_KEY || c.env.GOOGLE_SOLAR_API_KEY
+    mapsKey: c.env.GOOGLE_MAPS_API_KEY || c.env.GOOGLE_SOLAR_API_KEY,
+    serviceAccountKey: c.env.GCP_SERVICE_ACCOUNT_KEY || undefined
   }
 }
 
