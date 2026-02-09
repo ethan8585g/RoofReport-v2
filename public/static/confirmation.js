@@ -133,6 +133,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       <!-- FULL MEASUREMENT REPORT (v2.0) -->
       ${reportData ? renderFullReport(reportData, orderId) : ''}
 
+      <!-- AI MEASUREMENT ENGINE SECTION -->
+      <div id="ai-engine-root" class="mt-8"></div>
+
       <!-- Actions -->
       <div class="flex flex-wrap gap-3 justify-center mt-8">
         <a href="/" class="px-6 py-3 bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors font-medium">
@@ -149,6 +152,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         </a>
       </div>
     `;
+
+    // ============================================================
+    // AUTO-TRIGGER AI ANALYSIS
+    // After rendering, check for existing AI data or trigger new analysis
+    // ============================================================
+    loadAIAnalysis(orderId, reportData);
+
 
   } catch (err) {
     root.innerHTML = `
@@ -509,4 +519,571 @@ function getComplexityColor(cls) {
     very_complex: 'bg-red-100 text-red-700'
   };
   return map[cls] || 'bg-gray-100 text-gray-600';
+}
+
+// ============================================================
+// AI MEASUREMENT ENGINE — Gemini Vision Integration
+// ============================================================
+
+async function loadAIAnalysis(orderId, reportData) {
+  const root = document.getElementById('ai-engine-root');
+  if (!root) return;
+
+  // Show loading state
+  root.innerHTML = renderAILoadingState();
+
+  try {
+    // Check for existing AI analysis
+    const existingRes = await fetch('/api/ai/' + orderId);
+    const existing = await existingRes.json();
+
+    if (existing.status === 'completed' && existing.measurement) {
+      renderAIEngine(root, existing, reportData);
+      return;
+    }
+
+    // Trigger new analysis
+    const analyzeRes = await fetch('/api/ai/' + orderId + '/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    const result = await analyzeRes.json();
+
+    if (result.success || result.status === 'completed') {
+      renderAIEngine(root, result, reportData);
+    } else {
+      root.innerHTML = renderAIError(result.error || result.details || 'Analysis failed');
+    }
+  } catch (err) {
+    root.innerHTML = renderAIError(err.message);
+  }
+}
+
+function renderAILoadingState() {
+  return `
+    <div class="bg-gray-900 rounded-2xl border border-gray-700 overflow-hidden shadow-xl">
+      <div class="p-4 border-b border-gray-700 bg-gray-800/50 flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
+            <i class="fas fa-brain text-white text-sm"></i>
+          </div>
+          <div>
+            <h3 class="font-bold text-white text-sm">AI Measurement Engine</h3>
+            <p class="text-xs text-gray-400">Powered by Gemini Vision</p>
+          </div>
+        </div>
+        <span class="text-xs bg-blue-900/30 text-blue-300 px-3 py-1 rounded-full border border-blue-700/50 animate-pulse">
+          <i class="fas fa-spinner fa-spin mr-1"></i>Analyzing...
+        </span>
+      </div>
+      <div class="p-12 flex flex-col items-center justify-center">
+        <div class="relative w-20 h-20 mb-6">
+          <div class="absolute inset-0 border-4 border-blue-500/30 rounded-full animate-ping"></div>
+          <div class="absolute inset-0 border-4 border-t-blue-500 rounded-full animate-spin"></div>
+        </div>
+        <p class="text-blue-400 font-mono text-sm animate-pulse">AI MEASUREMENT ENGINE RUNNING...</p>
+        <p class="text-gray-500 text-xs mt-2">Extracting Roof Geometry, Lines & Obstructions from Satellite Imagery</p>
+        <p class="text-gray-600 text-xs mt-1">This typically takes 5-15 seconds</p>
+      </div>
+    </div>
+  `;
+}
+
+function renderAIError(message) {
+  return `
+    <div class="bg-gray-900 rounded-2xl border border-gray-700 overflow-hidden">
+      <div class="p-4 border-b border-gray-700 bg-gray-800/50 flex items-center gap-2">
+        <div class="w-8 h-8 bg-red-600 rounded-lg flex items-center justify-center">
+          <i class="fas fa-brain text-white text-sm"></i>
+        </div>
+        <div>
+          <h3 class="font-bold text-white text-sm">AI Measurement Engine</h3>
+          <p class="text-xs text-red-400">${message}</p>
+        </div>
+      </div>
+      <div class="p-8 text-center">
+        <i class="fas fa-exclamation-triangle text-3xl text-red-400 mb-3"></i>
+        <p class="text-gray-400 text-sm">AI analysis could not be completed.</p>
+        <p class="text-gray-500 text-xs mt-1">The standard Solar API report above is still valid.</p>
+        <p class="text-gray-600 text-xs mt-3">Check that GOOGLE_VERTEX_API_KEY is configured.</p>
+      </div>
+    </div>
+  `;
+}
+
+// ============================================================
+// MAIN AI ENGINE RENDERER
+// ============================================================
+function renderAIEngine(root, aiData, reportData) {
+  const measurement = aiData.measurement;
+  const aiReport = aiData.report;
+  const satelliteUrl = aiData.satellite_image_url;
+  const facetCount = measurement?.facets?.length || 0;
+  const lineCount = measurement?.lines?.length || 0;
+  const obstructionCount = measurement?.obstructions?.length || 0;
+
+  root.innerHTML = `
+    <div class="bg-gray-900 rounded-2xl border border-gray-700 overflow-hidden shadow-xl">
+      <!-- Header -->
+      <div class="p-4 border-b border-gray-700 bg-gray-800/50 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
+            <i class="fas fa-brain text-white"></i>
+          </div>
+          <div>
+            <h3 class="font-bold text-white">AI Measurement Engine</h3>
+            <p class="text-xs text-gray-400">Gemini Vision Roof Geometry Analysis</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-xs bg-green-500/20 text-green-400 px-3 py-1 rounded-full border border-green-700/50">
+            <i class="fas fa-check-circle mr-1"></i>Analysis Complete
+          </span>
+        </div>
+      </div>
+
+      <!-- Two Column Layout -->
+      <div class="grid lg:grid-cols-2 gap-0 divide-x divide-gray-700">
+
+        <!-- LEFT: Satellite Image with SVG Overlay -->
+        <div class="p-4">
+          <div class="mb-3 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <i class="fas fa-ruler text-blue-400 text-sm"></i>
+              <span class="text-sm font-semibold text-gray-200">Vision Analysis</span>
+            </div>
+            <span class="text-xs bg-blue-900/30 text-blue-300 px-2 py-0.5 rounded border border-blue-700/50">
+              Satellite + AI Overlay
+            </span>
+          </div>
+
+          <!-- Image + SVG Overlay Container -->
+          <div class="relative w-full aspect-square bg-gray-800 rounded-xl overflow-hidden border border-gray-700" id="ai-overlay-container">
+            ${satelliteUrl ? `<img src="${satelliteUrl}" alt="Satellite" class="w-full h-full object-cover" crossorigin="anonymous" />` : '<div class="w-full h-full bg-gray-800 flex items-center justify-center text-gray-500">No satellite image</div>'}
+
+            ${measurement ? `
+              <svg viewBox="0 0 1000 1000" class="absolute inset-0 w-full h-full" preserveAspectRatio="none" style="pointer-events:none">
+                <!-- Facets -->
+                ${(measurement.facets || []).map((facet, idx) => {
+                  const pts = (facet.points || []).map(p => p.x + ',' + p.y).join(' ');
+                  const cx = facet.points?.length ? Math.round(facet.points.reduce((a, p) => a + p.x, 0) / facet.points.length) : 0;
+                  const cy = facet.points?.length ? Math.round(facet.points.reduce((a, p) => a + p.y, 0) / facet.points.length) : 0;
+                  return '<g>' +
+                    '<polygon points="' + pts + '" fill="rgba(59,130,246,0.2)" stroke="rgba(59,130,246,0.8)" stroke-width="2"/>' +
+                    '<text x="' + cx + '" y="' + cy + '" fill="white" font-size="22" text-anchor="middle" font-weight="bold" style="text-shadow:0 1px 3px rgba(0,0,0,0.8)">' + (facet.pitch || '') + '</text>' +
+                    '</g>';
+                }).join('')}
+
+                <!-- Lines -->
+                ${(measurement.lines || []).map((line, idx) => {
+                  const colors = { RIDGE: '#F59E0B', HIP: '#F97316', VALLEY: '#3B82F6', EAVE: '#10B981', RAKE: '#EF4444' };
+                  const c = colors[line.type] || '#EF4444';
+                  return '<line x1="' + line.start.x + '" y1="' + line.start.y + '" x2="' + line.end.x + '" y2="' + line.end.y + '" stroke="' + c + '" stroke-width="3" stroke-linecap="round"/>';
+                }).join('')}
+
+                <!-- Obstructions -->
+                ${(measurement.obstructions || []).map((obs, idx) => {
+                  const b = obs.boundingBox;
+                  return '<rect x="' + b.min.x + '" y="' + b.min.y + '" width="' + (b.max.x - b.min.x) + '" height="' + (b.max.y - b.min.y) + '" fill="rgba(239,68,68,0.25)" stroke="#EF4444" stroke-width="2" stroke-dasharray="5,3"/>';
+                }).join('')}
+              </svg>
+            ` : ''}
+          </div>
+
+          <!-- Stats Bar -->
+          <div class="mt-3 grid grid-cols-3 gap-2">
+            <div class="bg-gray-800 rounded-lg p-3 text-center border border-gray-700">
+              <div class="text-2xl font-bold text-white">${facetCount}</div>
+              <div class="text-[10px] text-gray-400 uppercase tracking-wide">Facets</div>
+            </div>
+            <div class="bg-gray-800 rounded-lg p-3 text-center border border-gray-700">
+              <div class="text-2xl font-bold text-white">${lineCount}</div>
+              <div class="text-[10px] text-gray-400 uppercase tracking-wide">Lines</div>
+            </div>
+            <div class="bg-gray-800 rounded-lg p-3 text-center border border-gray-700">
+              <div class="text-2xl font-bold text-white">${obstructionCount}</div>
+              <div class="text-[10px] text-gray-400 uppercase tracking-wide">Obstructions</div>
+            </div>
+          </div>
+
+          <!-- Legend -->
+          <div class="mt-3 bg-gray-800/50 rounded-lg p-3 border border-gray-700">
+            <div class="text-xs font-semibold text-gray-400 mb-2">Legend</div>
+            <div class="grid grid-cols-3 gap-2 text-xs">
+              <div class="flex items-center gap-1.5"><div class="w-4 h-0.5 bg-amber-500 rounded"></div><span class="text-gray-400">Ridge</span></div>
+              <div class="flex items-center gap-1.5"><div class="w-4 h-0.5 bg-blue-500 rounded"></div><span class="text-gray-400">Valley</span></div>
+              <div class="flex items-center gap-1.5"><div class="w-4 h-0.5 bg-green-500 rounded"></div><span class="text-gray-400">Eave</span></div>
+              <div class="flex items-center gap-1.5"><div class="w-4 h-0.5 bg-orange-500 rounded"></div><span class="text-gray-400">Hip</span></div>
+              <div class="flex items-center gap-1.5"><div class="w-4 h-0.5 bg-red-500 rounded"></div><span class="text-gray-400">Rake</span></div>
+              <div class="flex items-center gap-1.5"><div class="w-3 h-3 border border-red-500 bg-red-500/20 rounded-sm" style="border-style:dashed"></div><span class="text-gray-400">Obstruction</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT: Measurement Data + AI Report + Charts -->
+        <div class="p-4 space-y-4">
+
+          ${renderAIMeasurementPanel(measurement, reportData)}
+
+          ${aiReport ? renderAIReportCard(aiReport) : ''}
+
+          ${renderAILineSummary(measurement)}
+
+          ${renderAIFacetTable(measurement)}
+
+        </div>
+      </div>
+
+      <!-- Charts Row -->
+      <div class="border-t border-gray-700 p-4">
+        <div class="grid lg:grid-cols-2 gap-4">
+          <div class="bg-gray-800 rounded-xl p-4 border border-gray-700">
+            <h4 class="text-sm font-semibold text-gray-300 mb-3"><i class="fas fa-chart-bar text-blue-400 mr-1"></i>Segment Areas</h4>
+            <canvas id="ai-segment-chart" height="200"></canvas>
+          </div>
+          <div class="bg-gray-800 rounded-xl p-4 border border-gray-700">
+            <h4 class="text-sm font-semibold text-gray-300 mb-3"><i class="fas fa-compass text-purple-400 mr-1"></i>Orientation Distribution</h4>
+            <canvas id="ai-orientation-chart" height="200"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Render charts after DOM is ready
+  setTimeout(() => renderAICharts(reportData), 100);
+}
+
+// ============================================================
+// MEASUREMENT PANEL — Scale factor + area calculations
+// ============================================================
+function renderAIMeasurementPanel(measurement, reportData) {
+  if (!measurement || !measurement.facets || measurement.facets.length === 0) {
+    return '<div class="bg-gray-800 rounded-lg p-4 text-center text-gray-500 text-sm">No facet data available</div>';
+  }
+
+  // Calculate scale factor from Solar API ground area vs AI polygon area
+  const realGroundArea = reportData?.total_footprint_sqm || reportData?.total_footprint_sqft * 0.0929 || 100;
+  const totalNormalizedArea = measurement.facets.reduce((acc, f) => acc + calcPolygonArea(f.points || []), 0);
+  const scaleFactor = Math.sqrt(realGroundArea) / Math.sqrt(totalNormalizedArea || 1);
+
+  // Process facets
+  let totalSqFt = 0;
+  const facets = measurement.facets.map((f, idx) => {
+    const rawArea = calcPolygonArea(f.points || []);
+    const projectedAreaM2 = rawArea * (scaleFactor * scaleFactor);
+    const pitchDeg = parsePitch(f.pitch);
+    const pitchMult = 1 / Math.cos((pitchDeg * Math.PI) / 180);
+    const trueAreaM2 = projectedAreaM2 * pitchMult;
+    const trueAreaSqFt = trueAreaM2 * 10.7639;
+    totalSqFt += trueAreaSqFt;
+    return { ...f, trueAreaSqFt, pitchDeg, idx };
+  });
+
+  // Process lines
+  let lineSummary = {};
+  (measurement.lines || []).forEach(line => {
+    const rawLen = calcDistance(line.start, line.end);
+    const projLen = rawLen * scaleFactor;
+    const isSloped = ['HIP', 'VALLEY', 'RAKE'].includes(line.type);
+    const trueLen = projLen * (isSloped ? 1.15 : 1.0) * 3.28084; // Convert to feet
+    if (!lineSummary[line.type]) lineSummary[line.type] = { count: 0, totalFt: 0 };
+    lineSummary[line.type].count++;
+    lineSummary[line.type].totalFt += trueLen;
+  });
+
+  return `
+    <div class="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
+      <div class="p-3 border-b border-gray-700 flex items-center justify-between bg-gray-800/50">
+        <div class="flex items-center gap-2">
+          <i class="fas fa-calculator text-green-400 text-sm"></i>
+          <span class="font-semibold text-gray-200 text-sm">AI Measurement Report</span>
+        </div>
+        <span class="text-xs text-white font-bold bg-green-500/20 text-green-400 px-2 py-0.5 rounded">
+          ${Math.round(totalSqFt).toLocaleString()} sq ft
+        </span>
+      </div>
+
+      <div class="grid grid-cols-2 gap-0 divide-x divide-gray-700">
+        <!-- Line Measurements -->
+        <div class="p-3">
+          <h5 class="text-[10px] font-medium text-gray-400 uppercase tracking-wider mb-2 flex items-center gap-1">
+            <i class="fas fa-ruler text-xs"></i> Linear Measurements
+          </h5>
+          <div class="space-y-1.5">
+            ${Object.entries(lineSummary).map(([type, stats]) => {
+              const dotColor = type === 'RIDGE' ? 'bg-amber-500' : type === 'VALLEY' ? 'bg-blue-500' : type === 'EAVE' ? 'bg-green-500' : type === 'HIP' ? 'bg-orange-500' : 'bg-red-500';
+              return `
+                <div class="flex justify-between items-center px-2 py-1.5 bg-gray-700/30 rounded border border-gray-700/50">
+                  <div class="flex items-center gap-2">
+                    <div class="w-1.5 h-1.5 rounded-full ${dotColor}"></div>
+                    <span class="text-gray-300 text-xs capitalize">${type.toLowerCase()}s</span>
+                    <span class="text-[10px] text-gray-500 bg-gray-800 px-1.5 py-0.5 rounded-full">${stats.count}</span>
+                  </div>
+                  <span class="font-mono text-white text-xs">${Math.round(stats.totalFt)} ft</span>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+
+        <!-- Facet Measurements -->
+        <div class="p-3">
+          <h5 class="text-[10px] font-medium text-gray-400 uppercase tracking-wider mb-2 flex items-center gap-1">
+            <i class="fas fa-th text-xs"></i> Facet Details
+          </h5>
+          <div class="max-h-48 overflow-y-auto pr-1" style="-webkit-overflow-scrolling:touch">
+            <table class="w-full text-xs text-left">
+              <thead class="text-[10px] text-gray-500 uppercase sticky top-0 bg-gray-800">
+                <tr>
+                  <th class="px-1 py-1">ID</th>
+                  <th class="px-1 py-1">Pitch</th>
+                  <th class="px-1 py-1 text-right">Area</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-700/30">
+                ${facets.map(f => `
+                  <tr class="hover:bg-gray-700/20">
+                    <td class="px-1 py-1 text-gray-400 font-mono">#${f.idx + 1}</td>
+                    <td class="px-1 py-1 text-gray-300">${Math.round(f.pitchDeg)}&deg;</td>
+                    <td class="px-1 py-1 text-right text-white font-mono">${Math.round(f.trueAreaSqFt)} ft&sup2;</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// ============================================================
+// AI REPORT CARD
+// ============================================================
+function renderAIReportCard(report) {
+  return `
+    <div class="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
+      <div class="bg-gradient-to-r from-blue-600 to-purple-600 p-3">
+        <h4 class="text-sm font-bold text-white flex items-center gap-2">
+          <i class="fas fa-file-alt"></i>AI Assessment Report
+        </h4>
+      </div>
+      <div class="p-4 space-y-3">
+        <div>
+          <p class="text-[10px] font-medium text-gray-400 uppercase mb-1">Executive Summary</p>
+          <p class="text-gray-200 text-xs leading-relaxed">${report.summary || 'N/A'}</p>
+        </div>
+        <div class="grid grid-cols-3 gap-2">
+          <div class="bg-gray-700/50 p-2.5 rounded-lg border border-gray-600">
+            <div class="flex items-center gap-1 mb-1 text-blue-400">
+              <i class="fas fa-hammer text-xs"></i>
+              <span class="font-semibold text-[10px]">Material</span>
+            </div>
+            <p class="text-white text-xs">${report.materialSuggestion || 'N/A'}</p>
+          </div>
+          <div class="bg-gray-700/50 p-2.5 rounded-lg border border-gray-600">
+            <div class="flex items-center gap-1 mb-1 text-amber-400">
+              <i class="fas fa-exclamation-triangle text-xs"></i>
+              <span class="font-semibold text-[10px]">Difficulty</span>
+            </div>
+            <div class="flex items-center gap-1">
+              <span class="text-xl font-bold text-white">${report.difficultyScore || 0}</span>
+              <span class="text-gray-400 text-xs">/10</span>
+            </div>
+            <div class="w-full bg-gray-600 h-1 rounded-full mt-1">
+              <div class="bg-amber-400 h-1 rounded-full" style="width:${(report.difficultyScore || 0) * 10}%"></div>
+            </div>
+          </div>
+          <div class="bg-gray-700/50 p-2.5 rounded-lg border border-gray-600">
+            <div class="flex items-center gap-1 mb-1 text-green-400">
+              <i class="fas fa-dollar-sign text-xs"></i>
+              <span class="font-semibold text-[10px]">Est. Cost</span>
+            </div>
+            <p class="text-white font-mono text-xs">${report.estimatedCostRange || 'N/A'}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// ============================================================
+// AI LINE SUMMARY (compact)
+// ============================================================
+function renderAILineSummary(measurement) {
+  if (!measurement?.lines?.length) return '';
+
+  const groups = {};
+  (measurement.lines || []).forEach(l => {
+    if (!groups[l.type]) groups[l.type] = 0;
+    groups[l.type]++;
+  });
+
+  return `
+    <div class="flex flex-wrap gap-2">
+      ${Object.entries(groups).map(([type, count]) => {
+        const colors = { RIDGE: 'bg-amber-500/20 text-amber-400 border-amber-700/50', HIP: 'bg-orange-500/20 text-orange-400 border-orange-700/50', VALLEY: 'bg-blue-500/20 text-blue-400 border-blue-700/50', EAVE: 'bg-green-500/20 text-green-400 border-green-700/50', RAKE: 'bg-red-500/20 text-red-400 border-red-700/50' };
+        return '<span class="text-xs px-2 py-1 rounded-full border ' + (colors[type] || 'bg-gray-700 text-gray-400') + '">' + type + ': ' + count + '</span>';
+      }).join('')}
+    </div>
+  `;
+}
+
+// ============================================================
+// AI FACET TABLE
+// ============================================================
+function renderAIFacetTable(measurement) {
+  if (!measurement?.facets?.length) return '';
+
+  return `
+    <div class="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
+      <div class="p-3 border-b border-gray-700">
+        <h4 class="text-xs font-semibold text-gray-300">AI-Detected Facet Details</h4>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs text-left text-gray-400">
+          <thead class="text-[10px] text-gray-500 uppercase bg-gray-900/50">
+            <tr>
+              <th class="px-3 py-2">Facet</th>
+              <th class="px-3 py-2">Pitch</th>
+              <th class="px-3 py-2">Azimuth</th>
+              <th class="px-3 py-2 text-right">Points</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-700/30">
+            ${measurement.facets.map((f, idx) => `
+              <tr class="hover:bg-gray-700/30">
+                <td class="px-3 py-2 font-medium text-white">#${idx + 1}</td>
+                <td class="px-3 py-2">${f.pitch || 'N/A'}</td>
+                <td class="px-3 py-2">${f.azimuth || 'N/A'}</td>
+                <td class="px-3 py-2 text-right">${f.points?.length || 0}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+// ============================================================
+// CHARTS — Segment Areas + Orientation Distribution
+// Uses Chart.js loaded from CDN
+// ============================================================
+function renderAICharts(reportData) {
+  if (typeof Chart === 'undefined') {
+    // Load Chart.js dynamically
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js';
+    script.onload = () => renderAICharts(reportData);
+    document.head.appendChild(script);
+    return;
+  }
+
+  const segments = reportData?.segments || [];
+  if (segments.length === 0) return;
+
+  // Segment Area Bar Chart
+  const segCanvas = document.getElementById('ai-segment-chart');
+  if (segCanvas) {
+    new Chart(segCanvas, {
+      type: 'bar',
+      data: {
+        labels: segments.map((s, i) => s.name || ('Seg ' + (i + 1))),
+        datasets: [{
+          label: 'True Area (sq ft)',
+          data: segments.map(s => s.true_area_sqft || 0),
+          backgroundColor: 'rgba(59, 130, 246, 0.6)',
+          borderColor: 'rgba(59, 130, 246, 1)',
+          borderWidth: 1,
+          borderRadius: 4
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: '#9CA3AF', font: { size: 10 } }, grid: { color: '#374151' } },
+          y: { ticks: { color: '#9CA3AF', font: { size: 10 } }, grid: { color: '#374151' } }
+        }
+      }
+    });
+  }
+
+  // Orientation Pie Chart
+  const oriCanvas = document.getElementById('ai-orientation-chart');
+  if (oriCanvas) {
+    const dirs = [
+      { name: 'North', filter: s => s.azimuth_degrees > 315 || s.azimuth_degrees <= 45 },
+      { name: 'East', filter: s => s.azimuth_degrees > 45 && s.azimuth_degrees <= 135 },
+      { name: 'South', filter: s => s.azimuth_degrees > 135 && s.azimuth_degrees <= 225 },
+      { name: 'West', filter: s => s.azimuth_degrees > 225 && s.azimuth_degrees <= 315 }
+    ];
+
+    const azData = dirs.map(d => ({
+      name: d.name,
+      value: segments.filter(d.filter).length
+    })).filter(d => d.value > 0);
+
+    const colors = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042'];
+
+    new Chart(oriCanvas, {
+      type: 'doughnut',
+      data: {
+        labels: azData.map(d => d.name),
+        datasets: [{
+          data: azData.map(d => d.value),
+          backgroundColor: colors.slice(0, azData.length),
+          borderColor: '#1F2937',
+          borderWidth: 2
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            position: 'bottom',
+            labels: { color: '#9CA3AF', font: { size: 11 }, padding: 12 }
+          }
+        }
+      }
+    });
+  }
+}
+
+// ============================================================
+// GEOMETRY UTILITIES (mirrored from roofmetric-ai)
+// ============================================================
+function calcDistance(p1, p2) {
+  return Math.sqrt(Math.pow((p2.x || 0) - (p1.x || 0), 2) + Math.pow((p2.y || 0) - (p1.y || 0), 2));
+}
+
+function calcPolygonArea(points) {
+  if (!points || points.length < 3) return 0;
+  let area = 0;
+  const n = points.length;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    area += (points[i].x || 0) * (points[j].y || 0);
+    area -= (points[j].x || 0) * (points[i].y || 0);
+  }
+  return Math.abs(area) / 2;
+}
+
+function parsePitch(pitchStr) {
+  if (!pitchStr) return 0;
+  if (typeof pitchStr === 'number') return pitchStr;
+  // Handle "X/12" format
+  if (pitchStr.includes('/')) {
+    const parts = pitchStr.split('/').map(Number);
+    if (!isNaN(parts[0]) && !isNaN(parts[1]) && parts[1] !== 0) {
+      return (Math.atan(parts[0] / parts[1]) * 180) / Math.PI;
+    }
+  }
+  // Handle "X deg" or raw number
+  const deg = parseFloat(pitchStr);
+  return isNaN(deg) ? 0 : deg;
 }

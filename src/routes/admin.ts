@@ -187,6 +187,31 @@ adminRoutes.post('/init-db', async (c) => {
       await c.env.DB.prepare(idx).run()
     }
 
+    // Migration 0003: Edge measurements, materials, quality columns
+    const migration0003Cols = [
+      'edge_measurements TEXT', 'total_ridge_ft REAL', 'total_hip_ft REAL',
+      'total_valley_ft REAL', 'total_eave_ft REAL', 'total_rake_ft REAL',
+      'material_estimate TEXT', 'gross_squares REAL', 'bundle_count INTEGER',
+      'total_material_cost_cad REAL', 'complexity_class TEXT',
+      'imagery_quality TEXT', 'imagery_date TEXT', 'confidence_score INTEGER',
+      'field_verification_recommended INTEGER DEFAULT 0',
+      'professional_report_html TEXT', 'report_version TEXT DEFAULT \'2.0\'',
+      'roof_footprint_sqft REAL', 'roof_footprint_sqm REAL', 'area_multiplier REAL',
+      'roof_pitch_ratio TEXT'
+    ]
+    for (const col of migration0003Cols) {
+      try { await c.env.DB.prepare(`ALTER TABLE reports ADD COLUMN ${col}`).run() } catch(e) {}
+    }
+
+    // Migration 0004: AI Measurement Engine columns
+    const migration0004Cols = [
+      'ai_measurement_json TEXT', 'ai_report_json TEXT', 'ai_satellite_url TEXT',
+      'ai_analyzed_at TEXT', "ai_status TEXT DEFAULT 'pending'", 'ai_error TEXT'
+    ]
+    for (const col of migration0004Cols) {
+      try { await c.env.DB.prepare(`ALTER TABLE reports ADD COLUMN ${col}`).run() } catch(e) {}
+    }
+
     return c.json({ success: true, message: 'Database initialized successfully' })
   } catch (err: any) {
     return c.json({ error: 'Failed to initialize database', details: err.message }, 500)

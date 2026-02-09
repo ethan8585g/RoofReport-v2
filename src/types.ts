@@ -20,9 +20,71 @@ export type Bindings = {
   GOOGLE_SOLAR_API_KEY: string
   GOOGLE_MAPS_API_KEY: string
 
+  // Google Vertex AI / Gemini API - for AI roof geometry analysis
+  GOOGLE_VERTEX_API_KEY: string
+
   // Stripe - stored as Cloudflare secrets, accessed server-side only
   STRIPE_SECRET_KEY: string
   STRIPE_PUBLISHABLE_KEY: string  // This one is safe for frontend (it's "publishable")
+}
+
+// ============================================================
+// AI MEASUREMENT ENGINE TYPES — Gemini Vision roof geometry
+// ============================================================
+
+/** A point in normalized coordinates (0-1000 based on image boundaries) */
+export interface MeasurementPoint {
+  x: number  // 0-1000
+  y: number  // 0-1000
+}
+
+/** A roof facet (plane) detected by AI vision analysis */
+export interface AIRoofFacet {
+  id: string
+  points: MeasurementPoint[]
+  pitch: string   // e.g. "25 deg" or "6/12"
+  azimuth: string // e.g. "180 deg" or "South"
+}
+
+/** A roof line (edge) detected by AI vision analysis */
+export interface AIRoofLine {
+  type: 'RIDGE' | 'HIP' | 'VALLEY' | 'EAVE' | 'RAKE'
+  start: MeasurementPoint
+  end: MeasurementPoint
+}
+
+/** A roof obstruction detected by AI vision analysis */
+export interface AIObstruction {
+  type: 'CHIMNEY' | 'VENT' | 'SKYLIGHT' | 'HVAC'
+  boundingBox: {
+    min: MeasurementPoint
+    max: MeasurementPoint
+  }
+}
+
+/** Complete AI measurement analysis result */
+export interface AIMeasurementAnalysis {
+  facets: AIRoofFacet[]
+  lines: AIRoofLine[]
+  obstructions: AIObstruction[]
+}
+
+/** AI-generated roofing assessment report */
+export interface AIReportData {
+  summary: string
+  materialSuggestion: string
+  difficultyScore: number
+  estimatedCostRange: string
+}
+
+/** Combined AI analysis result stored in DB */
+export interface AIAnalysisResult {
+  measurement: AIMeasurementAnalysis | null
+  report: AIReportData | null
+  satellite_image_url: string
+  analyzed_at: string
+  status: 'pending' | 'analyzing' | 'completed' | 'failed'
+  error?: string
 }
 
 // ============================================================

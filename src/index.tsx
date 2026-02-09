@@ -5,6 +5,7 @@ import { companiesRoutes } from './routes/companies'
 import { settingsRoutes } from './routes/settings'
 import { reportsRoutes } from './routes/reports'
 import { adminRoutes } from './routes/admin'
+import { aiAnalysisRoutes } from './routes/ai-analysis'
 import type { Bindings } from './types'
 
 const app = new Hono<{ Bindings: Bindings }>()
@@ -18,6 +19,7 @@ app.route('/api/companies', companiesRoutes)
 app.route('/api/settings', settingsRoutes)
 app.route('/api/reports', reportsRoutes)
 app.route('/api/admin', adminRoutes)
+app.route('/api/ai', aiAnalysisRoutes)
 
 // Health check
 app.get('/api/health', (c) => {
@@ -29,6 +31,7 @@ app.get('/api/health', (c) => {
     env_configured: {
       GOOGLE_SOLAR_API_KEY: !!c.env.GOOGLE_SOLAR_API_KEY,
       GOOGLE_MAPS_API_KEY: !!c.env.GOOGLE_MAPS_API_KEY,
+      GOOGLE_VERTEX_API_KEY: !!c.env.GOOGLE_VERTEX_API_KEY,
       STRIPE_SECRET_KEY: !!c.env.STRIPE_SECRET_KEY,
       STRIPE_PUBLISHABLE_KEY: !!c.env.STRIPE_PUBLISHABLE_KEY,
       DB: !!c.env.DB
@@ -228,9 +231,10 @@ function getOrderConfirmationHTML() {
       <a href="/" class="text-brand-200 hover:text-white text-sm"><i class="fas fa-arrow-left mr-1"></i>New Order</a>
     </div>
   </header>
-  <main class="max-w-3xl mx-auto px-4 py-8">
+  <main class="max-w-5xl mx-auto px-4 py-8">
     <div id="confirmation-root"></div>
   </main>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
   <script src="/static/confirmation.js"></script>
 </body>
 </html>`
