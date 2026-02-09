@@ -244,7 +244,9 @@ Return JSON: {
     }
   })
 
+  console.log(`[Gemini] Raw response (first 500 chars): ${text.substring(0, 500)}`)
   const analysis = JSON.parse(text) as AIMeasurementAnalysis
+  console.log(`[Gemini] Parsed: ${analysis.facets?.length || 0} facets, ${analysis.lines?.length || 0} lines, ${analysis.obstructions?.length || 0} obstructions`)
 
   // Validate basic structure
   if (!analysis.facets) analysis.facets = []
@@ -322,7 +324,10 @@ Provide a JSON response with EXACTLY these fields:
     }
   })
 
-  return JSON.parse(text) as AIReportData
+  const parsed = JSON.parse(text)
+  // Gemini sometimes returns an array with a single object — unwrap it
+  const report = Array.isArray(parsed) ? parsed[0] : parsed
+  return report as AIReportData
 }
 
 // ============================================================
