@@ -1,169 +1,140 @@
-# Reuse Canada - Roof Measurement Tool v2.0
+# Reuse Canada - Roofing Measurement Tool
 
-Professional satellite-based roof measurement platform with 3D surface area calculation, edge-level analysis, and automated material estimation (Bill of Materials).
+## Project Overview
+- **Name**: Reuse Canada Roofing Measurement Tool
+- **Version**: 2.1 (Vertex AI Engine Integration)
+- **Goal**: Professional roof measurement reports with AI-powered geometry extraction
+- **Features**: Google Solar API, Gemini Vision AI, Vertex AI Engine, Material BOM, Edge Analysis
 
-## Live App
+## URLs
+- **Live Sandbox**: https://3000-ing8ae0z5fkhj91kq4pyi-dfc00ec5.sandbox.novita.ai
+- **Quick Measure (Vertex AI)**: https://3000-ing8ae0z5fkhj91kq4pyi-dfc00ec5.sandbox.novita.ai/measure
+- **Admin Dashboard**: https://3000-ing8ae0z5fkhj91kq4pyi-dfc00ec5.sandbox.novita.ai/admin
+- **Health Check**: https://3000-ing8ae0z5fkhj91kq4pyi-dfc00ec5.sandbox.novita.ai/api/health
 
-- **Sandbox**: https://3000-ing8ae0z5fkhj91kq4pyi-dfc00ec5.sandbox.novita.ai
-- **Order Form**: `/`
-- **Admin Dashboard**: `/admin`
-- **Settings**: `/settings`
-- **Order Confirmation**: `/order/:id`
-- **Professional Report (PDF-ready)**: `/api/reports/:id/html`
+## Architecture
 
-## Completed Features (v2.0)
+### Dual AI Engine System
+The tool uses two AI pipelines:
 
-### Core Measurement Engine
-- **3D Surface Area Calculation**: `true_area = footprint / cos(pitch)` applied per-segment
-- **Edge-Level 3D Math**: Hip/valley factor `sqrt(2*rise^2 + 288) / (12*sqrt(2))`; rake factor `1 / cos(pitch)`
-- **Weighted Pitch Averaging**: Area-weighted across all segments
-- **Google Solar API Integration**: `buildingInsights:findClosest` with `roofSegmentStats` parsing (pitchDegrees, azimuthDegrees, stats.areaMeters2, planeHeightAtCenterMeters)
-- **Mock Data Generator**: Realistic Alberta residential data when API key not configured
+**1. Google Solar API Pipeline (Standard)**
+- Fetches building insights from `solar.googleapis.com`
+- Returns 12-58 roof segments with pitch, azimuth, area
+- Generates edge breakdown, material BOM, quality scores
+- Output: Full professional measurement report (v2.0)
 
-### Edge Measurement System
-Every report includes 3D linear measurements for all roof edges:
-| Edge Type | Plan vs True | Calculation |
-|-----------|-------------|-------------|
-| Ridge | Horizontal (plan = true) | Ridge lines are level |
-| Hip | plan * hip_factor | `sqrt(2*rise^2 + 288) / (12*sqrt(2))` |
-| Valley | plan * valley_factor | Same as hip factor |
-| Eave | Horizontal (plan = true) | Bottom perimeter |
-| Rake | plan * rake_factor | `1 / cos(pitch)` |
+**2. Vertex AI / Gemini Vision Engine (AI Measurement)**
+- Fetches satellite imagery from Google Static Maps
+- Sends to Gemini Vision (gemini-2.0-flash) for roof geometry extraction
+- Returns facets (polygons), structural lines, obstructions
+- Generates AI assessment report with material suggestions, difficulty score, cost range
+- SVG overlay visualization on satellite imagery
 
-### Material Estimation Engine (BOM)
-Automated Bill of Materials with 9 line items:
-1. **Shingles** (architectural/3-tab) - 3 bundles per square
-2. **Underlayment** (synthetic) - 1 roll per 1000 sqft
-3. **Ice & Water Shield** - eave + valley coverage, 3 ft wide
-4. **Starter Strip** - eave + rake linear footage
-5. **Ridge/Hip Cap** - ridge + hip linear footage
-6. **Drip Edge** (aluminum) - eave + rake, 10 ft sections
-7. **Valley Flashing** (W-valley) - valley linear footage
-8. **Roofing Nails** - 1.5 lbs per square, 30 lb boxes
-9. **Ridge Vent** - 4 ft sections along ridge
+### Authentication Modes
+```
+Mode 1: Gemini REST API (Development)
+  Key: GOOGLE_VERTEX_API_KEY (AIzaSy... format)
+  Endpoint: generativelanguage.googleapis.com/v1beta/models/...
+  Requires: Generative Language API enabled in GCP
 
-**Waste Calculation**: 10% (simple) to 15% (very complex), based on:
-- Segment count
-- Hip/valley count
-- Pitch variation across segments
+Mode 2: Vertex AI Platform (Production)
+  Key: GOOGLE_CLOUD_ACCESS_TOKEN (OAuth2 Bearer)
+  Config: GOOGLE_CLOUD_PROJECT + GOOGLE_CLOUD_LOCATION
+  Endpoint: {location}-aiplatform.googleapis.com/v1/publishers/google/models/...
+  Source: gcloud auth print-access-token
+```
 
-**Complexity Classification**: simple / moderate / complex / very_complex
+## Pages & Routes
 
-### Professional Report (6 Sections)
-Accessible at `/api/reports/:id/html` - branded, print-ready, PDF-convertible:
-1. **Property Context** - address, coordinates, homeowner/requester
-2. **Measurement Summary** - footprint vs true area, pitch multiplier
-3. **Edge Breakdown** - all edges with plan vs 3D lengths and factors
-4. **Facet Analysis** - per-segment footprint, true area, pitch, direction
-5. **Material Estimates** - full BOM with quantities, waste, pricing
-6. **Solar Potential** - panels, energy, sunshine hours
+| Route | Description |
+|-------|------------|
+| `/` | Main order form — 5-step flow (service tier, location, homeowner, requester, review) |
+| `/measure` | **NEW** Standalone Vertex AI Measure Tool — MapCanvas + Places Autocomplete + Gemini Vision |
+| `/order/:id` | Order confirmation with Solar report + AI Measurement Engine overlay |
+| `/admin` | Admin dashboard — orders, revenue, stats |
+| `/settings` | API key configuration |
 
-### Order & Payment Pipeline
-- 5-step order form: Service Tier > Property > Homeowner > Requester > Review
-- 3 service tiers: Immediate ($25, 5 min), Urgent ($15, 30 min), Regular ($10, 1.5 hr)
-- Simulated payment processing with audit trail
-- Auto-generate report on payment
+## API Endpoints
 
-### Admin Dashboard
-- Order statistics (total, pending, processing, completed)
-- Revenue breakdown by tier
-- Report & material statistics (avg squares, avg cost, complexity breakdown)
-- Company management (add/edit B2B customers)
-- Activity log
-
-### Settings
-- Company profile (Reuse Canada identity)
-- API key status display (env var based, never in DB)
-- Pricing configuration per tier
-
-## API Reference
-
-### Orders
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/orders` | Create order |
-| GET | `/api/orders` | List orders (filters: status, tier, limit, offset) |
-| GET | `/api/orders/:id` | Get order + report summary |
-| PATCH | `/api/orders/:id/status` | Update status |
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/health` | Health check with env status + Vertex AI mode |
+| GET | `/api/config/client` | Client-safe config (maps key, features) |
+| POST | `/api/orders` | Create new order |
 | POST | `/api/orders/:id/pay` | Process payment |
-
-### Reports
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/reports/:id` | Get full report data |
-| POST | `/api/reports/:id/generate` | Generate v2.0 report (with edges + materials) |
-| GET | `/api/reports/:id/html` | Professional HTML report (PDF-ready) |
-
-### Companies
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/companies/master` | Get master company (Reuse Canada) |
-| PUT | `/api/companies/master` | Update master company |
-| GET | `/api/companies/customers` | List B2B customers |
-| POST | `/api/companies/customers` | Add customer company |
-
-### System
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/health` | Health check + env var status |
-| GET | `/api/config/client` | Frontend-safe publishable keys |
-| GET | `/api/admin/dashboard` | Dashboard stats + report stats |
+| POST | `/api/reports/:id/generate` | Generate Solar API report (v2.0) |
+| GET | `/api/reports/:id` | Get report data |
+| GET | `/api/reports/:id/html` | Professional HTML report |
+| **POST** | **`/api/ai/measure`** | **Quick Measure — lat/lng → Gemini Vision geometry** |
+| POST | `/api/ai/:orderId/analyze` | Full AI analysis for an order |
+| GET | `/api/ai/:orderId` | Retrieve stored AI analysis |
+| **POST** | **`/api/ai/vertex-proxy`** | **Vertex AI Platform proxy (for frontend SDK calls)** |
+| POST | `/api/admin/init-db` | Initialize database |
+| GET | `/api/admin/dashboard` | Admin analytics |
 
 ## Data Architecture
 
-### Canonical Data Model (`src/types.ts`)
-```
-RoofReport {
-  property: { address, city, province, lat, lng, homeowner, requester }
-  total_footprint_sqft, total_true_area_sqft, area_multiplier
-  roof_pitch_degrees, roof_pitch_ratio, roof_azimuth_degrees
-  segments: RoofSegment[] { name, footprint, true_area, pitch, azimuth }
-  edges: EdgeMeasurement[] { type, label, plan_length, true_length, pitch_factor }
-  edge_summary: { ridge_ft, hip_ft, valley_ft, eave_ft, rake_ft, total_ft }
-  materials: MaterialEstimate {
-    net_area, waste_pct, gross_area, gross_squares, bundle_count
-    line_items: MaterialLineItem[] { category, description, net/gross/order qty, price }
-    total_material_cost_cad, complexity_class, complexity_factor
-  }
-  quality: { imagery_quality, confidence_score, field_verification_recommended, notes }
-  metadata: { provider, api_duration_ms, coordinates }
-}
-```
+### Storage
+- **Cloudflare D1** — SQLite database for orders, reports, payments, companies
+- Tables: `orders`, `reports`, `payments`, `customer_companies`, `master_companies`, `api_requests_log`, `user_activity_log`, `settings`
+- AI columns in reports: `ai_measurement_json`, `ai_report_json`, `ai_satellite_url`, `ai_analyzed_at`, `ai_status`, `ai_error`
 
-### Database (Cloudflare D1)
-- **8 tables**: master_companies, customer_companies, orders, reports, payments, api_requests_log, user_activity_log, settings
-- **3 migrations**: initial schema, 3D area fields, edges/materials/quality fields
-- Reports table stores: segments JSON, edges JSON, material estimate JSON, plus denormalized fields for fast queries
-
-### Security Architecture
-- API keys stored in environment variables only (`.dev.vars` local, `wrangler secret` prod)
-- Never in database, never in frontend JS
-- `GOOGLE_SOLAR_API_KEY` and `STRIPE_SECRET_KEY` = server-side only
-- `GOOGLE_MAPS_API_KEY` injected server-side into HTML script tag (referrer-restricted)
-- `STRIPE_PUBLISHABLE_KEY` exposed to frontend (by design)
-- `/api/health` reports configured status (true/false), never values
+### Key Data Types
+- **RoofReport** (v2.0): Segments, edges, materials, solar data, imagery, quality
+- **AIMeasurementAnalysis**: Facets (polygons 0-1000), lines (RIDGE/HIP/VALLEY/EAVE/RAKE), obstructions
+- **AIReportData**: Summary, material suggestion, difficulty score (1-10), estimated cost range (CAD)
 
 ## Tech Stack
-- **Backend**: Hono (TypeScript) on Cloudflare Workers
+- **Runtime**: Cloudflare Workers + Hono
+- **Frontend**: Vanilla JS + Tailwind CSS (CDN) + Chart.js
+- **Maps**: Google Maps JavaScript API + Google Static Maps
+- **AI**: Gemini 2.0 Flash (Vision + Text) via REST or Vertex AI Platform
 - **Database**: Cloudflare D1 (SQLite)
-- **Frontend**: Vanilla JS + Tailwind CSS (CDN)
-- **Build**: Vite + @hono/vite-build
-- **Dev**: wrangler pages dev --d1 --local
+- **Build**: Vite + TypeScript
 
-## API Keys Required for Production
-1. **Google Solar API** - https://console.cloud.google.com/apis/library/solar.googleapis.com
-2. **Google Maps API** - https://console.cloud.google.com/apis/library/maps-backend.googleapis.com
-3. **Stripe** - https://dashboard.stripe.com/apikeys
+## Files Added/Modified (Vertex AI Engine)
 
-## What's Next
-- [ ] Live Google Solar API data (add key to `.dev.vars`)
-- [ ] Stripe checkout integration (real payments)
-- [ ] Email notifications (report delivery)
-- [ ] Customer portal (self-service access)
-- [ ] Cloudflare Pages deployment
-- [ ] Terra Draw integration (replacing deprecated Google Drawing Library)
-- [ ] GeoTIFF processing (DSM/Mask layers)
-- [ ] SRS SIPS material ordering integration
+### New Files
+- `src/services/gemini.ts` — Dual-mode Gemini API client (REST + Vertex AI Platform)
+- `src/routes/ai-analysis.ts` — AI analysis routes + /api/measure + /api/vertex-proxy
+- `public/static/measure.js` — Standalone Measure page (MapCanvas + SVG overlay + MeasurementPanel)
+- `public/static/vertex-ai-proxy.js` — Frontend fetch interceptor for Vertex AI SDK calls
+- `migrations/0004_ai_measurement_engine.sql` — DB migration for AI columns
 
-## Last Updated
-2026-02-09 - v2.0 release
+### Modified Files
+- `src/types.ts` — Added GOOGLE_CLOUD_PROJECT, GOOGLE_CLOUD_LOCATION, GOOGLE_CLOUD_ACCESS_TOKEN bindings
+- `src/index.tsx` — Added /measure route, Vertex AI health info, AI Measure nav link
+- `.dev.vars` — Added GCP project config (helpful-passage-486204-h9)
+
+## Environment Variables
+
+| Variable | Purpose | Required |
+|----------|---------|----------|
+| `GOOGLE_SOLAR_API_KEY` | Solar API for building insights | Yes |
+| `GOOGLE_MAPS_API_KEY` | Maps JS API + Static Maps | Yes |
+| `GOOGLE_VERTEX_API_KEY` | Gemini REST API (AIzaSy... format) | For Mode 1 |
+| `GOOGLE_CLOUD_PROJECT` | GCP project ID | For Mode 2 |
+| `GOOGLE_CLOUD_LOCATION` | GCP region (e.g. global) | For Mode 2 |
+| `GOOGLE_CLOUD_ACCESS_TOKEN` | OAuth2 Bearer token | For Mode 2 |
+| `STRIPE_SECRET_KEY` | Stripe payments | Optional |
+| `STRIPE_PUBLISHABLE_KEY` | Stripe publishable key | Optional |
+
+## Action Required
+
+### Enable Generative Language API
+The Gemini Vision engine requires the Generative Language API to be enabled:
+
+**URL**: https://console.developers.google.com/apis/api/generativelanguage.googleapis.com/overview?project=191664638800
+
+After enabling, the AI engine will:
+- Extract roof facets, lines, and obstructions from satellite imagery
+- Generate professional AI assessment reports
+- Render SVG overlays with color-coded geometry
+- Calculate calibrated measurements using scale factors
+
+## Deployment
+
+### Platform: Cloudflare Pages
+- **Status**: Development (sandbox)
+- **Last Updated**: 2026-02-09
+- **Build**: `npm run build` (Vite → dist/_worker.js ~102 KB)

@@ -4,13 +4,28 @@
 // ============================================================
 // POST /api/ai/:orderId/analyze — Run full AI analysis
 // GET  /api/ai/:orderId         — Retrieve stored AI results
+// POST /api/ai/measure          — Quick measure by lat/lng (no order required)
+// POST /api/ai/vertex-proxy     — Vertex AI proxy for frontend SDK calls
 // ============================================================
 
 import { Hono } from 'hono'
 import type { Bindings } from '../types'
-import { analyzeRoofGeometry, generateAIRoofingReport } from '../services/gemini'
+import { analyzeRoofGeometry, generateAIRoofingReport, quickMeasure } from '../services/gemini'
 
 export const aiAnalysisRoutes = new Hono<{ Bindings: Bindings }>()
+
+// ============================================================
+// Helper: Build environment credentials from Hono context
+// ============================================================
+function getGeminiEnv(c: any) {
+  return {
+    apiKey: c.env.GOOGLE_VERTEX_API_KEY || c.env.GOOGLE_MAPS_API_KEY || c.env.GOOGLE_SOLAR_API_KEY,
+    accessToken: c.env.GOOGLE_CLOUD_ACCESS_TOKEN || undefined,
+    project: c.env.GOOGLE_CLOUD_PROJECT || undefined,
+    location: c.env.GOOGLE_CLOUD_LOCATION || undefined,
+    mapsKey: c.env.GOOGLE_MAPS_API_KEY || c.env.GOOGLE_SOLAR_API_KEY
+  }
+}
 
 // ============================================================
 // GET — Retrieve stored AI analysis for an order
@@ -44,7 +59,114 @@ aiAnalysisRoutes.get('/:orderId', async (c) => {
 })
 
 // ============================================================
-// POST — Run AI analysis (Gemini Vision + Report)
+// POST — Quick Measure by lat/lng (no order required)
+// Port of Vertex Engine's /api/measure endpoint
+// ============================================================
+aiAnalysisRoutes.post('/measure', async (c) => {
+  try {
+    const { lat, lng } = await c.req.json()
+    if (!lat || !lng) {
+      return c.json({ error: 'lat and lng are required' }, 400)
+    }
+
+    const env = getGeminiEnv(c)
+    if (!env.apiKey && !env.accessToken) {
+      return c.json({ error: 'No AI API key configured' }, 400)
+    }
+
+    const startTime = Date.now()
+    const { analysis, satelliteUrl } = await quickMeasure(lat, lng, env)
+    const duration = Date.now() - startTime
+
+    return c.json({
+      status: 'success',
+      analysis,
+      meta: {
+        lat,
+        lng,
+        image_source: 'Google Static Maps',
+        duration_ms: duration,
+        satellite_url: satelliteUrl
+      }
+    })
+  } catch (e: any) {
+    console.error('[/api/ai/measure]', e)
+    return c.json({ error: e.message || 'Measurement failed' }, 500)
+  }
+})
+
+// ============================================================
+// POST — Vertex AI Proxy (for frontend SDK calls)
+// Mirrors the Node.js proxy from roofstack-ai-2/backend/server.js
+// but adapted for Cloudflare Workers (no google-auth-library)
+// ============================================================
+aiAnalysisRoutes.post('/vertex-proxy', async (c) => {
+  // Validate proxy header (same as original server.js)
+  const proxyHeader = c.req.header('x-app-proxy')
+  if (proxyHeader !== 'local-vertex-ai-app') {
+    return c.json({ error: 'Forbidden: Request must include X-App-Proxy header' }, 403)
+  }
+
+  const accessToken = c.env.GOOGLE_CLOUD_ACCESS_TOKEN
+  const project = c.env.GOOGLE_CLOUD_PROJECT
+  const location = c.env.GOOGLE_CLOUD_LOCATION
+
+  if (!accessToken || !project) {
+    return c.json({
+      error: 'Vertex AI proxy not configured',
+      hint: 'Set GOOGLE_CLOUD_ACCESS_TOKEN, GOOGLE_CLOUD_PROJECT, GOOGLE_CLOUD_LOCATION in .dev.vars'
+    }, 400)
+  }
+
+  try {
+    const body = await c.req.json()
+    const { originalUrl, method, headers: reqHeaders, body: reqBody } = body
+
+    if (!originalUrl) {
+      return c.json({ error: 'originalUrl is required' }, 400)
+    }
+
+    // Map the aiplatform.googleapis.com URL to the clients6 version with project/location
+    const loc = location === 'global' ? 'us-central1' : location
+    let apiUrl = originalUrl
+      .replace(
+        /https:\/\/aiplatform\.googleapis\.com\/(v\w+)\/publishers\/google\/models\/([^:]+):(\w+)/,
+        `https://${loc}-aiplatform.clients6.google.com/$1/projects/${project}/locations/${loc}/publishers/google/models/$2:$3`
+      )
+
+    // Handle ReasoningEngine URLs
+    if (originalUrl.includes('reasoningEngines')) {
+      apiUrl = originalUrl.replace(
+        /https:\/\/([^-]+)-aiplatform\.googleapis\.com/,
+        'https://$1-aiplatform.clients6.google.com'
+      )
+    }
+
+    console.log(`[Vertex Proxy] ${originalUrl} → ${apiUrl}`)
+
+    const apiHeaders: Record<string, string> = {
+      'Authorization': `Bearer ${accessToken}`,
+      'X-Goog-User-Project': project,
+      'Content-Type': 'application/json'
+    }
+
+    const response = await fetch(apiUrl, {
+      method: method || 'POST',
+      headers: { ...apiHeaders, ...(reqHeaders || {}) },
+      body: reqBody ? (typeof reqBody === 'string' ? reqBody : JSON.stringify(reqBody)) : undefined
+    })
+
+    const data = await response.json()
+    return c.json(data, response.status as any)
+
+  } catch (e: any) {
+    console.error('[Vertex Proxy]', e)
+    return c.json({ error: e.message }, 500)
+  }
+})
+
+// ============================================================
+// POST — Run AI analysis for an order (full pipeline)
 // Pipeline:
 // 1. Fetch order + report data
 // 2. Build satellite image URL from coordinates
@@ -55,13 +177,12 @@ aiAnalysisRoutes.get('/:orderId', async (c) => {
 aiAnalysisRoutes.post('/:orderId/analyze', async (c) => {
   try {
     const orderId = c.req.param('orderId')
-    const geminiKey = c.env.GOOGLE_VERTEX_API_KEY
-    const mapsKey = c.env.GOOGLE_MAPS_API_KEY || c.env.GOOGLE_SOLAR_API_KEY
+    const env = getGeminiEnv(c)
 
-    if (!geminiKey) {
+    if (!env.apiKey && !env.accessToken) {
       return c.json({
-        error: 'Gemini API key not configured',
-        hint: 'Set GOOGLE_VERTEX_API_KEY in .dev.vars or wrangler secrets'
+        error: 'No AI API key configured',
+        hint: 'Set GOOGLE_VERTEX_API_KEY in .dev.vars or wrangler secrets. Or set GOOGLE_CLOUD_ACCESS_TOKEN + GOOGLE_CLOUD_PROJECT for Vertex AI.'
       }, 400)
     }
 
@@ -90,55 +211,43 @@ aiAnalysisRoutes.post('/:orderId/analyze', async (c) => {
 
     const startTime = Date.now()
 
-    // Build satellite image URL (zoom 20 = ~0.15m/px, ideal for roof analysis)
-    const satelliteUrl = mapsKey
-      ? `https://maps.googleapis.com/maps/api/staticmap?center=${order.latitude},${order.longitude}&zoom=20&size=640x640&maptype=satellite&key=${mapsKey}`
+    // Build satellite image URL
+    const satelliteUrl = env.mapsKey
+      ? `https://maps.googleapis.com/maps/api/staticmap?center=${order.latitude},${order.longitude}&zoom=20&size=640x640&maptype=satellite&key=${env.mapsKey}`
       : null
-
-    // Try Gemini API with available keys
-    // Priority: GOOGLE_VERTEX_API_KEY (dedicated), then GOOGLE_MAPS_API_KEY as fallback
-    const keysToTry = [geminiKey, c.env.GOOGLE_MAPS_API_KEY].filter(Boolean)
 
     let geometryResult = null
     let aiReportResult = null
     let lastError = ''
 
-    for (const key of keysToTry) {
-      try {
-        // Run both analyses in parallel
-        const [geoRes, reportRes] = await Promise.allSettled([
-          // 1. Vision analysis — extract roof geometry from satellite image
-          satelliteUrl
-            ? analyzeRoofGeometry(satelliteUrl, key)
-            : Promise.resolve(null),
+    try {
+      // Run both analyses in parallel
+      const [geoRes, reportRes] = await Promise.allSettled([
+        // 1. Vision analysis — extract roof geometry from satellite image
+        satelliteUrl
+          ? analyzeRoofGeometry(satelliteUrl, env)
+          : Promise.resolve(null),
 
-          // 2. AI report — generate assessment from Solar API data
-          report?.api_response_raw
-            ? generateAIRoofingReport(
-                buildSolarSummary(report.api_response_raw),
-                key
-              )
-            : generateAIRoofingReport(
-                buildFallbackSummary(order, report),
-                key
-              )
-        ])
+        // 2. AI report — generate assessment from Solar API data
+        report?.api_response_raw
+          ? generateAIRoofingReport(buildSolarSummary(report.api_response_raw), env)
+          : generateAIRoofingReport(buildFallbackSummary(order, report), env)
+      ])
 
-        geometryResult = geoRes.status === 'fulfilled' ? geoRes.value : null
-        aiReportResult = reportRes.status === 'fulfilled' ? reportRes.value : null
+      geometryResult = geoRes.status === 'fulfilled' ? geoRes.value : null
+      aiReportResult = reportRes.status === 'fulfilled' ? reportRes.value : null
 
-        if (geometryResult || aiReportResult) break // Success with this key
-        lastError = (geoRes.status === 'rejected' ? geoRes.reason?.message : '') +
-                    (reportRes.status === 'rejected' ? ' | ' + reportRes.reason?.message : '')
-
-      } catch (e: any) {
-        lastError = e.message
-        continue // Try next key
+      if (!geometryResult && geoRes.status === 'rejected') {
+        lastError = geoRes.reason?.message || 'Vision analysis failed'
       }
+      if (!aiReportResult && reportRes.status === 'rejected') {
+        lastError += (lastError ? ' | ' : '') + (reportRes.reason?.message || 'Report generation failed')
+      }
+    } catch (e: any) {
+      lastError = e.message
     }
 
     if (!geometryResult && !aiReportResult && lastError) {
-      // Store error but still return partial success
       await c.env.DB.prepare(`
         UPDATE reports SET ai_status = 'failed', ai_error = ? WHERE order_id = ?
       `).bind(lastError, orderId).run()
@@ -150,7 +259,7 @@ aiAnalysisRoutes.post('/:orderId/analyze', async (c) => {
         hint: lastError.includes('SERVICE_DISABLED')
           ? 'Enable the Generative Language API at: https://console.developers.google.com/apis/api/generativelanguage.googleapis.com/overview'
           : lastError.includes('UNAUTHENTICATED')
-            ? 'The API key format is not compatible with Gemini API. Use an AIzaSy... format key and enable the Generative Language API.'
+            ? 'Use an AIzaSy... format key and enable the Generative Language API. Or configure GOOGLE_CLOUD_ACCESS_TOKEN for Vertex AI.'
             : 'Check API key configuration and Gemini API access.'
       }, 400)
     }
@@ -177,7 +286,7 @@ aiAnalysisRoutes.post('/:orderId/analyze', async (c) => {
     // Log the API call
     await c.env.DB.prepare(`
       INSERT INTO api_requests_log (order_id, request_type, endpoint, response_status, duration_ms)
-      VALUES (?, 'gemini_vision_analysis', 'generativelanguage.googleapis.com', 200, ?)
+      VALUES (?, 'gemini_vertex_analysis', 'vertex-ai-engine', 200, ?)
     `).bind(orderId, duration).run()
 
     return c.json({
@@ -196,7 +305,6 @@ aiAnalysisRoutes.post('/:orderId/analyze', async (c) => {
     })
 
   } catch (err: any) {
-    // Store error in DB
     const orderId = c.req.param('orderId')
     try {
       await c.env.DB.prepare(`

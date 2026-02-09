@@ -32,9 +32,17 @@ app.get('/api/health', (c) => {
       GOOGLE_SOLAR_API_KEY: !!c.env.GOOGLE_SOLAR_API_KEY,
       GOOGLE_MAPS_API_KEY: !!c.env.GOOGLE_MAPS_API_KEY,
       GOOGLE_VERTEX_API_KEY: !!c.env.GOOGLE_VERTEX_API_KEY,
+      GOOGLE_CLOUD_PROJECT: !!c.env.GOOGLE_CLOUD_PROJECT,
+      GOOGLE_CLOUD_LOCATION: !!c.env.GOOGLE_CLOUD_LOCATION,
+      GOOGLE_CLOUD_ACCESS_TOKEN: !!c.env.GOOGLE_CLOUD_ACCESS_TOKEN,
       STRIPE_SECRET_KEY: !!c.env.STRIPE_SECRET_KEY,
       STRIPE_PUBLISHABLE_KEY: !!c.env.STRIPE_PUBLISHABLE_KEY,
       DB: !!c.env.DB
+    },
+    vertex_ai: {
+      mode: c.env.GOOGLE_CLOUD_ACCESS_TOKEN ? 'vertex_ai_platform' : (c.env.GOOGLE_VERTEX_API_KEY ? 'gemini_rest_api' : 'not_configured'),
+      project: c.env.GOOGLE_CLOUD_PROJECT || null,
+      location: c.env.GOOGLE_CLOUD_LOCATION || null
     }
   })
 })
@@ -85,6 +93,12 @@ app.get('/order/:id', (c) => {
 // Settings Page (API Keys)
 app.get('/settings', (c) => {
   return c.html(getSettingsPageHTML())
+})
+
+// Measure Page — Standalone Vertex AI Measurement Tool
+app.get('/measure', (c) => {
+  const mapsKey = c.env.GOOGLE_MAPS_API_KEY || ''
+  return c.html(getMeasurePageHTML(mapsKey))
 })
 
 export default app
@@ -159,6 +173,7 @@ function getMainPageHTML(mapsApiKey: string) {
         </div>
       </div>
       <nav class="flex items-center space-x-4">
+        <a href="/measure" class="text-brand-200 hover:text-white text-sm"><i class="fas fa-ruler-combined mr-1"></i>AI Measure</a>
         <a href="/admin" class="text-brand-200 hover:text-white text-sm"><i class="fas fa-tachometer-alt mr-1"></i>Admin</a>
         <a href="/settings" class="text-brand-200 hover:text-white text-sm"><i class="fas fa-cog mr-1"></i>Settings</a>
       </nav>
@@ -236,6 +251,58 @@ function getOrderConfirmationHTML() {
   </main>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
   <script src="/static/confirmation.js"></script>
+</body>
+</html>`
+}
+
+function getMeasurePageHTML(mapsApiKey: string) {
+  const mapsScript = mapsApiKey
+    ? `<script>
+      var googleMapsReady = false;
+      function onGoogleMapsReady() {
+        googleMapsReady = true;
+        console.log('[Maps] Google Maps API loaded');
+        if (typeof initMeasureMap === 'function') initMeasureMap();
+      }
+    </script>
+    <script src="https://maps.googleapis.com/maps/api/js?key=${mapsApiKey}&libraries=places&callback=onGoogleMapsReady" async defer></script>`
+    : '<!-- No Maps key -->'
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  ${getHeadTags()}
+  <title>Quick Measure - Vertex AI Engine</title>
+  ${mapsScript}
+</head>
+<body class="bg-gray-900 min-h-screen text-gray-100">
+  <!-- Header -->
+  <header class="border-b border-gray-800 bg-gray-900/50 backdrop-blur-md sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="bg-blue-600 p-2 rounded-lg">
+          <i class="fas fa-layer-group text-white"></i>
+        </div>
+        <span class="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400">
+          RoofStack AI
+        </span>
+      </div>
+      <div class="flex items-center gap-4">
+        <div class="hidden md:flex items-center gap-2 text-sm text-gray-400 bg-gray-800 px-3 py-1 rounded-full border border-gray-700">
+          <i class="fas fa-circle text-green-500 text-xs"></i>
+          <span>Vertex AI Engine Active</span>
+        </div>
+        <a href="/" class="text-gray-400 hover:text-white text-sm"><i class="fas fa-arrow-left mr-1"></i>Back</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 py-8">
+    <div id="measure-root"></div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+  <script src="/static/measure.js"></script>
 </body>
 </html>`
 }

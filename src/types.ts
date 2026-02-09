@@ -21,7 +21,16 @@ export type Bindings = {
   GOOGLE_MAPS_API_KEY: string
 
   // Google Vertex AI / Gemini API - for AI roof geometry analysis
+  // GOOGLE_VERTEX_API_KEY: Standard Gemini REST API key (AIzaSy... format)
+  //   Used with: https://generativelanguage.googleapis.com/v1beta/models/...
+  // GOOGLE_CLOUD_PROJECT + GOOGLE_CLOUD_LOCATION: For Vertex AI platform calls
+  //   Used with: https://aiplatform.googleapis.com/v1/publishers/google/models/...
+  // GOOGLE_CLOUD_ACCESS_TOKEN: OAuth2 Bearer token for Vertex AI (from gcloud auth)
+  //   Required when using the Vertex AI proxy endpoint
   GOOGLE_VERTEX_API_KEY: string
+  GOOGLE_CLOUD_PROJECT: string   // e.g. "helpful-passage-486204-h9"
+  GOOGLE_CLOUD_LOCATION: string  // e.g. "global" or "us-central1"
+  GOOGLE_CLOUD_ACCESS_TOKEN: string // OAuth2 token from 'gcloud auth print-access-token'
 
   // Stripe - stored as Cloudflare secrets, accessed server-side only
   STRIPE_SECRET_KEY: string
