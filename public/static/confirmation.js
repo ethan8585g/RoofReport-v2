@@ -552,7 +552,11 @@ async function loadAIAnalysis(orderId, reportData) {
     if (result.success || result.status === 'completed') {
       renderAIEngine(root, result, reportData);
     } else {
-      root.innerHTML = renderAIError(result.error || result.details || 'Analysis failed');
+      root.innerHTML = renderAIError(
+        result.error || result.details || 'Analysis failed',
+        result.hint || null,
+        result.activation_url || null
+      );
     }
   } catch (err) {
     root.innerHTML = renderAIError(err.message);
@@ -589,7 +593,10 @@ function renderAILoadingState() {
   `;
 }
 
-function renderAIError(message) {
+function renderAIError(message, hint, activationUrl) {
+  const isApiDisabled = message && (message.includes('403') || message.includes('SERVICE_DISABLED') || message.includes('not been used'));
+  const actionUrl = activationUrl || (isApiDisabled ? 'https://console.developers.google.com/apis/api/generativelanguage.googleapis.com/overview' : null);
+
   return `
     <div class="bg-gray-900 rounded-2xl border border-gray-700 overflow-hidden">
       <div class="p-4 border-b border-gray-700 bg-gray-800/50 flex items-center gap-2">
@@ -598,14 +605,35 @@ function renderAIError(message) {
         </div>
         <div>
           <h3 class="font-bold text-white text-sm">AI Measurement Engine</h3>
-          <p class="text-xs text-red-400">${message}</p>
+          <p class="text-xs text-red-400">Action Required</p>
         </div>
       </div>
       <div class="p-8 text-center">
-        <i class="fas fa-exclamation-triangle text-3xl text-red-400 mb-3"></i>
-        <p class="text-gray-400 text-sm">AI analysis could not be completed.</p>
-        <p class="text-gray-500 text-xs mt-1">The standard Solar API report above is still valid.</p>
-        <p class="text-gray-600 text-xs mt-3">Check that GOOGLE_VERTEX_API_KEY is configured.</p>
+        ${isApiDisabled ? `
+          <div class="w-16 h-16 mx-auto mb-4 bg-amber-500/20 rounded-full flex items-center justify-center">
+            <i class="fas fa-key text-3xl text-amber-400"></i>
+          </div>
+          <h4 class="text-lg font-bold text-white mb-2">Enable Generative Language API</h4>
+          <p class="text-gray-400 text-sm max-w-md mx-auto mb-4">
+            The Gemini AI API is not yet enabled in your Google Cloud project.
+            Click the button below to enable it — the AI engine will activate immediately.
+          </p>
+          <a href="${actionUrl}" target="_blank" rel="noopener noreferrer"
+             class="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors shadow-lg shadow-blue-600/20">
+            <i class="fas fa-external-link-alt"></i>
+            Enable API in Google Cloud Console
+          </a>
+          <p class="text-gray-500 text-xs mt-4">
+            After enabling, wait 1-2 minutes then <button onclick="location.reload()" class="text-blue-400 underline cursor-pointer">reload this page</button>.
+          </p>
+        ` : `
+          <i class="fas fa-exclamation-triangle text-3xl text-red-400 mb-3"></i>
+          <p class="text-gray-400 text-sm">${message || 'AI analysis could not be completed.'}</p>
+          ${hint ? `<p class="text-gray-500 text-xs mt-2">${hint}</p>` : ''}
+        `}
+        <p class="text-gray-600 text-xs mt-4 border-t border-gray-700 pt-4">
+          <i class="fas fa-info-circle mr-1"></i>The standard Solar API report above is still fully valid and accurate.
+        </p>
       </div>
     </div>
   `;

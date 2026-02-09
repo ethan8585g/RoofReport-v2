@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name**: Reuse Canada Roofing Measurement Tool
-- **Version**: 2.1 (Vertex AI Engine Integration)
+- **Version**: 2.2 (Vertex AI Engine + Enhanced Error Handling)
 - **Goal**: Professional roof measurement reports with AI-powered geometry extraction
 - **Features**: Google Solar API, Gemini Vision AI, Vertex AI Engine, Material BOM, Edge Analysis
 
@@ -59,6 +59,7 @@ Mode 2: Vertex AI Platform (Production)
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/health` | Health check with env status + Vertex AI mode |
+| **GET** | **`/api/health/gemini`** | **Gemini API connectivity test — diagnoses 403/API disabled** |
 | GET | `/api/config/client` | Client-safe config (maps key, features) |
 | POST | `/api/orders` | Create new order |
 | POST | `/api/orders/:id/pay` | Process payment |
@@ -126,11 +127,23 @@ The Gemini Vision engine requires the Generative Language API to be enabled:
 
 **URL**: https://console.developers.google.com/apis/api/generativelanguage.googleapis.com/overview?project=191664638800
 
-After enabling, the AI engine will:
+After enabling, wait 1-2 minutes, then test:
+```bash
+curl https://YOUR_URL/api/health/gemini
+```
+
+Once active, the AI engine will:
 - Extract roof facets, lines, and obstructions from satellite imagery
 - Generate professional AI assessment reports
 - Render SVG overlays with color-coded geometry
 - Calculate calibrated measurements using scale factors
+
+### Enhanced Error UX (v2.2)
+When the API is not yet enabled:
+- **Order Confirmation page**: Shows a prominent "Enable API" button with direct link
+- **Measure page**: Shows actionable error with link to GCP console
+- **API responses**: Include `hint` and `activation_url` fields for programmatic handling
+- **Diagnostic endpoint**: `/api/health/gemini` tests API connectivity with clear fix instructions
 
 ## Deployment
 

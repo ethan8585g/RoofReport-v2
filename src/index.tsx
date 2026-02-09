@@ -47,6 +47,48 @@ app.get('/api/health', (c) => {
   })
 })
 
+// Diagnostic: Test Gemini API connectivity
+app.get('/api/health/gemini', async (c) => {
+  const apiKey = c.env.GOOGLE_VERTEX_API_KEY || c.env.GOOGLE_MAPS_API_KEY
+  if (!apiKey) {
+    return c.json({ status: 'error', message: 'No Gemini API key configured', fix: 'Set GOOGLE_VERTEX_API_KEY in .dev.vars or wrangler secrets' }, 400)
+  }
+
+  try {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: [{ parts: [{ text: 'Respond with exactly: OK' }] }] })
+    })
+
+    if (response.ok) {
+      const data: any = await response.json()
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || ''
+      return c.json({ status: 'ok', model: 'gemini-2.0-flash', response: text.trim(), latency_note: 'API is active and responding' })
+    }
+
+    const errData: any = await response.json().catch(() => ({}))
+    const errMsg = errData?.error?.message || `HTTP ${response.status}`
+    const isDisabled = errMsg.includes('SERVICE_DISABLED') || errMsg.includes('not been used')
+
+    return c.json({
+      status: 'error',
+      http_status: response.status,
+      message: errMsg,
+      fix: isDisabled
+        ? 'Enable the Generative Language API in your GCP project'
+        : 'Check API key permissions',
+      activation_url: isDisabled
+        ? 'https://console.developers.google.com/apis/api/generativelanguage.googleapis.com/overview'
+        : null
+    }, response.status as any)
+
+  } catch (err: any) {
+    return c.json({ status: 'error', message: err.message, fix: 'Network error — check internet connectivity' }, 500)
+  }
+})
+
 // ============================================================
 // SERVER-SIDE CONFIG ENDPOINT
 // Returns ONLY publishable/safe values to the frontend.

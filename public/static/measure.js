@@ -99,9 +99,11 @@ document.addEventListener('DOMContentLoaded', () => {
               </div>
 
               ${state.error ? `
-                <div class="bg-red-900/20 p-4 rounded-lg border border-red-700/50 flex items-start gap-2">
-                  <i class="fas fa-exclamation-circle text-red-400 mt-0.5"></i>
-                  <p class="text-sm text-red-200">${state.error}</p>
+                <div class="bg-red-900/20 p-4 rounded-lg border border-red-700/50">
+                  <div class="flex items-start gap-2">
+                    <i class="fas fa-exclamation-circle text-red-400 mt-0.5 flex-shrink-0"></i>
+                    <div class="text-sm text-red-200">${state.error}</div>
+                  </div>
                 </div>
               ` : ''}
 
@@ -258,11 +260,20 @@ document.addEventListener('DOMContentLoaded', () => {
         state.isAnalyzing = false;
         render();
       } else {
-        throw new Error(data.error || 'Analysis failed');
+        // Enhanced error with activation link
+        const err = new Error(data.error || 'Analysis failed');
+        err.hint = data.hint || null;
+        err.activation_url = data.activation_url || null;
+        throw err;
       }
     } catch (err) {
       state.isAnalyzing = false;
-      state.error = err.message || 'Backend connection failed';
+      const isApiDisabled = err.message && (err.message.includes('403') || err.message.includes('SERVICE_DISABLED') || err.message.includes('not been used'));
+      if (isApiDisabled || err.activation_url) {
+        state.error = 'Generative Language API not enabled. <a href="' + (err.activation_url || 'https://console.developers.google.com/apis/api/generativelanguage.googleapis.com/overview') + '" target="_blank" class="text-blue-400 underline font-bold">Click here to enable it</a>, wait 1-2 minutes, then try again.';
+      } else {
+        state.error = err.message || 'Backend connection failed';
+      }
       render();
     }
   };

@@ -91,7 +91,17 @@ aiAnalysisRoutes.post('/measure', async (c) => {
     })
   } catch (e: any) {
     console.error('[/api/ai/measure]', e)
-    return c.json({ error: e.message || 'Measurement failed' }, 500)
+    const msg = e.message || 'Measurement failed'
+    const isApiDisabled = msg.includes('SERVICE_DISABLED') || msg.includes('403')
+    return c.json({
+      error: msg,
+      hint: isApiDisabled
+        ? 'The Generative Language API is not enabled in your GCP project. Enable it here: https://console.developers.google.com/apis/api/generativelanguage.googleapis.com/overview'
+        : 'Check that GOOGLE_VERTEX_API_KEY is set and the Generative Language API is enabled.',
+      activation_url: isApiDisabled
+        ? 'https://console.developers.google.com/apis/api/generativelanguage.googleapis.com/overview'
+        : null
+    }, isApiDisabled ? 403 : 500)
   }
 })
 
