@@ -72,6 +72,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     console.warn('Could not load companies:', e);
   }
 
+  // Check for ?tier= query parameter (from landing page pricing CTA)
+  const urlParams = new URLSearchParams(window.location.search);
+  const preselectedTier = urlParams.get('tier');
+  if (preselectedTier) {
+    const tierPrices = { immediate: 25, urgent: 15, regular: 10 };
+    if (tierPrices[preselectedTier]) {
+      state.formData.service_tier = preselectedTier;
+      state.formData.price = tierPrices[preselectedTier];
+      // Auto-advance to step 2 since tier is already selected
+      state.currentStep = 2;
+    }
+  }
+
   render();
 });
 

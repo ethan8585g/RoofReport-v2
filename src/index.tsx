@@ -116,8 +116,13 @@ app.get('/api/config/client', (c) => {
 // Secret keys (Solar API, Stripe Secret) are NEVER in HTML.
 // ============================================================
 
-// Landing / Order Form page
+// Landing / Marketing page
 app.get('/', (c) => {
+  return c.html(getLandingPageHTML())
+})
+
+// Order Form page (new route)
+app.get('/order/new', (c) => {
   const mapsKey = c.env.GOOGLE_MAPS_API_KEY || ''
   return c.html(getMainPageHTML(mapsKey))
 })
@@ -157,6 +162,20 @@ function getTailwindConfig() {
           colors: {
             brand: { 50:'#ecfdf5',100:'#d1fae5',200:'#a7f3d0',300:'#6ee7b7',400:'#34d399',500:'#10b981',600:'#059669',700:'#047857',800:'#065f46',900:'#064e3b' },
             accent: { 50:'#fffbeb',100:'#fef3c7',200:'#fde68a',300:'#fcd34d',400:'#fbbf24',500:'#f59e0b',600:'#d97706',700:'#b45309',800:'#92400e',900:'#78350f' }
+          },
+          animation: {
+            'fade-in-up': 'fadeInUp 0.6s ease-out forwards',
+            'fade-in': 'fadeIn 0.5s ease-out forwards',
+          },
+          keyframes: {
+            fadeInUp: {
+              '0%': { opacity: 0, transform: 'translateY(20px)' },
+              '100%': { opacity: 1, transform: 'translateY(0)' }
+            },
+            fadeIn: {
+              '0%': { opacity: 0 },
+              '100%': { opacity: 1 }
+            }
           }
         }
       }
@@ -175,49 +194,45 @@ function getHeadTags() {
 }
 
 function getMainPageHTML(mapsApiKey: string) {
-  // Google Maps script tag — only included if key is configured server-side.
-  // The key appears in the HTML <script src> which is how Google designed Maps JS API.
-  // This is NOT a secret key. Google Maps JS API keys are restricted by HTTP referrer.
   const mapsScript = mapsApiKey
     ? `<script>
-      // Global flag set when Google Maps JS API finishes loading.
-      // Defined here (before the Maps <script>) so the callback exists when it fires.
       var googleMapsReady = false;
       function onGoogleMapsReady() {
         googleMapsReady = true;
         console.log('[Maps] Google Maps API loaded successfully');
-        // If app.js already rendered step 2, initialize the map now
         if (typeof initMap === 'function' && document.getElementById('map')) {
           initMap();
         }
       }
     </script>
     <script src="https://maps.googleapis.com/maps/api/js?key=${mapsApiKey}&libraries=places&callback=onGoogleMapsReady" async defer></script>`
-    : '<!-- Google Maps: No API key configured. Using fallback map. Configure in .dev.vars or wrangler secrets. -->'
+    : '<!-- Google Maps: No API key configured. -->'
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   ${getHeadTags()}
-  <title>Roof Measurement Tool - Reuse Canada</title>
+  <title>Order a Roof Report - Reuse Canada</title>
   ${mapsScript}
 </head>
 <body class="bg-gray-50 min-h-screen">
   <header class="bg-brand-800 text-white shadow-lg">
     <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
       <div class="flex items-center space-x-3">
-        <div class="w-10 h-10 bg-accent-500 rounded-lg flex items-center justify-center">
-          <i class="fas fa-home text-white text-lg"></i>
-        </div>
-        <div>
-          <h1 class="text-xl font-bold">Roof Measurement Tool</h1>
-          <p class="text-brand-200 text-xs">Powered by Reuse Canada</p>
-        </div>
+        <a href="/" class="flex items-center space-x-3 hover:opacity-90 transition-opacity">
+          <div class="w-10 h-10 bg-accent-500 rounded-lg flex items-center justify-center">
+            <i class="fas fa-home text-white text-lg"></i>
+          </div>
+          <div>
+            <h1 class="text-xl font-bold">Roof Measurement Tool</h1>
+            <p class="text-brand-200 text-xs">Powered by Reuse Canada</p>
+          </div>
+        </a>
       </div>
       <nav class="flex items-center space-x-4">
+        <a href="/" class="text-brand-200 hover:text-white text-sm"><i class="fas fa-arrow-left mr-1"></i>Home</a>
         <a href="/measure" class="text-brand-200 hover:text-white text-sm"><i class="fas fa-ruler-combined mr-1"></i>AI Measure</a>
         <a href="/admin" class="text-brand-200 hover:text-white text-sm"><i class="fas fa-tachometer-alt mr-1"></i>Admin</a>
-        <a href="/settings" class="text-brand-200 hover:text-white text-sm"><i class="fas fa-cog mr-1"></i>Settings</a>
       </nav>
     </div>
   </header>
@@ -253,7 +268,8 @@ function getAdminPageHTML() {
         </div>
       </div>
       <nav class="flex items-center space-x-4">
-        <a href="/" class="text-brand-200 hover:text-white text-sm"><i class="fas fa-plus mr-1"></i>New Order</a>
+        <a href="/" class="text-brand-200 hover:text-white text-sm"><i class="fas fa-home mr-1"></i>Home</a>
+        <a href="/order/new" class="text-brand-200 hover:text-white text-sm"><i class="fas fa-plus mr-1"></i>New Order</a>
         <a href="/settings" class="text-brand-200 hover:text-white text-sm"><i class="fas fa-cog mr-1"></i>Settings</a>
       </nav>
     </div>
@@ -285,7 +301,8 @@ function getOrderConfirmationHTML() {
           <p class="text-brand-200 text-xs">Powered by Reuse Canada</p>
         </div>
       </div>
-      <a href="/" class="text-brand-200 hover:text-white text-sm"><i class="fas fa-arrow-left mr-1"></i>New Order</a>
+      <a href="/" class="text-brand-200 hover:text-white text-sm"><i class="fas fa-arrow-left mr-1"></i>Home</a>
+      <a href="/order/new" class="text-brand-200 hover:text-white text-sm"><i class="fas fa-plus mr-1"></i>New Order</a>
     </div>
   </header>
   <main class="max-w-5xl mx-auto px-4 py-8">
@@ -334,7 +351,8 @@ function getMeasurePageHTML(mapsApiKey: string) {
           <i class="fas fa-circle text-green-500 text-xs"></i>
           <span>Vertex AI Engine Active</span>
         </div>
-        <a href="/" class="text-gray-400 hover:text-white text-sm"><i class="fas fa-arrow-left mr-1"></i>Back</a>
+        <a href="/" class="text-gray-400 hover:text-white text-sm"><i class="fas fa-arrow-left mr-1"></i>Home</a>
+        <a href="/order/new" class="text-gray-400 hover:text-white text-sm"><i class="fas fa-plus mr-1"></i>Order</a>
       </div>
     </div>
   </header>
@@ -345,6 +363,147 @@ function getMeasurePageHTML(mapsApiKey: string) {
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
   <script src="/static/measure.js"></script>
+</body>
+</html>`
+}
+
+function getLandingPageHTML() {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  ${getHeadTags()}
+  <title>Professional Roof Measurement Reports - Reuse Canada</title>
+  <meta name="description" content="Get accurate roof area, pitch analysis, edge breakdowns, material estimates, and solar potential from satellite imagery. Professional reports starting at $10 CAD.">
+  <style>
+    /* Landing page scroll animations */
+    .scroll-animate {
+      opacity: 0;
+      transform: translateY(20px);
+      transition: all 0.7s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .scroll-animate.animate-in {
+      opacity: 1 !important;
+      transform: translateY(0) !important;
+    }
+    /* Smooth scrolling */
+    html { scroll-behavior: smooth; }
+    /* Navbar transparency transition */
+    .landing-nav { transition: all 0.3s ease; }
+    .landing-nav.scrolled {
+      background: rgba(6, 78, 59, 0.97);
+      backdrop-filter: blur(12px);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+    }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <!-- Sticky Navigation -->
+  <nav id="landing-nav" class="landing-nav fixed top-0 left-0 right-0 z-50 bg-transparent">
+    <div class="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+      <a href="/" class="flex items-center gap-3">
+        <div class="w-9 h-9 bg-accent-500 rounded-lg flex items-center justify-center">
+          <i class="fas fa-home text-white"></i>
+        </div>
+        <div class="leading-tight">
+          <span class="text-white font-bold text-lg">Reuse Canada</span>
+          <span class="hidden sm:block text-brand-200 text-[10px] -mt-0.5">Roof Measurement Reports</span>
+        </div>
+      </a>
+
+      <!-- Desktop nav -->
+      <div class="hidden md:flex items-center gap-6">
+        <a href="#how-it-works" class="text-brand-200 hover:text-white text-sm transition-colors">How It Works</a>
+        <a href="#features" class="text-brand-200 hover:text-white text-sm transition-colors">Features</a>
+        <a href="#pricing" class="text-brand-200 hover:text-white text-sm transition-colors">Pricing</a>
+        <a href="#faq" class="text-brand-200 hover:text-white text-sm transition-colors">FAQ</a>
+        <a href="/measure" class="text-brand-200 hover:text-white text-sm transition-colors"><i class="fas fa-ruler-combined mr-1"></i>AI Measure</a>
+        <a href="/order/new" class="bg-accent-500 hover:bg-accent-600 text-white font-semibold py-2 px-5 rounded-lg text-sm transition-all hover:scale-105 shadow-lg shadow-accent-500/25">
+          Order Report
+        </a>
+      </div>
+
+      <!-- Mobile menu button -->
+      <button id="mobile-menu-btn" class="md:hidden text-white text-xl" onclick="document.getElementById('mobile-menu').classList.toggle('hidden')">
+        <i class="fas fa-bars"></i>
+      </button>
+    </div>
+
+    <!-- Mobile menu -->
+    <div id="mobile-menu" class="hidden md:hidden bg-brand-900/95 backdrop-blur-md border-t border-brand-700">
+      <div class="max-w-7xl mx-auto px-4 py-4 flex flex-col gap-3">
+        <a href="#how-it-works" class="text-brand-200 hover:text-white text-sm py-2" onclick="document.getElementById('mobile-menu').classList.add('hidden')">How It Works</a>
+        <a href="#features" class="text-brand-200 hover:text-white text-sm py-2" onclick="document.getElementById('mobile-menu').classList.add('hidden')">Features</a>
+        <a href="#pricing" class="text-brand-200 hover:text-white text-sm py-2" onclick="document.getElementById('mobile-menu').classList.add('hidden')">Pricing</a>
+        <a href="#faq" class="text-brand-200 hover:text-white text-sm py-2" onclick="document.getElementById('mobile-menu').classList.add('hidden')">FAQ</a>
+        <a href="/measure" class="text-brand-200 hover:text-white text-sm py-2">AI Measure</a>
+        <a href="/order/new" class="bg-accent-500 text-white font-semibold py-2.5 px-5 rounded-lg text-sm text-center mt-2">Order Report</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Landing page content -->
+  <div id="landing-root"></div>
+
+  <!-- Footer -->
+  <footer class="bg-gray-900 text-gray-400 border-t border-gray-800">
+    <div class="max-w-7xl mx-auto px-4 py-16">
+      <div class="grid md:grid-cols-4 gap-8">
+        <div>
+          <div class="flex items-center gap-3 mb-4">
+            <div class="w-9 h-9 bg-accent-500 rounded-lg flex items-center justify-center">
+              <i class="fas fa-home text-white"></i>
+            </div>
+            <span class="text-white font-bold text-lg">Reuse Canada</span>
+          </div>
+          <p class="text-sm leading-relaxed">Professional AI-powered roof measurement reports for contractors, estimators, and roofing professionals across Canada.</p>
+        </div>
+        <div>
+          <h4 class="text-white font-semibold mb-4 text-sm uppercase tracking-wider">Product</h4>
+          <ul class="space-y-2 text-sm">
+            <li><a href="#features" class="hover:text-white transition-colors">Features</a></li>
+            <li><a href="#pricing" class="hover:text-white transition-colors">Pricing</a></li>
+            <li><a href="#how-it-works" class="hover:text-white transition-colors">How It Works</a></li>
+            <li><a href="/measure" class="hover:text-white transition-colors">AI Measure Tool</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4 class="text-white font-semibold mb-4 text-sm uppercase tracking-wider">Company</h4>
+          <ul class="space-y-2 text-sm">
+            <li><a href="https://reusecanada.ca" class="hover:text-white transition-colors">Reuse Canada</a></li>
+            <li><a href="#faq" class="hover:text-white transition-colors">FAQ</a></li>
+            <li><a href="mailto:reports@reusecanada.ca" class="hover:text-white transition-colors">Contact</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4 class="text-white font-semibold mb-4 text-sm uppercase tracking-wider">Get Started</h4>
+          <p class="text-sm mb-4">Ready to save hours on every estimate?</p>
+          <a href="/order/new" class="inline-block bg-accent-500 hover:bg-accent-600 text-white font-semibold py-2.5 px-6 rounded-lg text-sm transition-all">
+            Order a Report
+          </a>
+        </div>
+      </div>
+      <div class="border-t border-gray-800 mt-12 pt-8 flex flex-col md:flex-row items-center justify-between gap-4">
+        <p class="text-sm">&copy; 2026 Reuse Canada. All rights reserved.</p>
+        <div class="flex items-center gap-6 text-sm">
+          <span class="flex items-center gap-1.5"><i class="fas fa-map-marker-alt text-brand-400"></i> Alberta, Canada</span>
+          <span class="flex items-center gap-1.5"><i class="fas fa-envelope text-brand-400"></i> reports@reusecanada.ca</span>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Navbar scroll effect -->
+  <script>
+    window.addEventListener('scroll', () => {
+      const nav = document.getElementById('landing-nav');
+      if (window.scrollY > 50) {
+        nav.classList.add('scrolled');
+      } else {
+        nav.classList.remove('scrolled');
+      }
+    });
+  </script>
+  <script src="/static/landing.js"></script>
 </body>
 </html>`
 }
@@ -369,7 +528,8 @@ function getSettingsPageHTML() {
         </div>
       </div>
       <nav class="flex items-center space-x-4">
-        <a href="/" class="text-brand-200 hover:text-white text-sm"><i class="fas fa-plus mr-1"></i>New Order</a>
+        <a href="/" class="text-brand-200 hover:text-white text-sm"><i class="fas fa-home mr-1"></i>Home</a>
+        <a href="/order/new" class="text-brand-200 hover:text-white text-sm"><i class="fas fa-plus mr-1"></i>New Order</a>
         <a href="/admin" class="text-brand-200 hover:text-white text-sm"><i class="fas fa-tachometer-alt mr-1"></i>Admin</a>
       </nav>
     </div>
