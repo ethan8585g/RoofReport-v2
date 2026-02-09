@@ -144,6 +144,38 @@ function renderOverview(d) {
       </div>
     </div>
 
+    <!-- Report & Material Stats -->
+    ${d?.report_stats && d.report_stats.total_reports > 0 ? `
+    <div class="bg-white rounded-xl border border-gray-200 p-6 mb-8">
+      <h3 class="font-semibold text-gray-700 mb-4"><i class="fas fa-ruler-combined mr-2 text-brand-500"></i>Report & Material Statistics</h3>
+      <div class="grid grid-cols-2 lg:grid-cols-5 gap-4">
+        ${statCard('Reports', d.report_stats.total_reports || 0, 'fa-file-alt', 'brand')}
+        ${statCard('Avg Squares', (d.report_stats.avg_squares || 0).toFixed(1), 'fa-th-large', 'blue')}
+        ${statCard('Avg Material $', '$' + (d.report_stats.avg_material_cost || 0).toFixed(0), 'fa-dollar-sign', 'green')}
+        ${statCard('Total Material $', '$' + (d.report_stats.total_material_value || 0).toFixed(0), 'fa-coins', 'accent')}
+        ${statCard('Avg Confidence', (d.report_stats.avg_confidence || 0).toFixed(0) + '%', 'fa-chart-line', 'purple')}
+      </div>
+      <div class="mt-4 grid grid-cols-4 gap-2">
+        <div class="text-center p-2 bg-green-50 rounded-lg">
+          <p class="text-sm font-bold text-green-700">${d.report_stats.simple_roofs || 0}</p>
+          <p class="text-xs text-gray-500">Simple</p>
+        </div>
+        <div class="text-center p-2 bg-blue-50 rounded-lg">
+          <p class="text-sm font-bold text-blue-700">${d.report_stats.moderate_roofs || 0}</p>
+          <p class="text-xs text-gray-500">Moderate</p>
+        </div>
+        <div class="text-center p-2 bg-amber-50 rounded-lg">
+          <p class="text-sm font-bold text-amber-700">${d.report_stats.complex_roofs || 0}</p>
+          <p class="text-xs text-gray-500">Complex</p>
+        </div>
+        <div class="text-center p-2 bg-red-50 rounded-lg">
+          <p class="text-sm font-bold text-red-700">${d.report_stats.very_complex_roofs || 0}</p>
+          <p class="text-xs text-gray-500">V. Complex</p>
+        </div>
+      </div>
+    </div>
+    ` : ''}
+
     <!-- Recent Orders -->
     <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
       <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
@@ -233,6 +265,11 @@ function renderOrdersTab() {
                     <a href="/order/${o.id}" class="p-1.5 text-gray-400 hover:text-brand-600" title="View">
                       <i class="fas fa-eye"></i>
                     </a>
+                    ${o.status === 'completed' ? `
+                      <a href="/api/reports/${o.id}/html" target="_blank" class="p-1.5 text-gray-400 hover:text-accent-600" title="View Professional Report">
+                        <i class="fas fa-file-pdf"></i>
+                      </a>
+                    ` : ''}
                     ${o.status === 'processing' ? `
                       <button onclick="generateReport(${o.id})" class="p-1.5 text-gray-400 hover:text-green-600" title="Generate Report">
                         <i class="fas fa-file-alt"></i>

@@ -1,5 +1,7 @@
 // ============================================================
-// Order Confirmation Page - with 3D Roof Area Display
+// Order Confirmation Page - v2.0
+// Full professional report: 3D area, edge breakdown,
+// material estimates, quality badges, and professional report link
 // ============================================================
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -22,7 +24,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   `;
 
   try {
-    // Load order + report data
     const [orderRes, reportRes] = await Promise.all([
       fetch('/api/orders/' + orderId),
       fetch('/api/reports/' + orderId).catch(() => null)
@@ -33,7 +34,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     let reportData = null;
     if (reportRes && reportRes.ok) {
       const rData = await reportRes.json();
-      // Parse the full report from api_response_raw if available
       if (rData.report?.api_response_raw) {
         try { reportData = JSON.parse(rData.report.api_response_raw); } catch(e) {}
       }
@@ -90,7 +90,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         </div>
       </div>
 
-      <!-- Order Status -->
+      <!-- Order Progress -->
       <div class="bg-white rounded-xl border border-gray-200 p-6 mb-6">
         <h3 class="font-semibold text-gray-700 mb-4 flex items-center">
           <i class="fas fa-tasks text-brand-500 mr-2"></i>Order Status
@@ -130,16 +130,16 @@ document.addEventListener('DOMContentLoaded', async () => {
         </div>
       </div>
 
-      <!-- ============================================================ -->
-      <!-- ROOF MEASUREMENT REPORT — 3D Area Display                    -->
-      <!-- Shows both flat footprint AND true surface area              -->
-      <!-- ============================================================ -->
-      ${reportData ? renderRoofReport(reportData) : ''}
+      <!-- FULL MEASUREMENT REPORT (v2.0) -->
+      ${reportData ? renderFullReport(reportData, orderId) : ''}
 
       <!-- Actions -->
       <div class="flex flex-wrap gap-3 justify-center mt-8">
         <a href="/" class="px-6 py-3 bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors font-medium">
           <i class="fas fa-plus mr-2"></i>New Order
+        </a>
+        <a href="/api/reports/${orderId}/html" target="_blank" class="px-6 py-3 bg-accent-500 text-white rounded-lg hover:bg-accent-600 transition-colors font-medium">
+          <i class="fas fa-file-alt mr-2"></i>Professional Report
         </a>
         <button onclick="window.print()" class="px-6 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors font-medium no-print">
           <i class="fas fa-print mr-2"></i>Print
@@ -165,78 +165,77 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 // ============================================================
-// ROOF REPORT RENDERER — Key distinction: Footprint vs True Area
+// FULL REPORT RENDERER — v2.0 with all 6 sections
 // ============================================================
-function renderRoofReport(r) {
-  // Support both old format (roof_area_sqft) and new format (total_true_area_sqft)
+function renderFullReport(r, orderId) {
   const trueArea = r.total_true_area_sqft || r.roof_area_sqft || 0;
-  const footprint = r.total_footprint_sqft || Math.round(trueArea * 0.88) || 0; // estimate if not available
-  const trueAreaSqm = r.total_true_area_sqm || r.roof_area_sqm || Math.round(trueArea * 0.0929);
+  const footprint = r.total_footprint_sqft || Math.round(trueArea * 0.88) || 0;
+  const trueAreaSqm = r.total_true_area_sqm || Math.round(trueArea * 0.0929);
   const multiplier = r.area_multiplier || (footprint > 0 ? (trueArea / footprint) : 1);
   const pitchRatio = r.roof_pitch_ratio || '';
   const pitchDeg = r.roof_pitch_degrees || 0;
   const segments = r.segments || [];
+  const edges = r.edges || [];
+  const edgeSummary = r.edge_summary || {};
+  const materials = r.materials || {};
+  const quality = r.quality || {};
   const provider = r.metadata?.provider || 'unknown';
+  const lineItems = materials.line_items || [];
 
   return `
+    <!-- Report Header with Quality Badge -->
     <div class="bg-white rounded-xl border border-gray-200 p-6 mb-6">
-      <div class="flex items-center justify-between mb-6">
-        <h3 class="font-semibold text-gray-700 flex items-center">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-lg font-bold text-gray-800 flex items-center">
           <i class="fas fa-ruler-combined text-brand-500 mr-2"></i>Roof Measurement Report
+          <span class="ml-2 text-xs px-2 py-0.5 bg-brand-100 text-brand-700 rounded-full">v2.0</span>
         </h3>
-        <span class="text-xs px-2 py-1 bg-gray-100 text-gray-500 rounded-full">
-          Source: ${provider === 'mock' ? 'Simulated Data' : 'Google Solar API'}
-        </span>
+        <div class="flex items-center space-x-2">
+          ${renderQualityBadge(quality)}
+          <span class="text-xs px-2 py-1 bg-gray-100 text-gray-500 rounded-full">
+            ${provider === 'mock' ? 'Simulated' : 'Google Solar API'}
+          </span>
+        </div>
       </div>
 
       <!-- ============================================================ -->
-      <!-- THE CRITICAL DISTINCTION: Footprint vs True 3D Area          -->
-      <!-- This is what separates a professional report from a bad one   -->
+      <!-- SECTION 2: Area Measurements — Footprint vs True 3D          -->
       <!-- ============================================================ -->
       <div class="bg-gradient-to-r from-brand-50 to-blue-50 border border-brand-200 rounded-xl p-6 mb-6">
+        <h4 class="text-sm font-bold text-gray-700 mb-4 uppercase tracking-wider">
+          <i class="fas fa-ruler mr-1 text-brand-500"></i>Measurement Summary
+        </h4>
         <div class="grid md:grid-cols-3 gap-6">
-          <!-- Flat Footprint -->
           <div class="text-center">
             <div class="w-12 h-12 mx-auto mb-2 bg-blue-100 rounded-full flex items-center justify-center">
               <i class="fas fa-vector-square text-blue-600"></i>
             </div>
-            <p class="text-xs text-gray-500 uppercase tracking-wider">Flat Footprint</p>
-            <p class="text-xs text-gray-400">(view from above)</p>
+            <p class="text-xs text-gray-500 uppercase">Flat Footprint</p>
             <p class="text-2xl font-bold text-blue-700 mt-1">${footprint.toLocaleString()}</p>
             <p class="text-sm text-gray-500">sq ft</p>
           </div>
-
-          <!-- Arrow / Multiplier -->
           <div class="text-center flex flex-col items-center justify-center">
             <div class="w-12 h-12 mx-auto mb-2 bg-accent-100 rounded-full flex items-center justify-center">
               <i class="fas fa-times text-accent-600"></i>
             </div>
-            <p class="text-xs text-gray-500 uppercase tracking-wider">Pitch Multiplier</p>
+            <p class="text-xs text-gray-500 uppercase">Pitch Multiplier</p>
             <p class="text-2xl font-bold text-accent-700 mt-1">${multiplier.toFixed(3)}x</p>
-            <p class="text-xs text-gray-500">
-              Roof is <strong>${Math.round((multiplier - 1) * 100)}% larger</strong> than footprint
-            </p>
+            <p class="text-xs text-gray-500">Roof is <strong>${Math.round((multiplier - 1) * 100)}% larger</strong></p>
           </div>
-
-          <!-- True 3D Surface Area -->
           <div class="text-center">
             <div class="w-12 h-12 mx-auto mb-2 bg-brand-100 rounded-full flex items-center justify-center">
               <i class="fas fa-cube text-brand-600"></i>
             </div>
-            <p class="text-xs text-gray-500 uppercase tracking-wider">True Surface Area</p>
-            <p class="text-xs text-gray-400">(what you actually shingle)</p>
+            <p class="text-xs text-gray-500 uppercase">True Surface Area</p>
             <p class="text-3xl font-bold text-brand-700 mt-1">${Math.round(trueArea).toLocaleString()}</p>
             <p class="text-sm text-gray-500">sq ft <span class="text-xs text-gray-400">(${trueAreaSqm} m&sup2;)</span></p>
           </div>
         </div>
-
         <div class="mt-4 bg-white/60 rounded-lg p-3 text-center">
           <p class="text-xs text-gray-600">
             <i class="fas fa-info-circle text-brand-500 mr-1"></i>
-            <strong>Why the difference?</strong> A flat satellite view shows ${footprint.toLocaleString()} sq ft.
-            But roofs are slanted — at ${pitchDeg}&deg; pitch${pitchRatio ? ` (${pitchRatio})` : ''},
-            the actual surface area is <strong>${Math.round(trueArea).toLocaleString()} sq ft</strong>.
-            Use the true surface area for material estimates, shingle orders, and contractor quotes.
+            At ${pitchDeg}&deg; pitch${pitchRatio ? ` (${pitchRatio})` : ''},
+            the actual surface is <strong>${Math.round(trueArea).toLocaleString()} sq ft</strong> — use this for material ordering.
           </p>
         </div>
       </div>
@@ -261,48 +260,211 @@ function renderRoofReport(r) {
         </div>
       </div>
 
-      <!-- Segment Breakdown -->
-      ${segments.length > 0 ? `
-        <h4 class="text-sm font-semibold text-gray-700 mb-3"><i class="fas fa-layer-group mr-1 text-brand-500"></i>Roof Segments</h4>
-        <div class="overflow-x-auto">
-          <table class="w-full text-sm">
-            <thead class="bg-gray-50">
-              <tr>
-                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">Segment</th>
-                <th class="px-3 py-2 text-right text-xs font-medium text-gray-500">Footprint</th>
-                <th class="px-3 py-2 text-right text-xs font-medium text-gray-500 bg-brand-50">True Area</th>
-                <th class="px-3 py-2 text-center text-xs font-medium text-gray-500">Pitch</th>
-                <th class="px-3 py-2 text-center text-xs font-medium text-gray-500">Direction</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-gray-100">
-              ${segments.map(s => `
+      <!-- ============================================================ -->
+      <!-- SECTION 3: Edge Breakdown                                    -->
+      <!-- ============================================================ -->
+      ${edges.length > 0 ? `
+        <div class="mb-6">
+          <h4 class="text-sm font-bold text-gray-700 mb-3 uppercase tracking-wider">
+            <i class="fas fa-draw-polygon mr-1 text-brand-500"></i>Edge Breakdown
+          </h4>
+          <!-- Edge summary cards -->
+          <div class="grid grid-cols-5 gap-2 mb-3">
+            ${renderEdgeSummaryCard('Ridge', edgeSummary.total_ridge_ft, 'text-green-600', 'bg-green-50')}
+            ${renderEdgeSummaryCard('Hip', edgeSummary.total_hip_ft, 'text-blue-600', 'bg-blue-50')}
+            ${renderEdgeSummaryCard('Valley', edgeSummary.total_valley_ft, 'text-red-600', 'bg-red-50')}
+            ${renderEdgeSummaryCard('Eave', edgeSummary.total_eave_ft, 'text-amber-600', 'bg-amber-50')}
+            ${renderEdgeSummaryCard('Rake', edgeSummary.total_rake_ft, 'text-purple-600', 'bg-purple-50')}
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="bg-gray-50">
                 <tr>
-                  <td class="px-3 py-2 font-medium text-gray-700">${s.name}</td>
-                  <td class="px-3 py-2 text-right text-gray-500">${(s.footprint_area_sqft || s.area_sqft || 0).toLocaleString()} ft&sup2;</td>
-                  <td class="px-3 py-2 text-right font-semibold text-brand-700 bg-brand-50">${(s.true_area_sqft || s.area_sqft || 0).toLocaleString()} ft&sup2;</td>
-                  <td class="px-3 py-2 text-center text-gray-600">${s.pitch_degrees || s.pitch || 0}&deg; ${s.pitch_ratio ? `(${s.pitch_ratio})` : ''}</td>
-                  <td class="px-3 py-2 text-center text-gray-600">${s.azimuth_direction || ''} ${(s.azimuth_degrees || s.azimuth || 0)}&deg;</td>
+                  <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">Edge</th>
+                  <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">Type</th>
+                  <th class="px-3 py-2 text-right text-xs font-medium text-gray-500">Plan (2D)</th>
+                  <th class="px-3 py-2 text-right text-xs font-medium text-gray-500 bg-brand-50">True 3D</th>
+                  <th class="px-3 py-2 text-right text-xs font-medium text-gray-500">Factor</th>
                 </tr>
-              `).join('')}
-            </tbody>
-          </table>
+              </thead>
+              <tbody class="divide-y divide-gray-100">
+                ${edges.map(e => `
+                  <tr>
+                    <td class="px-3 py-2 font-medium text-gray-700">${e.label}</td>
+                    <td class="px-3 py-2 text-gray-500 capitalize">${e.edge_type.replace('_', ' ')}</td>
+                    <td class="px-3 py-2 text-right text-gray-500">${e.plan_length_ft} ft</td>
+                    <td class="px-3 py-2 text-right font-semibold text-brand-700 bg-brand-50">${e.true_length_ft} ft</td>
+                    <td class="px-3 py-2 text-right text-gray-500">${(e.pitch_factor || 1).toFixed(3)}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+              <tfoot class="bg-gray-50 font-semibold">
+                <tr>
+                  <td class="px-3 py-2" colspan="2">Total</td>
+                  <td class="px-3 py-2 text-right">${edges.reduce((s, e) => s + e.plan_length_ft, 0)} ft</td>
+                  <td class="px-3 py-2 text-right text-brand-700 bg-brand-50">${edgeSummary.total_linear_ft || 0} ft</td>
+                  <td></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      ` : ''}
+
+      <!-- ============================================================ -->
+      <!-- SECTION 4: Facet (Segment) Breakdown                         -->
+      <!-- ============================================================ -->
+      ${segments.length > 0 ? `
+        <div class="mb-6">
+          <h4 class="text-sm font-bold text-gray-700 mb-3 uppercase tracking-wider">
+            <i class="fas fa-layer-group mr-1 text-brand-500"></i>Facet Analysis
+          </h4>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="bg-gray-50">
+                <tr>
+                  <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">Segment</th>
+                  <th class="px-3 py-2 text-right text-xs font-medium text-gray-500">Footprint</th>
+                  <th class="px-3 py-2 text-right text-xs font-medium text-gray-500 bg-brand-50">True Area</th>
+                  <th class="px-3 py-2 text-center text-xs font-medium text-gray-500">Pitch</th>
+                  <th class="px-3 py-2 text-center text-xs font-medium text-gray-500">Direction</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-100">
+                ${segments.map(s => `
+                  <tr>
+                    <td class="px-3 py-2 font-medium text-gray-700">${s.name}</td>
+                    <td class="px-3 py-2 text-right text-gray-500">${(s.footprint_area_sqft || 0).toLocaleString()} ft&sup2;</td>
+                    <td class="px-3 py-2 text-right font-semibold text-brand-700 bg-brand-50">${(s.true_area_sqft || 0).toLocaleString()} ft&sup2;</td>
+                    <td class="px-3 py-2 text-center text-gray-600">${s.pitch_degrees || 0}&deg; ${s.pitch_ratio ? `(${s.pitch_ratio})` : ''}</td>
+                    <td class="px-3 py-2 text-center text-gray-600">${s.azimuth_direction || ''} ${(s.azimuth_degrees || 0)}&deg;</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ` : ''}
+
+      <!-- ============================================================ -->
+      <!-- SECTION 5: Material Estimate — Bill of Materials              -->
+      <!-- ============================================================ -->
+      ${lineItems.length > 0 ? `
+        <div class="mb-6">
+          <h4 class="text-sm font-bold text-gray-700 mb-3 uppercase tracking-wider">
+            <i class="fas fa-boxes mr-1 text-brand-500"></i>Material Estimate
+          </h4>
+
+          <!-- Material summary cards -->
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+            <div class="bg-brand-50 rounded-lg p-3 text-center border border-brand-200">
+              <p class="text-xs text-gray-500 uppercase">Gross Squares</p>
+              <p class="text-2xl font-bold text-brand-700">${materials.gross_squares || 0}</p>
+            </div>
+            <div class="bg-blue-50 rounded-lg p-3 text-center border border-blue-200">
+              <p class="text-xs text-gray-500 uppercase">Bundles</p>
+              <p class="text-2xl font-bold text-blue-700">${materials.bundle_count || 0}</p>
+            </div>
+            <div class="bg-amber-50 rounded-lg p-3 text-center border border-amber-200">
+              <p class="text-xs text-gray-500 uppercase">Waste Factor</p>
+              <p class="text-2xl font-bold text-amber-700">${materials.waste_pct || 0}%</p>
+            </div>
+            <div class="bg-green-50 rounded-lg p-3 text-center border border-green-200">
+              <p class="text-xs text-gray-500 uppercase">Est. Cost</p>
+              <p class="text-xl font-bold text-green-700">$${(materials.total_material_cost_cad || 0).toLocaleString()}</p>
+              <p class="text-xs text-gray-400">CAD</p>
+            </div>
+          </div>
+
+          <!-- Complexity badge -->
+          <div class="mb-3">
+            <span class="inline-block px-3 py-1 rounded-full text-xs font-medium ${getComplexityColor(materials.complexity_class)}">
+              Complexity: ${(materials.complexity_class || 'unknown').replace('_', ' ').toUpperCase()}
+            </span>
+            <span class="text-xs text-gray-400 ml-2">
+              Factor: ${(materials.complexity_factor || 1).toFixed(2)}x | Shingle: ${(materials.shingle_type || 'architectural')}
+            </span>
+          </div>
+
+          <!-- Line items table -->
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="bg-gray-50">
+                <tr>
+                  <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">Material</th>
+                  <th class="px-3 py-2 text-right text-xs font-medium text-gray-500">Net Qty</th>
+                  <th class="px-3 py-2 text-right text-xs font-medium text-gray-500">Waste</th>
+                  <th class="px-3 py-2 text-right text-xs font-medium text-gray-500 bg-brand-50">Order Qty</th>
+                  <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">Unit</th>
+                  <th class="px-3 py-2 text-right text-xs font-medium text-gray-500">Price</th>
+                  <th class="px-3 py-2 text-right text-xs font-medium text-gray-500">Total</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-100">
+                ${lineItems.map(item => `
+                  <tr>
+                    <td class="px-3 py-2 text-gray-700">${item.description}</td>
+                    <td class="px-3 py-2 text-right text-gray-500">${item.net_quantity}</td>
+                    <td class="px-3 py-2 text-right text-gray-500">${item.waste_pct}%</td>
+                    <td class="px-3 py-2 text-right font-semibold text-brand-700 bg-brand-50">${item.order_quantity}</td>
+                    <td class="px-3 py-2 text-gray-500">${item.order_unit}</td>
+                    <td class="px-3 py-2 text-right text-gray-500">$${(item.unit_price_cad || 0).toFixed(2)}</td>
+                    <td class="px-3 py-2 text-right font-medium">$${(item.line_total_cad || 0).toFixed(2)}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+              <tfoot class="bg-gray-50 font-bold">
+                <tr>
+                  <td class="px-3 py-3" colspan="5">Estimated Material Total</td>
+                  <td></td>
+                  <td class="px-3 py-3 text-right text-brand-700 text-base">$${(materials.total_material_cost_cad || 0).toLocaleString()} CAD</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+
+          <div class="mt-3 bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">
+            <i class="fas fa-info-circle mr-1"></i>
+            <strong>Note:</strong> Material costs are estimates based on typical Alberta retail pricing.
+            Actual costs vary by supplier. Contact your distributor for exact quotes.
+            ${materials.complexity_class !== 'simple' ? ` Roof rated "${(materials.complexity_class || '').replace('_', ' ')}" — expect additional waste and labour.` : ''}
+          </div>
         </div>
       ` : ''}
 
       <!-- Solar Potential -->
       ${r.num_panels_possible ? `
-        <div class="mt-6 bg-accent-50 rounded-lg p-4">
-          <h4 class="text-sm font-semibold text-accent-800 mb-2"><i class="fas fa-solar-panel mr-1"></i>Solar Potential</h4>
-          <div class="grid md:grid-cols-2 gap-2 text-sm">
+        <div class="bg-accent-50 rounded-lg p-4 mb-4 border border-accent-200">
+          <h4 class="text-sm font-bold text-accent-800 mb-2"><i class="fas fa-solar-panel mr-1"></i>Solar Potential</h4>
+          <div class="grid md:grid-cols-3 gap-2 text-sm">
+            <p class="text-gray-600">Max Sunshine: <span class="font-bold text-accent-700">${(r.max_sunshine_hours || 0).toLocaleString()} hrs/yr</span></p>
             <p class="text-gray-600">Panels Possible: <span class="font-bold text-accent-700">${r.num_panels_possible}</span></p>
             <p class="text-gray-600">Yearly Energy: <span class="font-bold text-accent-700">${Math.round(r.yearly_energy_kwh || 0).toLocaleString()} kWh</span></p>
           </div>
         </div>
       ` : ''}
+
+      <!-- Quality Notes -->
+      ${quality.notes && quality.notes.length > 0 ? `
+        <div class="bg-gray-50 rounded-lg p-4 border border-gray-200">
+          <h4 class="text-xs font-bold text-gray-600 mb-2 uppercase">Data Quality Notes</h4>
+          <ul class="text-xs text-gray-500 space-y-1 list-disc list-inside">
+            ${quality.notes.map(n => `<li>${n}</li>`).join('')}
+          </ul>
+          ${quality.field_verification_recommended ? `
+            <p class="mt-2 text-xs font-semibold text-amber-700">
+              <i class="fas fa-exclamation-triangle mr-1"></i>Field verification recommended before ordering materials.
+            </p>
+          ` : ''}
+        </div>
+      ` : ''}
     </div>
   `;
 }
+
+// ============================================================
+// HELPER FUNCTIONS
+// ============================================================
 
 function renderProgressStep(label, done) {
   return `
@@ -313,4 +475,38 @@ function renderProgressStep(label, done) {
       <span class="text-[10px] mt-1 ${done ? 'text-green-600 font-medium' : 'text-gray-400'}">${label}</span>
     </div>
   `;
+}
+
+function renderQualityBadge(quality) {
+  const q = quality.imagery_quality || 'BASE';
+  const colors = {
+    HIGH: 'bg-green-100 text-green-700',
+    MEDIUM: 'bg-amber-100 text-amber-700',
+    BASE: 'bg-gray-100 text-gray-600',
+    LOW: 'bg-red-100 text-red-700'
+  };
+  return `
+    <span class="text-xs px-2 py-1 ${colors[q] || colors.BASE} rounded-full font-medium">
+      ${q} Quality &middot; ${quality.confidence_score || 0}%
+    </span>
+  `;
+}
+
+function renderEdgeSummaryCard(label, value, textColor, bgColor) {
+  return `
+    <div class="${bgColor} rounded-lg p-2 text-center border border-gray-200">
+      <p class="text-xs text-gray-500">${label}</p>
+      <p class="text-lg font-bold ${textColor}">${value || 0}<span class="text-xs font-normal text-gray-400"> ft</span></p>
+    </div>
+  `;
+}
+
+function getComplexityColor(cls) {
+  const map = {
+    simple: 'bg-green-100 text-green-700',
+    moderate: 'bg-blue-100 text-blue-700',
+    complex: 'bg-amber-100 text-amber-700',
+    very_complex: 'bg-red-100 text-red-700'
+  };
+  return map[cls] || 'bg-gray-100 text-gray-600';
 }

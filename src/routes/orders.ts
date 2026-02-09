@@ -154,6 +154,10 @@ ordersRoutes.get('/:id', async (c) => {
       SELECT o.*, cc.company_name as customer_company_name,
              r.roof_area_sqft, r.roof_pitch_degrees, r.roof_azimuth_degrees,
              r.max_sunshine_hours, r.num_panels_possible, r.yearly_energy_kwh,
+             r.roof_footprint_sqft, r.area_multiplier, r.roof_pitch_ratio,
+             r.gross_squares, r.bundle_count, r.total_material_cost_cad,
+             r.complexity_class, r.confidence_score, r.imagery_quality,
+             r.report_version,
              r.report_pdf_url, r.status as report_status
       FROM orders o
       LEFT JOIN customer_companies cc ON o.customer_company_id = cc.id

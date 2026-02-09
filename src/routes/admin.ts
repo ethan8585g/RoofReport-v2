@@ -52,13 +52,35 @@ adminRoutes.get('/dashboard', async (c) => {
       SELECT * FROM user_activity_log ORDER BY created_at DESC LIMIT 20
     `).all()
 
+    // Report/material stats
+    let reportStats: any = {}
+    try {
+      reportStats = await c.env.DB.prepare(`
+        SELECT
+          COUNT(*) as total_reports,
+          SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_reports,
+          AVG(gross_squares) as avg_squares,
+          AVG(total_material_cost_cad) as avg_material_cost,
+          SUM(total_material_cost_cad) as total_material_value,
+          AVG(confidence_score) as avg_confidence,
+          SUM(CASE WHEN complexity_class = 'simple' THEN 1 ELSE 0 END) as simple_roofs,
+          SUM(CASE WHEN complexity_class = 'moderate' THEN 1 ELSE 0 END) as moderate_roofs,
+          SUM(CASE WHEN complexity_class = 'complex' THEN 1 ELSE 0 END) as complex_roofs,
+          SUM(CASE WHEN complexity_class = 'very_complex' THEN 1 ELSE 0 END) as very_complex_roofs
+        FROM reports
+      `).first() || {}
+    } catch (e) {
+      // migration may not have run yet
+    }
+
     return c.json({
       orders: orderStats,
       revenue: revenueStats,
       tiers: tierStats.results,
       recent_orders: recentOrders.results,
       customer_count: customerCount?.count || 0,
-      recent_activity: recentActivity.results
+      recent_activity: recentActivity.results,
+      report_stats: reportStats
     })
   } catch (err: any) {
     return c.json({ error: 'Failed to load dashboard', details: err.message }, 500)
