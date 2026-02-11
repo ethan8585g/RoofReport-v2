@@ -46,7 +46,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // ============================================================
 function renderHero() {
   return `
-    <section class="relative overflow-hidden bg-gradient-to-br from-gray-900 via-brand-900 to-gray-900 text-white">
+    <section class="relative overflow-hidden bg-gradient-to-br from-slate-900 via-brand-900 to-slate-900 text-white">
       <!-- Background pattern -->
       <div class="absolute inset-0 opacity-10">
         <div class="absolute inset-0" style="background-image: url('data:image/svg+xml,%3Csvg width=60 height=60 xmlns=%22http://www.w3.org/2000/svg%22%3E%3Cpath d=%22M30 0L60 30L30 60L0 30z%22 fill=%22none%22 stroke=%22white%22 stroke-width=%220.5%22/%3E%3C/svg%3E'); background-size: 60px 60px;"></div>
@@ -57,13 +57,13 @@ function renderHero() {
           <!-- Left: Copy -->
           <div>
             <div class="inline-flex items-center gap-2 bg-brand-500/20 border border-brand-400/30 rounded-full px-4 py-1.5 mb-6">
-              <span class="w-2 h-2 bg-green-400 rounded-full animate-pulse"></span>
-              <span class="text-sm font-medium text-brand-200">Powered by Google Solar AI + Satellite Imagery</span>
+              <span class="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></span>
+              <span class="text-sm font-medium text-brand-200">Satellite-Powered Roof Measurement Technology</span>
             </div>
 
             <h1 class="text-4xl lg:text-6xl font-extrabold leading-tight mb-6">
               Professional Roof<br/>
-              <span class="bg-clip-text text-transparent bg-gradient-to-r from-brand-400 to-accent-400">Measurement Reports</span><br/>
+              <span class="bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-cyan-400">Measurement Reports</span><br/>
               In Minutes
             </h1>
 
@@ -72,7 +72,7 @@ function renderHero() {
             </p>
 
             <div class="flex flex-col sm:flex-row gap-4 mb-8">
-              <a href="/order/new" class="inline-flex items-center justify-center gap-2 bg-accent-500 hover:bg-accent-600 text-white font-bold py-4 px-8 rounded-xl text-lg shadow-xl shadow-accent-500/25 transition-all hover:scale-105">
+              <a href="/login" class="inline-flex items-center justify-center gap-2 bg-accent-500 hover:bg-accent-600 text-white font-bold py-4 px-8 rounded-xl text-lg shadow-xl shadow-accent-500/25 transition-all hover:scale-105">
                 <i class="fas fa-ruler-combined"></i>
                 Order a Report Now
               </a>
@@ -94,7 +94,7 @@ function renderHero() {
               </div>
               <div class="flex items-center gap-2">
                 <i class="fas fa-check-circle text-green-400"></i>
-                <span class="text-gray-300"><strong class="text-white">Google Solar</strong> data</span>
+                <span class="text-gray-300"><strong class="text-white">Satellite</strong> accuracy</span>
               </div>
             </div>
           </div>
@@ -162,7 +162,7 @@ function renderHero() {
       <!-- Wave divider -->
       <div class="absolute bottom-0 left-0 right-0">
         <svg viewBox="0 0 1440 120" fill="none" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none" class="w-full h-16">
-          <path d="M0 120L48 105C96 90 192 60 288 52.5C384 45 480 60 576 67.5C672 75 768 75 864 67.5C960 60 1056 45 1152 45C1248 45 1344 60 1392 67.5L1440 75V120H0Z" fill="#f9fafb"/>
+          <path d="M0 120L48 105C96 90 192 60 288 52.5C384 45 480 60 576 67.5C672 75 768 75 864 67.5C960 60 1056 45 1152 45C1248 45 1344 60 1392 67.5L1440 75V120H0Z" fill="#ffffff"/>
         </svg>
       </div>
     </section>
@@ -174,27 +174,27 @@ function renderHero() {
 // ============================================================
 function renderTrustBar() {
   return `
-    <section class="bg-gray-50 py-8 border-b border-gray-200">
+    <section class="bg-white py-8 border-b border-gray-100">
       <div class="max-w-6xl mx-auto px-4">
         <div class="flex flex-wrap items-center justify-center gap-8 lg:gap-16 text-gray-400">
           <div class="flex items-center gap-2">
-            <img src="https://www.gstatic.com/images/branding/googlelogo/2x/googlelogo_color_74x24dp.png" alt="Google" class="h-6 opacity-60">
-            <span class="text-xs font-medium">Solar API</span>
-          </div>
-          <div class="flex items-center gap-2">
-            <i class="fas fa-satellite-dish text-xl"></i>
+            <i class="fas fa-satellite text-xl text-brand-400"></i>
             <span class="text-xs font-medium">Satellite Imagery</span>
           </div>
           <div class="flex items-center gap-2">
-            <i class="fas fa-brain text-xl"></i>
-            <span class="text-xs font-medium">Gemini AI Vision</span>
+            <i class="fas fa-drafting-compass text-xl text-brand-400"></i>
+            <span class="text-xs font-medium">Precision Measurements</span>
           </div>
           <div class="flex items-center gap-2">
-            <i class="fas fa-shield-alt text-xl"></i>
+            <i class="fas fa-file-invoice text-xl text-brand-400"></i>
+            <span class="text-xs font-medium">Material BOM</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <i class="fas fa-shield-alt text-xl text-brand-400"></i>
             <span class="text-xs font-medium">Secure & Private</span>
           </div>
           <div class="flex items-center gap-2">
-            <i class="fas fa-maple-leaf text-xl"></i>
+            <i class="fas fa-maple-leaf text-xl text-brand-400"></i>
             <span class="text-xs font-medium">Canadian Pricing</span>
           </div>
         </div>
@@ -239,7 +239,7 @@ function renderHowItWorks() {
   ];
 
   return `
-    <section id="how-it-works" class="py-20 bg-gray-50">
+    <section id="how-it-works" class="py-20 bg-white">
       <div class="max-w-6xl mx-auto px-4">
         <div class="text-center mb-16 scroll-animate opacity-0 translate-y-8 transition-all duration-700">
           <h2 class="text-3xl lg:text-4xl font-extrabold text-gray-900 mb-4">How It Works</h2>
@@ -263,7 +263,7 @@ function renderHowItWorks() {
         </div>
 
         <div class="text-center mt-12 scroll-animate opacity-0 translate-y-8 transition-all duration-700">
-          <a href="/order/new" class="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white font-bold py-3 px-8 rounded-xl shadow-lg transition-all hover:scale-105">
+          <a href="/login" class="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white font-bold py-3 px-8 rounded-xl shadow-lg transition-all hover:scale-105">
             <i class="fas fa-arrow-right"></i>
             Start Your First Report
           </a>
@@ -283,11 +283,11 @@ function renderFeatures() {
     { icon: 'fas fa-boxes', title: 'Material BOM', desc: 'Shingles, underlayment, ice shield, flashing, nails, vents — complete bill of materials with Alberta pricing.' },
     { icon: 'fas fa-layer-group', title: 'Segment Analysis', desc: 'Each roof plane individually measured with pitch, azimuth, direction, and area.' },
     { icon: 'fas fa-solar-panel', title: 'Solar Potential', desc: 'Bonus: maximum panel count, yearly energy production, and sunshine hours included free.' },
-    { icon: 'fas fa-brain', title: 'AI Vision Engine', desc: 'Gemini AI analyzes satellite imagery to detect facets, obstructions, chimneys, and structural lines.' },
+    { icon: 'fas fa-envelope', title: 'Email Delivery', desc: 'Reports delivered directly to your inbox as professional PDFs. Share with your team instantly.' },
   ];
 
   return `
-    <section id="features" class="py-20 bg-white">
+    <section id="features" class="py-20 bg-gray-50">
       <div class="max-w-6xl mx-auto px-4">
         <div class="text-center mb-16 scroll-animate opacity-0 translate-y-8 transition-all duration-700">
           <h2 class="text-3xl lg:text-4xl font-extrabold text-gray-900 mb-4">What's in Your Report</h2>
@@ -351,7 +351,7 @@ function renderPricing() {
   ];
 
   return `
-    <section id="pricing" class="py-20 bg-gray-50">
+    <section id="pricing" class="py-20 bg-white">
       <div class="max-w-6xl mx-auto px-4">
         <div class="text-center mb-16 scroll-animate opacity-0 translate-y-8 transition-all duration-700">
           <h2 class="text-3xl lg:text-4xl font-extrabold text-gray-900 mb-4">Simple, Transparent Pricing</h2>
@@ -382,7 +382,7 @@ function renderPricing() {
                     </li>
                   `).join('')}
                 </ul>
-                <a href="/order/new?tier=${p.id}" class="block text-center py-3 px-6 rounded-xl font-bold transition-all ${p.popular ? 'bg-accent-500 hover:bg-accent-600 text-white shadow-lg hover:scale-105' : 'bg-gray-100 hover:bg-brand-600 text-gray-700 hover:text-white'}">
+                <a href="/login" class="block text-center py-3 px-6 rounded-xl font-bold transition-all ${p.popular ? 'bg-accent-500 hover:bg-accent-600 text-white shadow-lg hover:scale-105' : 'bg-gray-100 hover:bg-brand-600 text-gray-700 hover:text-white'}">
                   Order ${p.name} Report
                 </a>
               </div>
@@ -399,7 +399,7 @@ function renderPricing() {
 // ============================================================
 function renderSampleReport() {
   return `
-    <section class="py-20 bg-white">
+    <section class="py-20 bg-gray-50">
       <div class="max-w-6xl mx-auto px-4">
         <div class="grid lg:grid-cols-2 gap-12 items-center">
           <!-- Left: Report Preview -->
@@ -499,7 +499,7 @@ function renderSampleReport() {
               `).join('')}
             </div>
 
-            <a href="/order/new" class="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white font-bold py-3 px-8 rounded-xl shadow-lg transition-all hover:scale-105">
+            <a href="/login" class="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white font-bold py-3 px-8 rounded-xl shadow-lg transition-all hover:scale-105">
               <i class="fas fa-ruler-combined"></i>
               Get Your Report Now
             </a>
@@ -624,7 +624,7 @@ window.toggleFAQ = function(btn) {
 // ============================================================
 function renderFinalCTA() {
   return `
-    <section class="py-20 bg-gradient-to-br from-brand-800 via-brand-900 to-gray-900 text-white relative overflow-hidden">
+    <section class="py-20 bg-gradient-to-br from-brand-800 via-slate-900 to-brand-900 text-white relative overflow-hidden">
       <div class="absolute inset-0 opacity-5">
         <div class="absolute inset-0" style="background-image: url('data:image/svg+xml,%3Csvg width=40 height=40 xmlns=%22http://www.w3.org/2000/svg%22%3E%3Ccircle cx=20 cy=20 r=1 fill=%22white%22/%3E%3C/svg%3E'); background-size: 40px 40px;"></div>
       </div>
@@ -638,7 +638,7 @@ function renderFinalCTA() {
         </p>
 
         <div class="flex flex-col sm:flex-row gap-4 justify-center mb-8">
-          <a href="/order/new" class="inline-flex items-center justify-center gap-2 bg-accent-500 hover:bg-accent-600 text-white font-bold py-4 px-10 rounded-xl text-lg shadow-xl shadow-accent-500/25 transition-all hover:scale-105">
+          <a href="/login" class="inline-flex items-center justify-center gap-2 bg-accent-500 hover:bg-accent-600 text-white font-bold py-4 px-10 rounded-xl text-lg shadow-xl shadow-accent-500/25 transition-all hover:scale-105">
             <i class="fas fa-ruler-combined"></i>
             Order Your First Report — $10
           </a>

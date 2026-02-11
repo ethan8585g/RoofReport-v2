@@ -7,6 +7,7 @@ import { settingsRoutes } from './routes/settings'
 import { reportsRoutes } from './routes/reports'
 import { adminRoutes } from './routes/admin'
 import { aiAnalysisRoutes } from './routes/ai-analysis'
+import { authRoutes } from './routes/auth'
 import type { Bindings } from './types'
 
 const app = new Hono<{ Bindings: Bindings }>()
@@ -21,13 +22,14 @@ app.route('/api/settings', settingsRoutes)
 app.route('/api/reports', reportsRoutes)
 app.route('/api/admin', adminRoutes)
 app.route('/api/ai', aiAnalysisRoutes)
+app.route('/api/auth', authRoutes)
 
 // Health check
 app.get('/api/health', (c) => {
   // Report which env vars are configured (true/false only — never expose values)
   return c.json({
     status: 'ok',
-    service: 'Reuse Canada Roofing Measurement Tool',
+    service: 'Reuse Canada - Roof Measurement Reports',
     timestamp: new Date().toISOString(),
     env_configured: {
       GOOGLE_SOLAR_API_KEY: !!c.env.GOOGLE_SOLAR_API_KEY,
@@ -163,10 +165,9 @@ app.get('/settings', (c) => {
   return c.html(getSettingsPageHTML())
 })
 
-// Measure Page — Standalone Vertex AI Measurement Tool
-app.get('/measure', (c) => {
-  const mapsKey = c.env.GOOGLE_MAPS_API_KEY || ''
-  return c.html(getMeasurePageHTML(mapsKey))
+// Login/Register Page
+app.get('/login', (c) => {
+  return c.html(getLoginPageHTML())
 })
 
 export default app
@@ -181,8 +182,8 @@ function getTailwindConfig() {
       theme: {
         extend: {
           colors: {
-            brand: { 50:'#ecfdf5',100:'#d1fae5',200:'#a7f3d0',300:'#6ee7b7',400:'#34d399',500:'#10b981',600:'#059669',700:'#047857',800:'#065f46',900:'#064e3b' },
-            accent: { 50:'#fffbeb',100:'#fef3c7',200:'#fde68a',300:'#fcd34d',400:'#fbbf24',500:'#f59e0b',600:'#d97706',700:'#b45309',800:'#92400e',900:'#78350f' }
+            brand: { 50:'#eff6ff',100:'#dbeafe',200:'#bfdbfe',300:'#93c5fd',400:'#60a5fa',500:'#3b82f6',600:'#2563eb',700:'#1d4ed8',800:'#1e3a5f',900:'#0f172a' },
+            accent: { 50:'#f0f9ff',100:'#e0f2fe',200:'#bae6fd',300:'#7dd3fc',400:'#38bdf8',500:'#0ea5e9',600:'#0284c7',700:'#0369a1',800:'#075985',900:'#0c4a6e' }
           },
           animation: {
             'fade-in-up': 'fadeInUp 0.6s ease-out forwards',
@@ -245,14 +246,13 @@ function getMainPageHTML(mapsApiKey: string) {
             <i class="fas fa-home text-white text-lg"></i>
           </div>
           <div>
-            <h1 class="text-xl font-bold">Roof Measurement Tool</h1>
-            <p class="text-brand-200 text-xs">Powered by Reuse Canada</p>
+            <h1 class="text-xl font-bold">Order a Report</h1>
+            <p class="text-brand-200 text-xs">Reuse Canada</p>
           </div>
         </a>
       </div>
       <nav class="flex items-center space-x-4">
         <a href="/" class="text-brand-200 hover:text-white text-sm"><i class="fas fa-arrow-left mr-1"></i>Home</a>
-        <a href="/measure" class="text-brand-200 hover:text-white text-sm"><i class="fas fa-ruler-combined mr-1"></i>AI Measure</a>
         <a href="/admin" class="text-brand-200 hover:text-white text-sm"><i class="fas fa-tachometer-alt mr-1"></i>Admin</a>
       </nav>
     </div>
@@ -274,30 +274,58 @@ function getAdminPageHTML() {
 <html lang="en">
 <head>
   ${getHeadTags()}
-  <title>Admin Dashboard - Roof Measurement Tool</title>
+  <title>Admin Dashboard - Reuse Canada</title>
 </head>
 <body class="bg-gray-50 min-h-screen">
   <header class="bg-brand-800 text-white shadow-lg">
     <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
       <div class="flex items-center space-x-3">
-        <div class="w-10 h-10 bg-accent-500 rounded-lg flex items-center justify-center">
-          <i class="fas fa-home text-white text-lg"></i>
-        </div>
-        <div>
-          <h1 class="text-xl font-bold">Admin Dashboard</h1>
-          <p class="text-brand-200 text-xs">Order Management & Analytics</p>
-        </div>
+        <a href="/" class="flex items-center space-x-3 hover:opacity-90 transition-opacity">
+          <div class="w-10 h-10 bg-accent-500 rounded-lg flex items-center justify-center">
+            <i class="fas fa-home text-white text-lg"></i>
+          </div>
+          <div>
+            <h1 class="text-xl font-bold">Admin Dashboard</h1>
+            <p class="text-brand-200 text-xs">Reuse Canada - Roof Reports</p>
+          </div>
+        </a>
       </div>
       <nav class="flex items-center space-x-4">
-        <a href="/" class="text-brand-200 hover:text-white text-sm"><i class="fas fa-home mr-1"></i>Home</a>
+        <span id="userGreeting" class="text-brand-200 text-sm hidden"><i class="fas fa-user-circle mr-1"></i><span id="userName"></span></span>
         <a href="/order/new" class="text-brand-200 hover:text-white text-sm"><i class="fas fa-plus mr-1"></i>New Order</a>
         <a href="/settings" class="text-brand-200 hover:text-white text-sm"><i class="fas fa-cog mr-1"></i>Settings</a>
+        <a href="/" class="text-brand-200 hover:text-white text-sm"><i class="fas fa-home mr-1"></i>Home</a>
+        <button onclick="doLogout()" class="text-brand-200 hover:text-white text-sm"><i class="fas fa-sign-out-alt mr-1"></i>Logout</button>
       </nav>
     </div>
   </header>
   <main class="max-w-7xl mx-auto px-4 py-8">
     <div id="admin-root"></div>
   </main>
+  <script>
+    // Auth guard + user display
+    (function() {
+      const user = localStorage.getItem('rc_user');
+      if (!user) {
+        window.location.href = '/login';
+        return;
+      }
+      try {
+        const u = JSON.parse(user);
+        const greeting = document.getElementById('userGreeting');
+        const nameEl = document.getElementById('userName');
+        if (greeting && nameEl) {
+          nameEl.textContent = u.name || u.email;
+          greeting.classList.remove('hidden');
+        }
+      } catch(e) {}
+    })();
+    function doLogout() {
+      localStorage.removeItem('rc_user');
+      localStorage.removeItem('rc_token');
+      window.location.href = '/login';
+    }
+  </script>
   <script src="/static/admin.js"></script>
 </body>
 </html>`
@@ -335,55 +363,234 @@ function getOrderConfirmationHTML() {
 </html>`
 }
 
-function getMeasurePageHTML(mapsApiKey: string) {
-  const mapsScript = mapsApiKey
-    ? `<script>
-      var googleMapsReady = false;
-      function onGoogleMapsReady() {
-        googleMapsReady = true;
-        console.log('[Maps] Google Maps API loaded');
-        if (typeof initMeasureMap === 'function') initMeasureMap();
-      }
-    </script>
-    <script src="https://maps.googleapis.com/maps/api/js?key=${mapsApiKey}&libraries=places&callback=onGoogleMapsReady" async defer></script>`
-    : '<!-- No Maps key -->'
-
+function getLoginPageHTML() {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   ${getHeadTags()}
-  <title>Quick Measure - Vertex AI Engine</title>
-  ${mapsScript}
+  <title>Login - Reuse Canada Roof Measurement</title>
 </head>
-<body class="bg-gray-900 min-h-screen text-gray-100">
-  <!-- Header -->
-  <header class="border-b border-gray-800 bg-gray-900/50 backdrop-blur-md sticky top-0 z-50">
-    <div class="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
-      <div class="flex items-center gap-3">
-        <div class="bg-blue-600 p-2 rounded-lg">
-          <i class="fas fa-layer-group text-white"></i>
+<body class="bg-gradient-to-br from-brand-900 via-slate-900 to-brand-800 min-h-screen flex items-center justify-center">
+  <div class="w-full max-w-md mx-auto px-4">
+    <!-- Logo -->
+    <div class="text-center mb-8">
+      <a href="/" class="inline-flex items-center gap-3">
+        <div class="w-12 h-12 bg-accent-500 rounded-xl flex items-center justify-center shadow-lg">
+          <i class="fas fa-home text-white text-xl"></i>
         </div>
-        <span class="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400">
-          RoofStack AI
-        </span>
+        <div class="text-left">
+          <span class="text-white font-bold text-2xl block">Reuse Canada</span>
+          <span class="text-brand-300 text-xs">Professional Roof Measurement Reports</span>
+        </div>
+      </a>
+    </div>
+
+    <!-- Auth Card -->
+    <div class="bg-white rounded-2xl shadow-2xl overflow-hidden">
+      <!-- Tabs -->
+      <div class="flex border-b border-gray-200">
+        <button id="loginTab" onclick="showTab('login')" class="flex-1 py-4 text-center font-semibold text-sm transition-colors bg-brand-50 text-brand-700 border-b-2 border-brand-500">
+          <i class="fas fa-sign-in-alt mr-1"></i>Sign In
+        </button>
+        <button id="registerTab" onclick="showTab('register')" class="flex-1 py-4 text-center font-semibold text-sm transition-colors text-gray-500 hover:text-gray-700">
+          <i class="fas fa-user-plus mr-1"></i>Create Account
+        </button>
       </div>
-      <div class="flex items-center gap-4">
-        <div class="hidden md:flex items-center gap-2 text-sm text-gray-400 bg-gray-800 px-3 py-1 rounded-full border border-gray-700">
-          <i class="fas fa-circle text-green-500 text-xs"></i>
-          <span>Vertex AI Engine Active</span>
+
+      <!-- Login Form -->
+      <div id="loginForm" class="p-8">
+        <h2 class="text-xl font-bold text-gray-800 mb-1">Welcome back</h2>
+        <p class="text-sm text-gray-500 mb-6">Sign in to order reports and manage your account</p>
+
+        <div class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
+            <input type="email" id="loginEmail" placeholder="you@company.com" class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-colors text-sm">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Password</label>
+            <input type="password" id="loginPassword" placeholder="Enter your password" class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-colors text-sm" onkeyup="if(event.key==='Enter')doLogin()">
+          </div>
         </div>
-        <a href="/" class="text-gray-400 hover:text-white text-sm"><i class="fas fa-arrow-left mr-1"></i>Home</a>
-        <a href="/order/new" class="text-gray-400 hover:text-white text-sm"><i class="fas fa-plus mr-1"></i>Order</a>
+
+        <div id="loginError" class="hidden mt-4 p-3 bg-red-50 text-red-700 rounded-lg text-sm"></div>
+
+        <button onclick="doLogin()" class="w-full mt-6 py-3 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-xl transition-all hover:scale-[1.02] shadow-lg shadow-brand-500/25">
+          <i class="fas fa-sign-in-alt mr-2"></i>Sign In
+        </button>
+
+        <p class="text-center text-sm text-gray-500 mt-4">
+          Don't have an account? <button onclick="showTab('register')" class="text-brand-600 font-semibold hover:underline">Create one</button>
+        </p>
+      </div>
+
+      <!-- Register Form -->
+      <div id="registerForm" class="p-8 hidden">
+        <h2 class="text-xl font-bold text-gray-800 mb-1">Create your account</h2>
+        <p class="text-sm text-gray-500 mb-6">Get started with professional roof measurement reports</p>
+
+        <div class="space-y-4">
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Full Name *</label>
+              <input type="text" id="regName" placeholder="John Smith" class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-colors text-sm">
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Company</label>
+              <input type="text" id="regCompany" placeholder="Smith Roofing" class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-colors text-sm">
+            </div>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Email *</label>
+            <input type="email" id="regEmail" placeholder="you@company.com" class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-colors text-sm">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+            <input type="tel" id="regPhone" placeholder="(780) 555-1234" class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-colors text-sm">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Password *</label>
+            <input type="password" id="regPassword" placeholder="Minimum 6 characters" class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-colors text-sm">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Confirm Password *</label>
+            <input type="password" id="regPasswordConfirm" placeholder="Confirm password" class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-colors text-sm" onkeyup="if(event.key==='Enter')doRegister()">
+          </div>
+        </div>
+
+        <div id="registerError" class="hidden mt-4 p-3 bg-red-50 text-red-700 rounded-lg text-sm"></div>
+        <div id="registerSuccess" class="hidden mt-4 p-3 bg-green-50 text-green-700 rounded-lg text-sm"></div>
+
+        <button onclick="doRegister()" class="w-full mt-6 py-3 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-xl transition-all hover:scale-[1.02] shadow-lg shadow-brand-500/25">
+          <i class="fas fa-user-plus mr-2"></i>Create Account
+        </button>
+
+        <p class="text-center text-sm text-gray-500 mt-4">
+          Already have an account? <button onclick="showTab('login')" class="text-brand-600 font-semibold hover:underline">Sign in</button>
+        </p>
       </div>
     </div>
-  </header>
 
-  <main class="max-w-7xl mx-auto px-4 py-8">
-    <div id="measure-root"></div>
-  </main>
+    <!-- Back link -->
+    <div class="text-center mt-6">
+      <a href="/" class="text-brand-300 hover:text-white text-sm transition-colors"><i class="fas fa-arrow-left mr-1"></i>Back to homepage</a>
+    </div>
+  </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
-  <script src="/static/measure.js"></script>
+  <script>
+    // Check if already logged in
+    (function() {
+      const user = localStorage.getItem('rc_user');
+      if (user) {
+        window.location.href = '/admin';
+      }
+    })();
+
+    function showTab(tab) {
+      const loginForm = document.getElementById('loginForm');
+      const registerForm = document.getElementById('registerForm');
+      const loginTab = document.getElementById('loginTab');
+      const registerTab = document.getElementById('registerTab');
+
+      if (tab === 'login') {
+        loginForm.classList.remove('hidden');
+        registerForm.classList.add('hidden');
+        loginTab.classList.add('bg-brand-50', 'text-brand-700', 'border-b-2', 'border-brand-500');
+        loginTab.classList.remove('text-gray-500');
+        registerTab.classList.remove('bg-brand-50', 'text-brand-700', 'border-b-2', 'border-brand-500');
+        registerTab.classList.add('text-gray-500');
+      } else {
+        loginForm.classList.add('hidden');
+        registerForm.classList.remove('hidden');
+        registerTab.classList.add('bg-brand-50', 'text-brand-700', 'border-b-2', 'border-brand-500');
+        registerTab.classList.remove('text-gray-500');
+        loginTab.classList.remove('bg-brand-50', 'text-brand-700', 'border-b-2', 'border-brand-500');
+        loginTab.classList.add('text-gray-500');
+      }
+    }
+
+    async function doLogin() {
+      const email = document.getElementById('loginEmail').value.trim();
+      const password = document.getElementById('loginPassword').value;
+      const errDiv = document.getElementById('loginError');
+      errDiv.classList.add('hidden');
+
+      if (!email || !password) {
+        errDiv.textContent = 'Please enter your email and password.';
+        errDiv.classList.remove('hidden');
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          localStorage.setItem('rc_user', JSON.stringify(data.user));
+          localStorage.setItem('rc_token', data.token);
+          window.location.href = '/admin';
+        } else {
+          errDiv.textContent = data.error || 'Login failed. Please try again.';
+          errDiv.classList.remove('hidden');
+        }
+      } catch (e) {
+        errDiv.textContent = 'Network error. Please try again.';
+        errDiv.classList.remove('hidden');
+      }
+    }
+
+    async function doRegister() {
+      const name = document.getElementById('regName').value.trim();
+      const email = document.getElementById('regEmail').value.trim();
+      const company = document.getElementById('regCompany').value.trim();
+      const phone = document.getElementById('regPhone').value.trim();
+      const password = document.getElementById('regPassword').value;
+      const confirm = document.getElementById('regPasswordConfirm').value;
+      const errDiv = document.getElementById('registerError');
+      const successDiv = document.getElementById('registerSuccess');
+      errDiv.classList.add('hidden');
+      successDiv.classList.add('hidden');
+
+      if (!name || !email || !password) {
+        errDiv.textContent = 'Name, email, and password are required.';
+        errDiv.classList.remove('hidden');
+        return;
+      }
+      if (password.length < 6) {
+        errDiv.textContent = 'Password must be at least 6 characters.';
+        errDiv.classList.remove('hidden');
+        return;
+      }
+      if (password !== confirm) {
+        errDiv.textContent = 'Passwords do not match.';
+        errDiv.classList.remove('hidden');
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password, name, company_name: company, phone })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          localStorage.setItem('rc_user', JSON.stringify(data.user));
+          localStorage.setItem('rc_token', data.token);
+          window.location.href = '/admin';
+        } else {
+          errDiv.textContent = data.error || 'Registration failed. Please try again.';
+          errDiv.classList.remove('hidden');
+        }
+      } catch (e) {
+        errDiv.textContent = 'Network error. Please try again.';
+        errDiv.classList.remove('hidden');
+      }
+    }
+  </script>
 </body>
 </html>`
 }
@@ -411,7 +618,7 @@ function getLandingPageHTML() {
     /* Navbar transparency transition */
     .landing-nav { transition: all 0.3s ease; }
     .landing-nav.scrolled {
-      background: rgba(6, 78, 59, 0.97);
+      background: rgba(15, 23, 42, 0.97);
       backdrop-filter: blur(12px);
       box-shadow: 0 4px 20px rgba(0,0,0,0.15);
     }
@@ -437,9 +644,8 @@ function getLandingPageHTML() {
         <a href="#features" class="text-brand-200 hover:text-white text-sm transition-colors">Features</a>
         <a href="#pricing" class="text-brand-200 hover:text-white text-sm transition-colors">Pricing</a>
         <a href="#faq" class="text-brand-200 hover:text-white text-sm transition-colors">FAQ</a>
-        <a href="/measure" class="text-brand-200 hover:text-white text-sm transition-colors"><i class="fas fa-ruler-combined mr-1"></i>AI Measure</a>
-        <a href="/order/new" class="bg-accent-500 hover:bg-accent-600 text-white font-semibold py-2 px-5 rounded-lg text-sm transition-all hover:scale-105 shadow-lg shadow-accent-500/25">
-          Order Report
+        <a href="/login" class="bg-accent-500 hover:bg-accent-600 text-white font-semibold py-2 px-5 rounded-lg text-sm transition-all hover:scale-105 shadow-lg shadow-accent-500/25">
+          <i class="fas fa-sign-in-alt mr-1"></i>Login / Order Report
         </a>
       </div>
 
@@ -456,8 +662,7 @@ function getLandingPageHTML() {
         <a href="#features" class="text-brand-200 hover:text-white text-sm py-2" onclick="document.getElementById('mobile-menu').classList.add('hidden')">Features</a>
         <a href="#pricing" class="text-brand-200 hover:text-white text-sm py-2" onclick="document.getElementById('mobile-menu').classList.add('hidden')">Pricing</a>
         <a href="#faq" class="text-brand-200 hover:text-white text-sm py-2" onclick="document.getElementById('mobile-menu').classList.add('hidden')">FAQ</a>
-        <a href="/measure" class="text-brand-200 hover:text-white text-sm py-2">AI Measure</a>
-        <a href="/order/new" class="bg-accent-500 text-white font-semibold py-2.5 px-5 rounded-lg text-sm text-center mt-2">Order Report</a>
+        <a href="/login" class="bg-accent-500 text-white font-semibold py-2.5 px-5 rounded-lg text-sm text-center mt-2"><i class="fas fa-sign-in-alt mr-1"></i>Login / Order Report</a>
       </div>
     </div>
   </nav>
@@ -484,7 +689,7 @@ function getLandingPageHTML() {
             <li><a href="#features" class="hover:text-white transition-colors">Features</a></li>
             <li><a href="#pricing" class="hover:text-white transition-colors">Pricing</a></li>
             <li><a href="#how-it-works" class="hover:text-white transition-colors">How It Works</a></li>
-            <li><a href="/measure" class="hover:text-white transition-colors">AI Measure Tool</a></li>
+            <li><a href="/login" class="hover:text-white transition-colors">Login</a></li>
           </ul>
         </div>
         <div>
@@ -498,8 +703,8 @@ function getLandingPageHTML() {
         <div>
           <h4 class="text-white font-semibold mb-4 text-sm uppercase tracking-wider">Get Started</h4>
           <p class="text-sm mb-4">Ready to save hours on every estimate?</p>
-          <a href="/order/new" class="inline-block bg-accent-500 hover:bg-accent-600 text-white font-semibold py-2.5 px-6 rounded-lg text-sm transition-all">
-            Order a Report
+          <a href="/login" class="inline-block bg-accent-500 hover:bg-accent-600 text-white font-semibold py-2.5 px-6 rounded-lg text-sm transition-all">
+            Login & Order
           </a>
         </div>
       </div>

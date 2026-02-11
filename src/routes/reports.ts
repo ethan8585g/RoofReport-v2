@@ -347,9 +347,9 @@ function buildEmailWrapper(reportHtml: string, address: string, reportNum: strin
 <body style="margin:0;padding:0;background:#f4f4f5;font-family:Arial,Helvetica,sans-serif">
 <div style="max-width:680px;margin:0 auto;padding:20px">
   <!-- Email Header -->
-  <div style="background:#065F46;color:#fff;padding:24px 28px;border-radius:12px 12px 0 0;text-align:center">
+  <div style="background:#1E3A5F;color:#fff;padding:24px 28px;border-radius:12px 12px 0 0;text-align:center">
     <div style="font-size:24px;font-weight:800;letter-spacing:1px">REUSE CANADA</div>
-    <div style="font-size:12px;color:#A7F3D0;margin-top:4px">Professional Roof Measurement Report</div>
+    <div style="font-size:12px;color:#93C5FD;margin-top:4px">Professional Roof Measurement Report</div>
   </div>
 
   <!-- Email Body -->
@@ -365,7 +365,7 @@ function buildEmailWrapper(reportHtml: string, address: string, reportNum: strin
     <ul style="font-size:13px;color:#374151;line-height:1.8;margin:0 0 24px;padding-left:20px">
       <li><strong>Page 1:</strong> Roof Measurement Dashboard - aerial views, total area, pitch, squares, linear measurements</li>
       <li><strong>Page 2:</strong> Material Order Calculation - shingles, accessories, ventilation, fasteners</li>
-      <li><strong>Page 3:</strong> Detailed Measurements - facet breakdown, roof diagram, RAS analysis</li>
+      <li><strong>Page 3:</strong> Detailed Measurements - facet breakdown, roof diagram</li>
     </ul>
 
     <div style="text-align:center;margin:24px 0">
@@ -374,13 +374,13 @@ function buildEmailWrapper(reportHtml: string, address: string, reportNum: strin
   </div>
 
   <!-- The Report (embedded) -->
-  <div style="border:2px solid #059669;border-radius:0 0 12px 12px;overflow:hidden;background:#fff">
+  <div style="border:2px solid #2563EB;border-radius:0 0 12px 12px;overflow:hidden;background:#fff">
     ${reportHtml}
   </div>
 
   <!-- Email Footer -->
   <div style="text-align:center;padding:20px;color:#9CA3AF;font-size:11px">
-    <p>&copy; ${new Date().getFullYear()} Reuse Canada | Professional Roof Measurement Services | Circular Economy Division</p>
+    <p>&copy; ${new Date().getFullYear()} Reuse Canada | Professional Roof Measurement Reports</p>
     <p style="margin-top:4px">This report was sent to ${recipient}. Questions? Contact reports@reusecanada.ca</p>
   </div>
 </div>
@@ -467,7 +467,7 @@ async function sendGmailEmail(serviceAccountJson: string, to: string, subject: s
     'Content-Type: text/plain; charset=UTF-8',
     'Content-Transfer-Encoding: 7bit',
     '',
-    `Your professional roof measurement report is ready. View this email in an HTML-capable client to see the full 3-page report including measurements, material calculations, and RAS yield analysis.`,
+    `Your professional roof measurement report is ready. View this email in an HTML-capable client to see the full 3-page report including measurements and material calculations.`,
     '',
     `--${boundary}`,
     'Content-Type: text/html; charset=UTF-8',
@@ -661,8 +661,9 @@ function generateMockRoofReport(order: any): RoofReport {
   const lng = order.longitude
   const orderId = order.id
 
-  // Typical Alberta residential footprint: 1400-2800 sq ft
-  const totalFootprintSqft = 1400 + Math.random() * 1400
+  // Typical Alberta residential footprint: 1100-1800 sq ft
+  // (With pitch, true area will be ~10-20% larger)
+  const totalFootprintSqft = 1100 + Math.random() * 700
 
   // Segment definitions — realistic Alberta residential
   const segmentDefs = [
@@ -1058,14 +1059,7 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
 .p3-diagram-title{font-size:12px;font-weight:800;color:#002F6C;text-transform:uppercase;text-align:center;letter-spacing:1px;margin-bottom:10px;padding-bottom:6px;border-bottom:2px solid #E0ECF5}
 .p3-diagram-svg{width:100%;max-height:300px}
 
-/* RAS Section (Page 3 bottom) */
-.p3-ras{background:#fff;border-radius:10px;padding:16px 20px;margin-top:16px;box-shadow:0 1px 4px rgba(0,0,0,0.06);border-left:4px solid #059669}
-.p3-ras-title{font-size:12px;font-weight:800;color:#059669;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px}
-.p3-ras-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
-.p3-ras-item{text-align:center;padding:8px;background:#F0FDF4;border-radius:6px}
-.p3-ras-item-label{font-size:8px;color:#475569;text-transform:uppercase;letter-spacing:0.5px}
-.p3-ras-item-value{font-size:16px;font-weight:800;color:#059669}
-.p3-ras-rec{background:#EFF6FF;border:1px solid #BFDBFE;border-radius:6px;padding:8px 12px;margin-top:10px;font-size:10px;color:#1E40AF}
+/* Report Summary (Page 3 bottom) */
 
 /* Print and screen adjustments */
 @media print{
@@ -1161,7 +1155,7 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
     <span class="p1-badge p1-badge-high">CONFIDENCE: ${quality.confidence_score}%</span>
   </div>
 
-  <div class="p1-footer"><div class="p1-footer-text">Reuse Canada | Professional Roof Measurement Services | Circular Economy Division | ${reportNum}</div></div>
+  <div class="p1-footer"><div class="p1-footer-text">Reuse Canada | Professional Roof Measurement Services | ${reportNum}</div></div>
 </div>
 
 <!-- ==================== PAGE 2: MATERIAL ORDER CALCULATION ==================== -->
@@ -1223,7 +1217,7 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
     </div>
   </div>
 
-  <div style="text-align:center;margin-top:16px;color:#5A7A96;font-size:8px">Reuse Canada | Material Order Calculation | ${reportNum} | Prices are estimates in CAD. Total est: $${mat.total_material_cost_cad.toFixed(2)}</div>
+  <div style="text-align:center;margin-top:16px;color:#5A7A96;font-size:8px">Reuse Canada | Material Order Calculation | ${reportNum} | All prices CAD estimates. Total: $${mat.total_material_cost_cad.toFixed(2)}</div>
 </div>
 
 <!-- ==================== PAGE 3: DETAILED MEASUREMENTS + DIAGRAM ==================== -->
@@ -1283,22 +1277,27 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
     </svg>
   </div>
 
-  <!-- RAS Yield Summary (if available) -->
-  ${report.ras_yield ? `
-  <div class="p3-ras">
-    <div class="p3-ras-title">RAS MATERIAL RECOVERY ANALYSIS - REUSE CANADA</div>
-    <div class="p3-ras-grid">
-      <div class="p3-ras-item"><div class="p3-ras-item-label">Shingle Squares</div><div class="p3-ras-item-value">${report.ras_yield.total_squares}</div></div>
-      <div class="p3-ras-item"><div class="p3-ras-item-label">Tear-Off Weight</div><div class="p3-ras-item-value">${report.ras_yield.estimated_weight_lbs.toLocaleString()} lbs</div></div>
-      <div class="p3-ras-item"><div class="p3-ras-item-label">Recovery Rate</div><div class="p3-ras-item-value">${report.ras_yield.total_yield.recovery_rate_pct}%</div></div>
-      <div class="p3-ras-item"><div class="p3-ras-item-label">Material Value</div><div class="p3-ras-item-value">$${report.ras_yield.market_value.total_cad.toFixed(2)}</div></div>
+  <!-- Professional Report Footer -->
+  <div style="background:#fff;border-radius:10px;padding:14px 20px;margin-top:16px;box-shadow:0 1px 4px rgba(0,0,0,0.06);text-align:center">
+    <div style="font-size:11px;font-weight:800;color:#002F6C;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">REPORT SUMMARY</div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
+      <div style="text-align:center;padding:8px;background:#EFF6FF;border-radius:6px">
+        <div style="font-size:8px;color:#475569;text-transform:uppercase;letter-spacing:0.5px">Total Area</div>
+        <div style="font-size:16px;font-weight:800;color:#1D4ED8">${report.total_true_area_sqft.toLocaleString()} ft&sup2;</div>
+      </div>
+      <div style="text-align:center;padding:8px;background:#EFF6FF;border-radius:6px">
+        <div style="font-size:8px;color:#475569;text-transform:uppercase;letter-spacing:0.5px">Roofing Squares</div>
+        <div style="font-size:16px;font-weight:800;color:#1D4ED8">${Math.round(report.total_true_area_sqft / 100 * 10) / 10}</div>
+      </div>
+      <div style="text-align:center;padding:8px;background:#EFF6FF;border-radius:6px">
+        <div style="font-size:8px;color:#475569;text-transform:uppercase;letter-spacing:0.5px">Material Cost</div>
+        <div style="font-size:16px;font-weight:800;color:#1D4ED8">$${report.materials.total_material_cost_cad.toFixed(2)}</div>
+      </div>
     </div>
-    <div class="p3-ras-rec"><b>Processing Recommendation:</b> ${report.ras_yield.processing_recommendation}</div>
   </div>
-  ` : ''}
 
   <div style="text-align:center;margin-top:12px;color:#5A7A96;font-size:8px">
-    &copy; ${new Date().getFullYear()} Reuse Canada | Professional Roof Measurement Services | Circular Economy Division | ${reportNum} | v${report.report_version || '2.0'}
+    &copy; ${new Date().getFullYear()} Reuse Canada | Professional Roof Measurement Reports | ${reportNum} | v${report.report_version || '2.0'}
   </div>
 </div>
 

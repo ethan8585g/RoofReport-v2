@@ -5,8 +5,8 @@
   animation: stepPulse 2s ease-in-out infinite;
 }
 @keyframes stepPulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
-  50% { box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(59, 130, 246, 0); }
 }
 
 /* Tier card selection */
@@ -20,7 +20,7 @@
 }
 .tier-card.selected {
   transform: translateY(-4px);
-  box-shadow: 0 12px 24px -8px rgba(16, 185, 129, 0.3);
+  box-shadow: 0 12px 24px -8px rgba(59, 130, 246, 0.3);
 }
 
 /* Form transitions */
@@ -71,7 +71,7 @@
 
 /* Price badge */
 .price-badge {
-  background: linear-gradient(135deg, #059669, #10b981);
+  background: linear-gradient(135deg, #2563eb, #3b82f6);
   color: white;
   font-weight: 700;
   padding: 4px 12px;
@@ -83,7 +83,7 @@
 .status-pending { background: #fef3c7; color: #92400e; }
 .status-paid { background: #dbeafe; color: #1e40af; }
 .status-processing { background: #e0e7ff; color: #3730a3; }
-.status-completed { background: #d1fae5; color: #065f46; }
+.status-completed { background: #dbeafe; color: #1e40af; }
 .status-failed { background: #fee2e2; color: #991b1b; }
 .status-cancelled { background: #f3f4f6; color: #4b5563; }
 

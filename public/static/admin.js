@@ -52,6 +52,7 @@ function renderAdmin() {
   const tabs = [
     { id: 'overview', label: 'Overview', icon: 'fa-chart-pie' },
     { id: 'orders', label: 'Orders', icon: 'fa-clipboard-list' },
+    { id: 'neworder', label: 'New Order', icon: 'fa-plus-circle' },
     { id: 'companies', label: 'Companies', icon: 'fa-building' },
     { id: 'activity', label: 'Activity', icon: 'fa-history' }
   ];
@@ -72,6 +73,7 @@ function renderAdmin() {
     <div class="step-panel">
       ${adminState.activeTab === 'overview' ? renderOverview(d) : ''}
       ${adminState.activeTab === 'orders' ? renderOrdersTab() : ''}
+      ${adminState.activeTab === 'neworder' ? renderNewOrderTab() : ''}
       ${adminState.activeTab === 'companies' ? renderCompaniesTab() : ''}
       ${adminState.activeTab === 'activity' ? renderActivityTab(d) : ''}
     </div>
@@ -269,10 +271,13 @@ function renderOrdersTab() {
                       <a href="/api/reports/${o.id}/html" target="_blank" class="p-1.5 text-gray-400 hover:text-accent-600" title="View Professional Report">
                         <i class="fas fa-file-pdf"></i>
                       </a>
+                      <button onclick="emailReport(${o.id})" class="p-1.5 text-gray-400 hover:text-blue-600" title="Email Report">
+                        <i class="fas fa-envelope"></i>
+                      </button>
                     ` : ''}
-                    ${o.status === 'processing' ? `
+                    ${o.status !== 'completed' ? `
                       <button onclick="generateReport(${o.id})" class="p-1.5 text-gray-400 hover:text-green-600" title="Generate Report">
-                        <i class="fas fa-file-alt"></i>
+                        <i class="fas fa-cog"></i>
                       </button>
                     ` : ''}
                   </div>
@@ -476,8 +481,175 @@ async function generateReport(orderId) {
       alert('Report generated successfully!');
       await loadDashboard();
       renderAdmin();
+    } else {
+      const data = await res.json();
+      alert('Generation failed: ' + (data.error || 'Unknown error'));
     }
   } catch (e) {
     alert('Failed: ' + e.message);
+  }
+}
+
+async function emailReport(orderId, email) {
+  const to = email || prompt('Enter recipient email:');
+  if (!to) return;
+  try {
+    const res = await fetch(`/api/reports/${orderId}/email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to_email: to })
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      alert('Report emailed to ' + to);
+    } else {
+      alert('Email failed: ' + (data.error || 'Unknown error'));
+    }
+  } catch (e) {
+    alert('Failed: ' + e.message);
+  }
+}
+
+// ============================================================
+// NEW ORDER TAB — Order report directly from admin
+// ============================================================
+function renderNewOrderTab() {
+  return `
+    <div class="bg-white rounded-xl border border-gray-200 p-8 max-w-2xl mx-auto">
+      <h3 class="text-xl font-bold text-gray-800 mb-6"><i class="fas fa-plus-circle mr-2 text-brand-500"></i>Order a Roof Measurement Report</h3>
+
+      <div class="space-y-5">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Property Address *</label>
+          <input type="text" id="noAddress" placeholder="123 Main Street" class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+        </div>
+        <div class="grid grid-cols-3 gap-3">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">City</label>
+            <input type="text" id="noCity" placeholder="Edmonton" class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Province</label>
+            <input type="text" id="noProvince" value="AB" class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Postal Code</label>
+            <input type="text" id="noPostal" placeholder="T5A 1A1" class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500">
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Latitude</label>
+            <input type="number" step="any" id="noLat" placeholder="53.5461" class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Longitude</label>
+            <input type="number" step="any" id="noLng" placeholder="-113.4938" class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500">
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Homeowner Name *</label>
+            <input type="text" id="noHomeowner" placeholder="John Smith" class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Homeowner Email</label>
+            <input type="email" id="noHomeEmail" placeholder="john@example.com" class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500">
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Your Name *</label>
+            <input type="text" id="noRequester" placeholder="Your name" class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Service Tier</label>
+            <select id="noTier" class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500">
+              <option value="immediate">Immediate ($25) - Under 5 min</option>
+              <option value="urgent">Urgent ($15) - 15-30 min</option>
+              <option value="regular">Regular ($10) - 45 min - 1.5 hrs</option>
+            </select>
+          </div>
+        </div>
+
+        <div id="noError" class="hidden p-3 bg-red-50 text-red-700 rounded-lg text-sm"></div>
+        <div id="noSuccess" class="hidden p-3 bg-green-50 text-green-700 rounded-lg text-sm"></div>
+
+        <button onclick="submitAdminOrder()" class="w-full py-3 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-xl transition-all hover:scale-[1.02] shadow-lg">
+          <i class="fas fa-paper-plane mr-2"></i>Create Order & Generate Report
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+async function submitAdminOrder() {
+  const address = document.getElementById('noAddress').value.trim();
+  const city = document.getElementById('noCity').value.trim();
+  const province = document.getElementById('noProvince').value.trim();
+  const postal = document.getElementById('noPostal').value.trim();
+  const lat = parseFloat(document.getElementById('noLat').value) || null;
+  const lng = parseFloat(document.getElementById('noLng').value) || null;
+  const homeowner = document.getElementById('noHomeowner').value.trim();
+  const homeEmail = document.getElementById('noHomeEmail').value.trim();
+  const requester = document.getElementById('noRequester').value.trim();
+  const tier = document.getElementById('noTier').value;
+  const errDiv = document.getElementById('noError');
+  const successDiv = document.getElementById('noSuccess');
+  errDiv.classList.add('hidden');
+  successDiv.classList.add('hidden');
+
+  if (!address || !homeowner || !requester) {
+    errDiv.textContent = 'Address, homeowner name, and your name are required.';
+    errDiv.classList.remove('hidden');
+    return;
+  }
+
+  try {
+    // 1. Create the order
+    const orderRes = await fetch('/api/orders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        property_address: address,
+        property_city: city,
+        property_province: province,
+        property_postal_code: postal,
+        latitude: lat,
+        longitude: lng,
+        homeowner_name: homeowner,
+        homeowner_email: homeEmail,
+        requester_name: requester,
+        requester_company: 'Reuse Canada',
+        service_tier: tier
+      })
+    });
+
+    const orderData = await orderRes.json();
+    if (!orderRes.ok) {
+      errDiv.textContent = 'Order creation failed: ' + (orderData.error || 'Unknown error');
+      errDiv.classList.remove('hidden');
+      return;
+    }
+
+    const orderId = orderData.order?.id;
+    successDiv.innerHTML = '<i class="fas fa-check-circle mr-1"></i>Order created: ' + orderData.order?.order_number + '. Generating report...';
+    successDiv.classList.remove('hidden');
+
+    // 2. Auto-generate the report
+    const reportRes = await fetch('/api/reports/' + orderId + '/generate', { method: 'POST' });
+    const reportData = await reportRes.json();
+
+    if (reportRes.ok) {
+      successDiv.innerHTML = '<i class="fas fa-check-circle mr-1"></i>Report generated! <a href="/api/reports/' + orderId + '/html" target="_blank" class="underline font-bold">View Report</a> | <a href="/order/' + orderId + '" class="underline">Order Details</a>';
+    } else {
+      successDiv.innerHTML = '<i class="fas fa-exclamation-triangle mr-1"></i>Order created but report generation failed: ' + (reportData.error || '');
+    }
+
+    // Refresh dashboard
+    await loadDashboard();
+  } catch (e) {
+    errDiv.textContent = 'Error: ' + e.message;
+    errDiv.classList.remove('hidden');
   }
 }
