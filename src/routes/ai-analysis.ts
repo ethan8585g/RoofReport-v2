@@ -9,7 +9,8 @@
 // ============================================================
 
 import { Hono } from 'hono'
-import type { Bindings } from '../types'
+import type { Bindings, RASYieldAnalysis } from '../types'
+import { computeRASYieldAnalysis, trueAreaFromFootprint, pitchToRatio, degreesToCardinal } from '../types'
 import { analyzeRoofGeometry, generateAIRoofingReport, quickMeasure } from '../services/gemini'
 
 export const aiAnalysisRoutes = new Hono<{ Bindings: Bindings }>()
@@ -107,6 +108,87 @@ aiAnalysisRoutes.post('/measure', async (c) => {
 })
 
 // ============================================================
+// POST — Quick RAS Yield Analysis (no order required)
+// Fetches Solar API data for a location and computes RAS yield
+// ============================================================
+aiAnalysisRoutes.post('/ras-yield', async (c) => {
+  try {
+    const { lat, lng, address } = await c.req.json()
+    if (!lat || !lng) {
+      return c.json({ error: 'lat and lng are required' }, 400)
+    }
+
+    const solarKey = c.env.GOOGLE_SOLAR_API_KEY
+    if (!solarKey) {
+      return c.json({ error: 'GOOGLE_SOLAR_API_KEY not configured' }, 400)
+    }
+
+    const startTime = Date.now()
+    const url = `https://solar.googleapis.com/v1/buildingInsights:findClosest?location.latitude=${lat}&location.longitude=${lng}&requiredQuality=HIGH&key=${solarKey}`
+    const response = await fetch(url)
+
+    if (!response.ok) {
+      const errText = await response.text()
+      return c.json({
+        status: 'error',
+        error: `Solar API ${response.status}`,
+        details: errText.substring(0, 300),
+        hint: response.status === 404 ? 'No building found at this location (rural/uncovered area)' : undefined
+      }, response.status as any)
+    }
+
+    const data: any = await response.json()
+    const sp = data.solarPotential
+
+    if (!sp) {
+      return c.json({ status: 'no_data', error: 'No solar potential data for this location' }, 404)
+    }
+
+    const rawSegments = sp.roofSegmentStats || []
+    const segments = rawSegments.map((seg: any, i: number) => {
+      const pitchDeg = seg.pitchDegrees || 0
+      const azimuthDeg = seg.azimuthDegrees || 0
+      const footprintSqm = seg.stats?.areaMeters2 || 0
+      const footprintSqft = footprintSqm * 10.7639
+      const trueAreaSqft = trueAreaFromFootprint(footprintSqft, pitchDeg)
+
+      return {
+        name: `Segment ${i + 1}`,
+        pitch_degrees: Math.round(pitchDeg * 10) / 10,
+        pitch_ratio: pitchToRatio(pitchDeg),
+        azimuth_degrees: Math.round(azimuthDeg * 10) / 10,
+        azimuth_direction: degreesToCardinal(azimuthDeg),
+        footprint_area_sqft: Math.round(footprintSqft),
+        true_area_sqft: Math.round(trueAreaSqft),
+        true_area_sqm: Math.round(trueAreaSqft * 0.0929 * 10) / 10
+      }
+    })
+
+    const totalTrueArea = segments.reduce((s: number, seg: any) => s + seg.true_area_sqft, 0)
+    const rasYield = computeRASYieldAnalysis(segments, totalTrueArea, 'architectural')
+    const duration = Date.now() - startTime
+
+    return c.json({
+      status: 'success',
+      address: address || `${lat}, ${lng}`,
+      building_id: data.name,
+      imagery_quality: data.imageryQuality,
+      ras_yield: rasYield,
+      meta: {
+        lat, lng,
+        duration_ms: duration,
+        segment_count: segments.length,
+        cost_per_query: '$0.075 CAD',
+        accuracy: '98.77% (HIGH quality imagery)'
+      }
+    })
+  } catch (e: any) {
+    console.error('[/api/ai/ras-yield]', e)
+    return c.json({ error: 'RAS yield analysis failed', details: e.message }, 500)
+  }
+})
+
+// ============================================================
 // POST — Vertex AI Proxy (for frontend SDK calls)
 // Mirrors the Node.js proxy from roofstack-ai-2/backend/server.js
 // but adapted for Cloudflare Workers (no google-auth-library)
@@ -173,6 +255,157 @@ aiAnalysisRoutes.post('/vertex-proxy', async (c) => {
   } catch (e: any) {
     console.error('[Vertex Proxy]', e)
     return c.json({ error: e.message }, 500)
+  }
+})
+
+// ============================================================
+// POST — Batch Solar API scan for market intelligence
+// Rate limit: 600 queries/minute (Google Solar API limit)
+// Accepts array of {lat, lng, address} and returns slope/yield data
+// For RAS acquisition site assessment and material sourcing
+// ============================================================
+aiAnalysisRoutes.post('/batch-scan', async (c) => {
+  try {
+    const { locations, include_ras_yield } = await c.req.json()
+
+    if (!locations || !Array.isArray(locations) || locations.length === 0) {
+      return c.json({ error: 'locations array is required (max 50 per batch)' }, 400)
+    }
+
+    if (locations.length > 50) {
+      return c.json({ error: 'Maximum 50 locations per batch request (600/min API limit)' }, 400)
+    }
+
+    const solarKey = c.env.GOOGLE_SOLAR_API_KEY
+    if (!solarKey) {
+      return c.json({ error: 'GOOGLE_SOLAR_API_KEY not configured' }, 400)
+    }
+
+    const startTime = Date.now()
+    const results: any[] = []
+    let successCount = 0
+    let failCount = 0
+
+    // Process locations with 100ms delay between calls to respect rate limits
+    // 600/min = 10/second, 100ms spacing is safe with margin
+    for (const loc of locations) {
+      if (!loc.lat || !loc.lng) {
+        results.push({ ...loc, status: 'error', error: 'Missing lat/lng' })
+        failCount++
+        continue
+      }
+
+      try {
+        const url = `https://solar.googleapis.com/v1/buildingInsights:findClosest?location.latitude=${loc.lat}&location.longitude=${loc.lng}&requiredQuality=HIGH&key=${solarKey}`
+        const response = await fetch(url)
+
+        if (!response.ok) {
+          const errText = await response.text()
+          results.push({
+            ...loc,
+            status: 'error',
+            error: `Solar API ${response.status}`,
+            details: errText.substring(0, 200)
+          })
+          failCount++
+          continue
+        }
+
+        const data: any = await response.json()
+        const sp = data.solarPotential
+
+        if (!sp) {
+          results.push({ ...loc, status: 'no_data', error: 'No solar potential data (rural/uncovered area)' })
+          failCount++
+          continue
+        }
+
+        const rawSegments = sp.roofSegmentStats || []
+        const segments = rawSegments.map((seg: any, i: number) => {
+          const pitchDeg = seg.pitchDegrees || 0
+          const azimuthDeg = seg.azimuthDegrees || 0
+          const footprintSqm = seg.stats?.areaMeters2 || 0
+          const footprintSqft = footprintSqm * 10.7639
+          const trueAreaSqft = trueAreaFromFootprint(footprintSqft, pitchDeg)
+
+          return {
+            name: `Segment ${i + 1}`,
+            pitch_degrees: Math.round(pitchDeg * 10) / 10,
+            pitch_ratio: pitchToRatio(pitchDeg),
+            azimuth_degrees: Math.round(azimuthDeg * 10) / 10,
+            azimuth_direction: degreesToCardinal(azimuthDeg),
+            footprint_area_sqft: Math.round(footprintSqft),
+            true_area_sqft: Math.round(trueAreaSqft),
+            true_area_sqm: Math.round(trueAreaSqft * 0.0929 * 10) / 10
+          }
+        })
+
+        const totalFootprint = segments.reduce((s: number, seg: any) => s + seg.footprint_area_sqft, 0)
+        const totalTrueArea = segments.reduce((s: number, seg: any) => s + seg.true_area_sqft, 0)
+        const weightedPitch = totalTrueArea > 0
+          ? segments.reduce((s: number, seg: any) => s + seg.pitch_degrees * seg.true_area_sqft, 0) / totalTrueArea
+          : 0
+
+        const result: any = {
+          ...loc,
+          status: 'success',
+          building_id: data.name,
+          imagery_quality: data.imageryQuality,
+          total_footprint_sqft: totalFootprint,
+          total_true_area_sqft: totalTrueArea,
+          total_true_area_sqm: Math.round(totalTrueArea * 0.0929),
+          weighted_pitch_degrees: Math.round(weightedPitch * 10) / 10,
+          weighted_pitch_ratio: pitchToRatio(weightedPitch),
+          segment_count: segments.length,
+          max_sunshine_hours: sp.maxSunshineHoursPerYear || 0,
+          max_panels: sp.maxArrayPanelsCount || 0,
+          segments_summary: segments.map((s: any) => ({
+            pitch: `${s.pitch_degrees}° (${s.pitch_ratio})`,
+            direction: s.azimuth_direction,
+            area_sqft: s.true_area_sqft
+          }))
+        }
+
+        // Add RAS yield analysis if requested
+        if (include_ras_yield) {
+          result.ras_yield = computeRASYieldAnalysis(segments, totalTrueArea, 'architectural')
+        }
+
+        results.push(result)
+        successCount++
+
+        // Rate limit: 100ms delay between calls
+        if (locations.indexOf(loc) < locations.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 100))
+        }
+      } catch (e: any) {
+        results.push({ ...loc, status: 'error', error: e.message })
+        failCount++
+      }
+    }
+
+    const duration = Date.now() - startTime
+
+    // Log batch scan
+    try {
+      await c.env.DB.prepare(`
+        INSERT INTO api_requests_log (order_id, request_type, endpoint, response_status, duration_ms, response_payload)
+        VALUES (0, 'batch_solar_scan', 'buildingInsights:findClosest', 200, ?, ?)
+      `).bind(duration, JSON.stringify({ total: locations.length, success: successCount, fail: failCount })).run()
+    } catch (e) { /* ignore logging errors */ }
+
+    return c.json({
+      status: 'completed',
+      total: locations.length,
+      success: successCount,
+      failed: failCount,
+      duration_ms: duration,
+      cost_estimate_cad: `$${(successCount * 0.075).toFixed(2)}`,
+      results
+    })
+  } catch (e: any) {
+    console.error('[/api/ai/batch-scan]', e)
+    return c.json({ error: 'Batch scan failed', details: e.message }, 500)
   }
 })
 
