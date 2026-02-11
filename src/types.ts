@@ -36,6 +36,10 @@ export type Bindings = {
   // Stripe - stored as Cloudflare secrets, accessed server-side only
   STRIPE_SECRET_KEY: string
   STRIPE_PUBLISHABLE_KEY: string  // This one is safe for frontend (it's "publishable")
+
+  // Email delivery
+  GMAIL_SENDER_EMAIL: string // The Google Workspace user email to impersonate when sending via Gmail API
+  RESEND_API_KEY: string     // Resend.com API key (recommended for personal Gmail users)
 }
 
 // ============================================================

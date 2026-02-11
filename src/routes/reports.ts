@@ -3,10 +3,10 @@ import type { Bindings } from '../types'
 import {
   trueAreaFromFootprint, pitchToRatio, degreesToCardinal,
   hipValleyFactor, rakeFactor, computeMaterialEstimate,
-  classifyComplexity, computeRASYieldAnalysis
+  classifyComplexity
 } from '../types'
 import type {
-  RoofReport, RoofSegment, EdgeMeasurement, EdgeType, MaterialEstimate, RASYieldAnalysis
+  RoofReport, RoofSegment, EdgeMeasurement, EdgeType, MaterialEstimate
 } from '../types'
 import { getAccessToken } from '../services/gcp-auth'
 
@@ -116,26 +116,34 @@ reportsRoutes.post('/:orderId/generate', async (c) => {
 
       } catch (apiErr: any) {
         apiDuration = Date.now() - startTime
+        const isNotFound = apiErr.message.includes('404') || apiErr.message.includes('NOT_FOUND')
+
         await c.env.DB.prepare(`
           INSERT INTO api_requests_log (order_id, request_type, endpoint, response_status, response_payload, duration_ms)
-          VALUES (?, 'google_solar_api', 'buildingInsights:findClosest', 500, ?, ?)
-        `).bind(orderId, apiErr.message, apiDuration).run()
+          VALUES (?, 'google_solar_api', 'buildingInsights:findClosest', ?, ?, ?)
+        `).bind(orderId, isNotFound ? 404 : 500, apiErr.message.substring(0, 500), apiDuration).run()
 
         reportData = generateMockRoofReport(order)
-        reportData.metadata.provider = `mock (Solar API failed: ${apiErr.message})`
+        reportData.metadata.provider = isNotFound
+          ? 'estimated (location not in Google Solar coverage — rural/acreage property)'
+          : `estimated (Solar API error: ${apiErr.message.substring(0, 100)})`
+        reportData.quality.notes = isNotFound
+          ? [
+              'Google Solar API has no building model for this location (rural/acreage property).',
+              'Measurements are estimated based on typical Alberta residential profiles.',
+              'For precise measurements: field verification or aerial drone survey recommended.',
+              'Google Solar coverage is best in urban/suburban areas with recent aerial imagery.'
+            ]
+          : [
+              `Solar API returned an error: ${apiErr.message.substring(0, 100)}`,
+              'Measurements are estimated. Field verification recommended.'
+            ]
       }
     } else {
       reportData = generateMockRoofReport(order)
     }
 
-    // Compute RAS yield analysis (Reuse Canada value-add)
-    reportData.ras_yield = computeRASYieldAnalysis(
-      reportData.segments,
-      reportData.total_true_area_sqft,
-      reportData.materials.shingle_type
-    )
-
-    // Generate professional HTML report (now includes RAS section)
+    // Generate professional HTML report
     const professionalHtml = generateProfessionalReportHTML(reportData)
 
     // Save to database
@@ -246,7 +254,7 @@ reportsRoutes.post('/:orderId/generate', async (c) => {
 reportsRoutes.post('/:orderId/email', async (c) => {
   try {
     const orderId = c.req.param('orderId')
-    const { to_email, subject_override } = await c.req.json().catch(() => ({} as any))
+    const { to_email, subject_override, from_email } = await c.req.json().catch(() => ({} as any))
 
     // Get order + report
     const order = await c.env.DB.prepare(`
@@ -285,54 +293,87 @@ reportsRoutes.post('/:orderId/email', async (c) => {
 
     // Build email body (HTML wrapper around the report)
     const emailHtml = buildEmailWrapper(reportHtml, propertyAddress, reportNum, recipientEmail)
+    let emailMethod = 'none'
 
-    // Send via Gmail API using service account
+    // ---- EMAIL PROVIDER PRIORITY ----
+    // 1. Resend API (recommended — works with any email, no Workspace needed)
+    // 2. Gmail API via service account + domain-wide delegation (Workspace only)
+    // 3. Fallback: report available at HTML URL
+
+    const resendApiKey = (c.env as any).RESEND_API_KEY
     const saKey = c.env.GCP_SERVICE_ACCOUNT_KEY
-    if (!saKey) {
+    const senderEmail = from_email || c.env.GMAIL_SENDER_EMAIL || null
+
+    if (resendApiKey) {
+      // ---- RESEND API (Recommended) ----
+      try {
+        await sendViaResend(resendApiKey, recipientEmail, subject, emailHtml, senderEmail)
+        emailMethod = 'resend'
+      } catch (resendErr: any) {
+        console.error('[Email] Resend API failed:', resendErr.message)
+        return c.json({
+          error: 'Resend email failed: ' + (resendErr.message || '').substring(0, 200),
+          fallback_url: `/api/reports/${orderId}/html`,
+          report_available: true,
+          fix: 'Check RESEND_API_KEY is valid. Get one free at https://resend.com'
+        }, 500)
+      }
+    } else if (saKey) {
+      // ---- GMAIL API via Service Account ----
+      try {
+        await sendGmailEmail(saKey, recipientEmail, subject, emailHtml, senderEmail)
+        emailMethod = 'gmail_api'
+      } catch (gmailErr: any) {
+        console.error('[Email] Gmail API failed:', gmailErr.message)
+        const errMsg = gmailErr.message || ''
+        const isDelegation = errMsg.includes('unauthorized_client') || errMsg.includes('access_denied') || errMsg.includes('Precondition')
+
+        return c.json({
+          error: 'Gmail API send failed: ' + errMsg.substring(0, 300),
+          fallback_url: `/api/reports/${orderId}/html`,
+          report_available: true,
+          gmail_api_fix: isDelegation ? {
+            issue: 'Gmail API requires Google Workspace with domain-wide delegation for service accounts.',
+            personal_gmail_note: 'Personal Gmail (e.g. @gmail.com) does NOT support domain-wide delegation.',
+            recommended_fix: 'Use Resend API instead — set RESEND_API_KEY in .dev.vars. Free at https://resend.com',
+            workspace_fix: {
+              step1: 'Google Workspace Admin > Security > API Controls > Domain-wide Delegation',
+              step2: 'Add service account client ID with scope: https://www.googleapis.com/auth/gmail.send',
+              step3: 'Set GMAIL_SENDER_EMAIL to a Workspace user email'
+            }
+          } : {
+            hint: 'Error: ' + errMsg.substring(0, 200),
+            recommended_fix: 'Use Resend API instead — set RESEND_API_KEY in .dev.vars'
+          }
+        }, 500)
+      }
+    } else {
       return c.json({
-        error: 'Email sending requires GCP_SERVICE_ACCOUNT_KEY with Gmail API access',
-        fallback: 'Report HTML is available at GET /api/reports/' + orderId + '/html'
-      }, 400)
-    }
-
-    try {
-      await sendGmailEmail(saKey, recipientEmail, subject, emailHtml)
-    } catch (gmailErr: any) {
-      console.error('[Email] Gmail API failed:', gmailErr.message)
-
-      // Determine if it's a SERVICE_DISABLED or PERMISSION error
-      const isApiDisabled = gmailErr.message.includes('SERVICE_DISABLED') || gmailErr.message.includes('accessNotConfigured')
-      const enableUrl = 'https://console.developers.google.com/apis/api/gmail.googleapis.com/overview?project=191664638800'
-
-      return c.json({
-        error: 'Gmail API send failed: ' + gmailErr.message.substring(0, 200),
+        error: 'No email provider configured',
         fallback_url: `/api/reports/${orderId}/html`,
         report_available: true,
-        gmail_api_fix: isApiDisabled ? {
-          step1: 'Enable Gmail API at: ' + enableUrl,
-          step2: 'Configure domain-wide delegation for the service account: roof-measure-ai@helpful-passage-486204-h9.iam.gserviceaccount.com',
-          step3: 'Add scopes: https://www.googleapis.com/auth/gmail.send',
-          step4: 'Wait 5 minutes for propagation, then retry this endpoint'
-        } : {
-          hint: 'Ensure the service account has Gmail API access and domain-wide delegation is configured.'
+        setup: {
+          recommended: 'Set RESEND_API_KEY in .dev.vars (free at https://resend.com — 100 emails/day)',
+          alternative: 'Set GCP_SERVICE_ACCOUNT_KEY + GMAIL_SENDER_EMAIL (requires Google Workspace)'
         }
-      }, 500)
+      }, 400)
     }
 
     // Log the email
     try {
       await c.env.DB.prepare(`
         INSERT INTO api_requests_log (order_id, request_type, endpoint, response_status, response_payload, duration_ms)
-        VALUES (?, 'email_sent', 'gmail_api', 200, ?, 0)
-      `).bind(orderId, JSON.stringify({ to: recipientEmail, subject })).run()
+        VALUES (?, 'email_sent', ?, 200, ?, 0)
+      `).bind(orderId, emailMethod, JSON.stringify({ to: recipientEmail, subject, method: emailMethod })).run()
     } catch (e) { /* ignore logging errors */ }
 
     return c.json({
       success: true,
-      message: `Report emailed successfully to ${recipientEmail}`,
+      message: `Report emailed successfully to ${recipientEmail} via ${emailMethod}`,
       to: recipientEmail,
       subject,
-      report_number: reportNum
+      report_number: reportNum,
+      email_method: emailMethod
     })
   } catch (err: any) {
     return c.json({ error: 'Failed to email report', details: err.message }, 500)
@@ -389,21 +430,33 @@ function buildEmailWrapper(reportHtml: string, address: string, reportNum: strin
 }
 
 // Send email via Gmail API using service account
-async function sendGmailEmail(serviceAccountJson: string, to: string, subject: string, htmlBody: string): Promise<void> {
+// senderEmail: If provided, the service account will impersonate this user (requires domain-wide delegation)
+//              If null, the service account will try to send as itself (limited support)
+async function sendGmailEmail(serviceAccountJson: string, to: string, subject: string, htmlBody: string, senderEmail?: string | null): Promise<void> {
   // Get access token with Gmail scope
   const sa = JSON.parse(serviceAccountJson)
 
   // Create JWT with Gmail send scope
   const now = Math.floor(Date.now() / 1000)
   const header = { alg: 'RS256', typ: 'JWT' }
-  const payload = {
+
+  // Build JWT payload
+  // If senderEmail is provided, use domain-wide delegation to impersonate that user
+  // The 'sub' claim tells Google: "I'm the service account, acting on behalf of this user"
+  const jwtPayload: Record<string, any> = {
     iss: sa.client_email,
-    sub: sa.client_email, // For domain-wide delegation, this would be the user to impersonate
     aud: 'https://oauth2.googleapis.com/token',
     iat: now,
     exp: now + 3600,
-    scope: 'https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.compose'
+    scope: 'https://www.googleapis.com/auth/gmail.send'
   }
+
+  if (senderEmail) {
+    jwtPayload.sub = senderEmail // Impersonate this user via domain-wide delegation
+  }
+  // If no senderEmail, omit 'sub' — service account tries to send as itself
+
+  const payload = jwtPayload
 
   const b64url = (s: string) => btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
   const ab2b64url = (buf: ArrayBuffer) => {
@@ -443,7 +496,7 @@ async function sendGmailEmail(serviceAccountJson: string, to: string, subject: s
 
   // Build RFC 2822 email message with proper encoding for large HTML
   const boundary = 'boundary_' + Date.now()
-  const fromEmail = sa.client_email
+  const fromEmail = senderEmail || sa.client_email
 
   // Encode the HTML body to base64 separately (handles Unicode properly)
   const htmlBodyBytes = new TextEncoder().encode(htmlBody)
@@ -489,7 +542,9 @@ async function sendGmailEmail(serviceAccountJson: string, to: string, subject: s
     .replace(/=+$/, '')
 
   // Send via Gmail API
-  const sendResp = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+  // When impersonating a user, 'me' refers to the impersonated user
+  const gmailUser = senderEmail || 'me'
+  const sendResp = await fetch(`https://gmail.googleapis.com/gmail/v1/users/${encodeURIComponent(gmailUser)}/messages/send`, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${accessToken}`,
@@ -501,6 +556,41 @@ async function sendGmailEmail(serviceAccountJson: string, to: string, subject: s
   if (!sendResp.ok) {
     const err = await sendResp.text()
     throw new Error(`Gmail send failed (${sendResp.status}): ${err}`)
+  }
+}
+
+// ============================================================
+// RESEND API — Simple transactional email (recommended for personal Gmail)
+// Free tier: 100 emails/day, no domain verification needed for testing
+// https://resend.com/docs/api-reference/emails/send-email
+// ============================================================
+async function sendViaResend(
+  apiKey: string, to: string, subject: string,
+  htmlBody: string, fromEmail?: string | null
+): Promise<void> {
+  // Resend free tier sends from onboarding@resend.dev
+  // With verified domain, send from your own email
+  const from = fromEmail
+    ? `Reuse Canada Reports <${fromEmail}>`
+    : 'Reuse Canada Reports <onboarding@resend.dev>'
+
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      from,
+      to: [to],
+      subject,
+      html: htmlBody
+    })
+  })
+
+  if (!response.ok) {
+    const errBody = await response.text()
+    throw new Error(`Resend API error (${response.status}): ${errBody}`)
   }
 }
 

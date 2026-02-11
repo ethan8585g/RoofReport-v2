@@ -41,6 +41,7 @@ app.get('/api/health', (c) => {
       GCP_SERVICE_ACCOUNT_KEY: !!c.env.GCP_SERVICE_ACCOUNT_KEY,
       STRIPE_SECRET_KEY: !!c.env.STRIPE_SECRET_KEY,
       STRIPE_PUBLISHABLE_KEY: !!c.env.STRIPE_PUBLISHABLE_KEY,
+      GMAIL_SENDER_EMAIL: c.env.GMAIL_SENDER_EMAIL || '(not set)',
       DB: !!c.env.DB
     },
     vertex_ai: {
