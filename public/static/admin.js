@@ -7,7 +7,8 @@ const adminState = {
   loading: true,
   activeTab: 'overview',
   orders: [],
-  companies: []
+  companies: [],
+  gmailStatus: null
 };
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -18,16 +19,20 @@ document.addEventListener('DOMContentLoaded', async () => {
 async function loadDashboard() {
   adminState.loading = true;
   try {
-    const [dashRes, ordersRes, companiesRes] = await Promise.all([
+    const [dashRes, ordersRes, companiesRes, gmailRes] = await Promise.all([
       fetch('/api/admin/dashboard'),
       fetch('/api/orders?limit=50'),
-      fetch('/api/companies/customers')
+      fetch('/api/companies/customers'),
+      fetch('/api/auth/gmail/status').catch(() => null)
     ]);
     adminState.dashboard = await dashRes.json();
     const ordersData = await ordersRes.json();
     adminState.orders = ordersData.orders || [];
     const companiesData = await companiesRes.json();
     adminState.companies = companiesData.companies || [];
+    if (gmailRes && gmailRes.ok) {
+      adminState.gmailStatus = await gmailRes.json();
+    }
   } catch (e) {
     console.error('Dashboard load error:', e);
   }
@@ -177,6 +182,9 @@ function renderOverview(d) {
       </div>
     </div>
     ` : ''}
+
+    <!-- Gmail Email Setup Card -->
+    ${renderGmailSetupCard()}
 
     <!-- Recent Orders -->
     <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
@@ -423,6 +431,112 @@ function renderActivityTab(d) {
       </div>
     </div>
   `;
+}
+
+// ============================================================
+// GMAIL SETUP CARD
+// ============================================================
+function renderGmailSetupCard() {
+  const gs = adminState.gmailStatus?.gmail_oauth2;
+  if (!gs) return '';
+
+  const isReady = gs.ready;
+  const senderEmail = gs.sender_email;
+
+  if (isReady) {
+    return `
+      <div class="bg-white rounded-xl border border-green-200 p-5 mb-8">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
+              <i class="fas fa-envelope-circle-check text-green-600"></i>
+            </div>
+            <div>
+              <p class="font-semibold text-gray-800">Gmail Connected</p>
+              <p class="text-sm text-gray-500">Reports will be sent from <strong>${senderEmail}</strong></p>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium"><i class="fas fa-check mr-1"></i>Active</span>
+            <button onclick="testGmailSend()" class="px-3 py-1.5 bg-blue-50 text-blue-600 border border-blue-200 rounded-lg text-xs font-medium hover:bg-blue-100 transition-colors">
+              <i class="fas fa-paper-plane mr-1"></i>Test Email
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  // Not connected — show setup card
+  const hasClientId = gs.client_id_configured;
+  const hasClientSecret = gs.client_secret_configured;
+  const needsSetup = !hasClientId || !hasClientSecret;
+
+  return `
+    <div class="bg-white rounded-xl border border-amber-200 p-5 mb-8">
+      <div class="flex items-start justify-between">
+        <div class="flex items-start gap-3">
+          <div class="w-10 h-10 bg-amber-100 rounded-lg flex items-center justify-center flex-shrink-0">
+            <i class="fas fa-envelope text-amber-600"></i>
+          </div>
+          <div>
+            <p class="font-semibold text-gray-800">Gmail Not Connected</p>
+            <p class="text-sm text-gray-500 mt-1">Connect your Gmail to send roof measurement reports directly to clients.</p>
+            ${needsSetup ? `
+              <div class="mt-3 bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">
+                <p class="font-semibold mb-1"><i class="fas fa-exclamation-triangle mr-1"></i>Setup Required:</p>
+                <ol class="list-decimal list-inside space-y-1 text-amber-700">
+                  <li>Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank" class="underline font-medium">Google Cloud Console</a></li>
+                  <li>Create an <strong>OAuth 2.0 Client ID</strong> (Web application)</li>
+                  <li>Add redirect URI: <code class="bg-amber-100 px-1 rounded">{your-domain}/api/auth/gmail/callback</code></li>
+                  <li>Add <strong>GMAIL_CLIENT_ID</strong> and <strong>GMAIL_CLIENT_SECRET</strong> to .dev.vars</li>
+                  <li>Restart the app, then click "Connect Gmail" below</li>
+                </ol>
+              </div>
+            ` : ''}
+          </div>
+        </div>
+        <div>
+          ${hasClientId && hasClientSecret ? `
+            <a href="/api/auth/gmail" class="inline-flex items-center px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700 transition-colors shadow-sm">
+              <i class="fab fa-google mr-2"></i>Connect Gmail
+            </a>
+          ` : `
+            <span class="px-3 py-1 bg-gray-100 text-gray-500 rounded-full text-xs font-medium">Setup Needed</span>
+          `}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function testGmailSend() {
+  const user = JSON.parse(localStorage.getItem('rc_user') || '{}');
+  const email = prompt('Send a test email to:', user.email || '');
+  if (!email) return;
+
+  try {
+    // Find any completed order for testing
+    const order = adminState.orders.find(o => o.status === 'completed');
+    if (!order) {
+      alert('No completed reports available. Generate a report first, then test email.');
+      return;
+    }
+
+    const res = await fetch(`/api/reports/${order.id}/email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to_email: email })
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      alert('Test email sent successfully to ' + email + ' via ' + data.email_method);
+    } else {
+      alert('Email failed: ' + (data.error || 'Unknown error') + (data.fix ? '\n\nFix: ' + data.fix : ''));
+    }
+  } catch (e) {
+    alert('Error: ' + e.message);
+  }
 }
 
 // ============================================================

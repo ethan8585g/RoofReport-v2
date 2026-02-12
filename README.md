@@ -2,15 +2,16 @@
 
 ## Project Overview
 - **Name**: Reuse Canada Roof Measurement Reports
-- **Version**: 4.1 (RAS Pipeline Removed, Email Provider Fix, Rural Property Handling)
+- **Version**: 4.2 (Gmail OAuth2 Integration for Personal Gmail Email Delivery)
 - **Goal**: Professional roof measurement reports for roofing contractors installing new roofs
-- **Features**: Marketing landing page, login/register system, admin dashboard with order management, Google Solar API, Material BOM, Edge Analysis, Multi-Provider Email Delivery
+- **Features**: Marketing landing page, login/register system, admin dashboard with order management, Google Solar API, Material BOM, Edge Analysis, Gmail OAuth2 Email Delivery
 
 ## URLs
 - **Live Sandbox**: https://3000-ing8ae0z5fkhj91kq4pyi-dfc00ec5.sandbox.novita.ai
 - **Login/Register**: https://3000-ing8ae0z5fkhj91kq4pyi-dfc00ec5.sandbox.novita.ai/login
 - **Admin Dashboard**: https://3000-ing8ae0z5fkhj91kq4pyi-dfc00ec5.sandbox.novita.ai/admin
 - **Health Check**: https://3000-ing8ae0z5fkhj91kq4pyi-dfc00ec5.sandbox.novita.ai/api/health
+- **Gmail Status**: https://3000-ing8ae0z5fkhj91kq4pyi-dfc00ec5.sandbox.novita.ai/api/auth/gmail/status
 - **Example Report (Order 17)**: https://3000-ing8ae0z5fkhj91kq4pyi-dfc00ec5.sandbox.novita.ai/api/reports/17/html
 
 ## User Flow
@@ -20,7 +21,7 @@
 4. Redirected to /admin dashboard
 5. Can order reports, view orders, track sales, manage companies
 6. Reports are generated via Google Solar API (urban) or estimated data (rural)
-7. Professional 3-page PDF-ready HTML reports delivered via email
+7. Professional 3-page PDF-ready HTML reports delivered via email (Gmail OAuth2)
 
 ## Authentication
 - First registered user gets **superadmin** role
@@ -51,10 +52,13 @@ Each report generates a branded 3-page HTML document:
 ## API Endpoints
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/health` | Service health + env status |
+| GET | `/api/health` | Service health + env status (includes Gmail OAuth2 status) |
 | POST | `/api/auth/register` | Create new account |
 | POST | `/api/auth/login` | Sign in |
 | GET | `/api/auth/users` | List all users |
+| GET | `/api/auth/gmail` | Start Gmail OAuth2 authorization (redirects to Google consent) |
+| GET | `/api/auth/gmail/callback` | OAuth2 callback (stores refresh token in DB) |
+| GET | `/api/auth/gmail/status` | Check Gmail OAuth2 connection status |
 | POST | `/api/orders` | Create order |
 | GET | `/api/orders` | List orders |
 | POST | `/api/reports/:id/generate` | Generate roof report |
@@ -62,6 +66,40 @@ Each report generates a branded 3-page HTML document:
 | POST | `/api/reports/:id/email` | Email report (supports `to_email`, `from_email`, `subject_override`) |
 | GET | `/api/admin/dashboard` | Admin analytics |
 | POST | `/api/admin/init-db` | Initialize/migrate database |
+
+## Gmail OAuth2 Email Delivery (NEW in v4.2)
+
+### How It Works
+The app uses OAuth2 with a refresh token to send emails as your personal Gmail account. This is the proper method for personal Gmail (domain-wide delegation only works with Google Workspace).
+
+### Setup Steps
+1. Go to [Google Cloud Console - Credentials](https://console.cloud.google.com/apis/credentials)
+2. Click "Create Credentials" > "OAuth 2.0 Client ID"
+3. Application type: **Web application**
+4. Name: "Reuse Canada Roof Reports"
+5. Authorized redirect URIs:
+   - Local: `http://localhost:3000/api/auth/gmail/callback`
+   - Sandbox: `https://3000-{sandbox-id}.sandbox.novita.ai/api/auth/gmail/callback`
+   - Production: `https://roofing-measurement-tool.pages.dev/api/auth/gmail/callback`
+6. Copy Client ID and Client Secret into `.dev.vars`:
+   ```
+   GMAIL_CLIENT_ID=your-client-id.apps.googleusercontent.com
+   GMAIL_CLIENT_SECRET=your-client-secret
+   ```
+7. Restart the app
+8. Visit `/api/auth/gmail` or click "Connect Gmail" in the admin dashboard
+9. Authorize with your Gmail account
+10. Refresh token is stored automatically in the database
+
+### Email Provider Priority
+1. **Gmail OAuth2** (preferred) - Sends as your personal Gmail (ethangourley17@gmail.com)
+2. **Resend API** (alternative) - Set `RESEND_API_KEY` in .dev.vars. Free at https://resend.com
+3. **Fallback** - Report HTML available at `/api/reports/:id/html`
+
+### Admin Dashboard
+The admin dashboard shows a Gmail connection card:
+- **Connected**: Green card with sender email and "Test Email" button
+- **Not Connected**: Amber card with setup instructions and "Connect Gmail" button
 
 ## Google Solar API Status
 - **Urban/Suburban**: Google Solar API returns **real building data** (HIGH quality, 0.1m/pixel)
@@ -73,70 +111,73 @@ Each report generates a branded 3-page HTML document:
   - Report clearly labeled: "estimated (location not in Google Solar coverage)"
   - Recommendation: field verification or aerial drone survey for precise measurements
 
-## Email Delivery
-Email provider priority:
-1. **Resend API** (recommended) - Set `RESEND_API_KEY` in .dev.vars. Free at https://resend.com (100 emails/day)
-2. **Gmail API** via Service Account - Requires Google Workspace with domain-wide delegation
-3. **Fallback** - Report HTML available at `/api/reports/:id/html`
-
-### Gmail API Issue (Personal Gmail)
-- Personal Gmail (@gmail.com) does **NOT** support domain-wide delegation
-- Service account cannot impersonate personal Gmail users
-- Solution: Use Resend API (or any transactional email service)
-- For Google Workspace users: configure domain-wide delegation in Admin Console
-
 ## Data Architecture
 - **Database**: Cloudflare D1 (SQLite)
 - **Tables**: admin_users, master_companies, customer_companies, orders, reports, payments, api_requests_log, user_activity_log, settings
 - **Storage**: Reports stored as HTML in D1, satellite imagery via Google Maps Static API
+- **Gmail Tokens**: Refresh tokens stored in `settings` table (key: `gmail_refresh_token`)
 
 ## Tech Stack
 - **Backend**: Cloudflare Workers + Hono framework
 - **Frontend**: Vanilla JS + Tailwind CSS (CDN)
 - **Maps**: Google Maps JS API + Static Maps
 - **AI**: Google Solar API (primary) + Gemini 2.0 Flash (secondary/AI analysis)
+- **Email**: Gmail OAuth2 (personal Gmail) / Resend API (alternative)
 - **Build**: Vite + TypeScript
 - **Auth**: Web Crypto API (SHA-256 password hashing)
 
 ## Environment Variables
-| Key | Description |
-|-----|-------------|
-| GOOGLE_SOLAR_API_KEY | Google Solar API for building insights |
-| GOOGLE_MAPS_API_KEY | Google Maps (frontend, publishable) |
-| GOOGLE_VERTEX_API_KEY | Gemini REST API key |
-| GOOGLE_CLOUD_PROJECT | GCP project ID |
-| GOOGLE_CLOUD_LOCATION | GCP location |
-| GCP_SERVICE_ACCOUNT_KEY | Full JSON service account key |
-| GMAIL_SENDER_EMAIL | Email to impersonate for Gmail API (Workspace only) |
-| RESEND_API_KEY | Resend.com API key (recommended for email) |
+| Key | Description | Required |
+|-----|-------------|----------|
+| GOOGLE_SOLAR_API_KEY | Google Solar API for building insights | Yes |
+| GOOGLE_MAPS_API_KEY | Google Maps (frontend, publishable) | Yes |
+| GOOGLE_VERTEX_API_KEY | Gemini REST API key | Yes |
+| GOOGLE_CLOUD_PROJECT | GCP project ID | Yes |
+| GOOGLE_CLOUD_LOCATION | GCP location | Yes |
+| GCP_SERVICE_ACCOUNT_KEY | Full JSON service account key | Yes |
+| GMAIL_CLIENT_ID | OAuth2 Client ID for Gmail | For email |
+| GMAIL_CLIENT_SECRET | OAuth2 Client Secret for Gmail | For email |
+| GMAIL_REFRESH_TOKEN | OAuth2 refresh token (auto-stored in DB) | Auto |
+| GMAIL_SENDER_EMAIL | Gmail address (ethangourley17@gmail.com) | For email |
+| RESEND_API_KEY | Resend.com API key (alternative email) | Optional |
 
-## v4.1 Changes (Current)
-- **Removed**: RAS yield computation from report generation pipeline (was still being computed)
-- **Fixed**: Gmail API error handling - clear message that personal Gmail doesn't support delegation
-- **Added**: Resend API as recommended email provider for personal Gmail users
-- **Improved**: Google Solar API error handling for rural/acreage properties
-  - 404 now shows "estimated (location not in Google Solar coverage)"
-  - Quality notes explain rural property limitations
-  - Recommends field verification for precise measurements
-- **Added**: GMAIL_SENDER_EMAIL and RESEND_API_KEY env vars
-- **Added**: Email provider priority: Resend > Gmail API > Fallback URL
+## Version History
 
-## v4.0 Changes
+### v4.2 (Current)
+- **Added**: Gmail OAuth2 integration for personal Gmail email delivery
+  - OAuth2 consent flow at `/api/auth/gmail`
+  - Callback handler stores refresh token in D1 database
+  - Status endpoint at `/api/auth/gmail/status`
+  - Email sender uses refresh token to get access tokens
+  - Checks both env vars and DB for stored refresh tokens
+- **Added**: Gmail connection card in admin dashboard
+  - Shows connection status (connected/not connected)
+  - "Connect Gmail" button for one-click authorization
+  - "Test Email" button when connected
+  - Step-by-step setup instructions when not configured
+- **Updated**: Health check shows Gmail OAuth2 configuration status
+- **Updated**: Email provider priority: Gmail OAuth2 > Resend > Fallback
+
+### v4.1
+- Removed RAS yield computation from report generation pipeline
+- Fixed Gmail API error handling for personal Gmail accounts
+- Added Resend API as recommended email provider
+- Improved Google Solar API handling for rural/acreage properties
+
+### v4.0
 - Theme: Green to modern white/blue palette
 - Removed: AI Measure button, "Powered by Google Solar AI" branding
-- Removed: All RAS content from report HTML output
 - Added: Login/register page, auth system, admin auth guard
 - Added: New Order tab in admin, email report button
-- Fixed: Mock roof area range (1100-1800 sqft footprint)
 
 ## Next Steps
-1. **Email Delivery**: Sign up at https://resend.com, get API key, set RESEND_API_KEY in .dev.vars
-2. **Measurements**: For rural properties, integrate aerial drone imagery or manual input for precise area
-3. **Stripe Payments**: Set STRIPE_SECRET_KEY and STRIPE_PUBLISHABLE_KEY for payment processing
+1. **Gmail Setup**: Create OAuth2 credentials in GCP Console, visit `/api/auth/gmail` to authorize
+2. **Measurements**: For rural properties, integrate aerial drone imagery or manual input
+3. **Stripe Payments**: Set STRIPE_SECRET_KEY and STRIPE_PUBLISHABLE_KEY
 4. **Cloudflare Deploy**: Deploy to production with `npx wrangler pages deploy dist`
 
 ## Deployment
 - **Platform**: Cloudflare Pages (via Wrangler)
 - **Status**: Active (Sandbox)
-- **Last Updated**: 2026-02-11
+- **Last Updated**: 2026-02-12
 - **Build**: `npm run build` (Vite SSR)

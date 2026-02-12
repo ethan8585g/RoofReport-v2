@@ -296,16 +296,47 @@ reportsRoutes.post('/:orderId/email', async (c) => {
     let emailMethod = 'none'
 
     // ---- EMAIL PROVIDER PRIORITY ----
-    // 1. Resend API (recommended — works with any email, no Workspace needed)
-    // 2. Gmail API via service account + domain-wide delegation (Workspace only)
-    // 3. Fallback: report available at HTML URL
+    // 1. Gmail OAuth2 (personal Gmail — uses refresh token from one-time consent)
+    // 2. Resend API (simple transactional email service)
+    // 3. Gmail API via service account + domain-wide delegation (Workspace only)
+    // 4. Fallback: report available at HTML URL
 
+    let gmailRefreshToken = (c.env as any).GMAIL_REFRESH_TOKEN || ''
+    const gmailClientId = (c.env as any).GMAIL_CLIENT_ID || ''
+    const gmailClientSecret = (c.env as any).GMAIL_CLIENT_SECRET || ''
     const resendApiKey = (c.env as any).RESEND_API_KEY
     const saKey = c.env.GCP_SERVICE_ACCOUNT_KEY
     const senderEmail = from_email || c.env.GMAIL_SENDER_EMAIL || null
 
-    if (resendApiKey) {
-      // ---- RESEND API (Recommended) ----
+    // If no refresh token in env, check the DB (stored from /api/auth/gmail/callback)
+    if (!gmailRefreshToken && gmailClientId && gmailClientSecret) {
+      try {
+        const row = await c.env.DB.prepare(
+          "SELECT setting_value FROM settings WHERE setting_key = 'gmail_refresh_token' AND master_company_id = 1"
+        ).first<any>()
+        if (row?.setting_value) {
+          gmailRefreshToken = row.setting_value
+          console.log('[Email] Using Gmail refresh token from database')
+        }
+      } catch (e) { /* settings table might not exist */ }
+    }
+
+    if (gmailRefreshToken && gmailClientId && gmailClientSecret) {
+      // ---- GMAIL OAUTH2 (Personal Gmail — Best option) ----
+      try {
+        await sendGmailOAuth2(gmailClientId, gmailClientSecret, gmailRefreshToken, recipientEmail, subject, emailHtml, senderEmail)
+        emailMethod = 'gmail_oauth2'
+      } catch (gmailErr: any) {
+        console.error('[Email] Gmail OAuth2 failed:', gmailErr.message)
+        return c.json({
+          error: 'Gmail OAuth2 send failed: ' + (gmailErr.message || '').substring(0, 300),
+          fallback_url: `/api/reports/${orderId}/html`,
+          report_available: true,
+          fix: 'Refresh token may be expired. Visit /api/auth/gmail to re-authorize.'
+        }, 500)
+      }
+    } else if (resendApiKey) {
+      // ---- RESEND API ----
       try {
         await sendViaResend(resendApiKey, recipientEmail, subject, emailHtml, senderEmail)
         emailMethod = 'resend'
@@ -318,43 +349,15 @@ reportsRoutes.post('/:orderId/email', async (c) => {
           fix: 'Check RESEND_API_KEY is valid. Get one free at https://resend.com'
         }, 500)
       }
-    } else if (saKey) {
-      // ---- GMAIL API via Service Account ----
-      try {
-        await sendGmailEmail(saKey, recipientEmail, subject, emailHtml, senderEmail)
-        emailMethod = 'gmail_api'
-      } catch (gmailErr: any) {
-        console.error('[Email] Gmail API failed:', gmailErr.message)
-        const errMsg = gmailErr.message || ''
-        const isDelegation = errMsg.includes('unauthorized_client') || errMsg.includes('access_denied') || errMsg.includes('Precondition')
-
-        return c.json({
-          error: 'Gmail API send failed: ' + errMsg.substring(0, 300),
-          fallback_url: `/api/reports/${orderId}/html`,
-          report_available: true,
-          gmail_api_fix: isDelegation ? {
-            issue: 'Gmail API requires Google Workspace with domain-wide delegation for service accounts.',
-            personal_gmail_note: 'Personal Gmail (e.g. @gmail.com) does NOT support domain-wide delegation.',
-            recommended_fix: 'Use Resend API instead — set RESEND_API_KEY in .dev.vars. Free at https://resend.com',
-            workspace_fix: {
-              step1: 'Google Workspace Admin > Security > API Controls > Domain-wide Delegation',
-              step2: 'Add service account client ID with scope: https://www.googleapis.com/auth/gmail.send',
-              step3: 'Set GMAIL_SENDER_EMAIL to a Workspace user email'
-            }
-          } : {
-            hint: 'Error: ' + errMsg.substring(0, 200),
-            recommended_fix: 'Use Resend API instead — set RESEND_API_KEY in .dev.vars'
-          }
-        }, 500)
-      }
     } else {
       return c.json({
         error: 'No email provider configured',
         fallback_url: `/api/reports/${orderId}/html`,
         report_available: true,
         setup: {
-          recommended: 'Set RESEND_API_KEY in .dev.vars (free at https://resend.com — 100 emails/day)',
-          alternative: 'Set GCP_SERVICE_ACCOUNT_KEY + GMAIL_SENDER_EMAIL (requires Google Workspace)'
+          recommended: 'Visit /api/auth/gmail to set up Gmail OAuth2 (sends as your personal Gmail)',
+          alternative: 'Set RESEND_API_KEY in .dev.vars (free at https://resend.com)',
+          note: 'Gmail OAuth2 requires GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, and GMAIL_REFRESH_TOKEN'
         }
       }, 400)
     }
@@ -591,6 +594,97 @@ async function sendViaResend(
   if (!response.ok) {
     const errBody = await response.text()
     throw new Error(`Resend API error (${response.status}): ${errBody}`)
+  }
+}
+
+// ============================================================
+// GMAIL OAUTH2 — Send email using OAuth2 refresh token
+// Works with personal Gmail. One-time consent at /api/auth/gmail
+// ============================================================
+async function sendGmailOAuth2(
+  clientId: string, clientSecret: string, refreshToken: string,
+  to: string, subject: string, htmlBody: string,
+  senderEmail?: string | null
+): Promise<void> {
+  // Exchange refresh token for access token
+  const tokenResp = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken
+    }).toString()
+  })
+
+  if (!tokenResp.ok) {
+    const err = await tokenResp.text()
+    throw new Error(`Gmail OAuth2 token refresh failed (${tokenResp.status}): ${err}`)
+  }
+
+  const tokenData: any = await tokenResp.json()
+  const accessToken = tokenData.access_token
+
+  // Build RFC 2822 email
+  const boundary = 'boundary_' + Date.now()
+  const fromAddr = senderEmail || 'me'
+
+  // Base64 encode the HTML body in chunks
+  const htmlBodyBytes = new TextEncoder().encode(htmlBody)
+  let htmlBase64 = ''
+  const chunk = 3 * 1024
+  for (let i = 0; i < htmlBodyBytes.length; i += chunk) {
+    const slice = htmlBodyBytes.slice(i, i + chunk)
+    let binary = ''
+    for (let j = 0; j < slice.length; j++) binary += String.fromCharCode(slice[j])
+    htmlBase64 += btoa(binary)
+  }
+
+  const rawMessage = [
+    `From: Reuse Canada Reports <${fromAddr}>`,
+    `To: ${to}`,
+    `Subject: =?UTF-8?B?${btoa(unescape(encodeURIComponent(subject)))}?=`,
+    `MIME-Version: 1.0`,
+    `Content-Type: multipart/alternative; boundary="${boundary}"`,
+    '',
+    `--${boundary}`,
+    'Content-Type: text/plain; charset=UTF-8',
+    'Content-Transfer-Encoding: 7bit',
+    '',
+    'Your professional roof measurement report is ready. View this email in an HTML-capable client to see the full 3-page report.',
+    '',
+    `--${boundary}`,
+    'Content-Type: text/html; charset=UTF-8',
+    'Content-Transfer-Encoding: base64',
+    '',
+    htmlBase64,
+    '',
+    `--${boundary}--`
+  ].join('\r\n')
+
+  // Encode to base64url for Gmail API
+  const messageBytes = new TextEncoder().encode(rawMessage)
+  let messageBinary = ''
+  for (let i = 0; i < messageBytes.length; i++) messageBinary += String.fromCharCode(messageBytes[i])
+  const encodedMessage = btoa(messageBinary)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '')
+
+  // Send via Gmail API — 'me' = the authorized user
+  const sendResp = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ raw: encodedMessage })
+  })
+
+  if (!sendResp.ok) {
+    const err = await sendResp.text()
+    throw new Error(`Gmail send failed (${sendResp.status}): ${err}`)
   }
 }
 
