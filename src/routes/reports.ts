@@ -97,6 +97,7 @@ reportsRoutes.post('/:orderId/generate', async (c) => {
 
     // Try real Google Solar API
     const solarApiKey = c.env.GOOGLE_SOLAR_API_KEY
+    const mapsApiKey = c.env.GOOGLE_MAPS_API_KEY || solarApiKey  // MAPS key preferred for Street View
     if (solarApiKey && order.latitude && order.longitude) {
       try {
         reportData = await callGoogleSolarAPI(
@@ -104,7 +105,8 @@ reportsRoutes.post('/:orderId/generate', async (c) => {
           order.longitude,
           solarApiKey,
           parseInt(orderId),
-          order
+          order,
+          mapsApiKey
         )
         apiDuration = Date.now() - startTime
         reportData.metadata.api_duration_ms = apiDuration
@@ -123,7 +125,7 @@ reportsRoutes.post('/:orderId/generate', async (c) => {
           VALUES (?, 'google_solar_api', 'buildingInsights:findClosest', ?, ?, ?)
         `).bind(orderId, isNotFound ? 404 : 500, apiErr.message.substring(0, 500), apiDuration).run()
 
-        reportData = generateMockRoofReport(order)
+        reportData = generateMockRoofReport(order, mapsApiKey)
         reportData.metadata.provider = isNotFound
           ? 'estimated (location not in Google Solar coverage — rural/acreage property)'
           : `estimated (Solar API error: ${apiErr.message.substring(0, 100)})`
@@ -140,7 +142,7 @@ reportsRoutes.post('/:orderId/generate', async (c) => {
             ]
       }
     } else {
-      reportData = generateMockRoofReport(order)
+      reportData = generateMockRoofReport(order, mapsApiKey)
     }
 
     // Generate professional HTML report
@@ -693,8 +695,9 @@ async function sendGmailOAuth2(
 // ============================================================
 async function callGoogleSolarAPI(
   lat: number, lng: number, apiKey: string,
-  orderId: number, order: any
+  orderId: number, order: any, mapsKey?: string
 ): Promise<RoofReport> {
+  const imageKey = mapsKey || apiKey  // Prefer MAPS key for image APIs
   // Optimal API parameters from deep research:
   // - requiredQuality=HIGH: 0.1m/pixel resolution from low-altitude aerial imagery
   // - This gives us 98.77% accuracy validated against industry benchmarks
@@ -812,10 +815,21 @@ async function callGoogleSolarAPI(
     num_panels_possible: maxPanels,
     yearly_energy_kwh: Math.round(yearlyEnergy),
     imagery: {
-      satellite_url: `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=20&size=600x400&maptype=satellite&key=${apiKey}`,
+      satellite_url: `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=20&size=600x400&maptype=satellite&key=${imageKey}`,
       dsm_url: null,
       mask_url: null,
-      flux_url: null
+      flux_url: null,
+      // Street View images from 4 cardinal directions, pitched up to show the roof
+      // heading: 0=North, 90=East, 180=South, 270=West (direction camera is FACING)
+      // We point the camera TOWARD the house from each side:
+      //   North view = camera south of house facing north (heading=0)
+      //   South view = camera north of house facing south (heading=180)
+      //   East view = camera west of house facing east (heading=90)
+      //   West view = camera east of house facing west (heading=270)
+      north_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&location=${lat},${lng}&heading=0&pitch=25&fov=90&key=${imageKey}`,
+      south_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&location=${lat},${lng}&heading=180&pitch=25&fov=90&key=${imageKey}`,
+      east_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&location=${lat},${lng}&heading=90&pitch=25&fov=90&key=${imageKey}`,
+      west_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&location=${lat},${lng}&heading=270&pitch=25&fov=90&key=${imageKey}`,
     },
     quality: {
       imagery_quality: imageryQuality as any,
@@ -840,7 +854,7 @@ async function callGoogleSolarAPI(
 // MOCK DATA GENERATOR — Full v2.0 report with edges + materials
 // Generates realistic Alberta residential roof data
 // ============================================================
-function generateMockRoofReport(order: any): RoofReport {
+function generateMockRoofReport(order: any, apiKey?: string): RoofReport {
   const lat = order.latitude
   const lng = order.longitude
   const orderId = order.id
@@ -926,11 +940,23 @@ function generateMockRoofReport(order: any): RoofReport {
     yearly_energy_kwh: Math.round(panelCount * 400),
     imagery: {
       satellite_url: lat && lng
-        ? `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=20&size=600x400&maptype=satellite`
+        ? `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=20&size=600x400&maptype=satellite${apiKey ? `&key=${apiKey}` : ''}`
         : null,
       dsm_url: null,
       mask_url: null,
-      flux_url: null
+      flux_url: null,
+      north_url: lat && lng && apiKey
+        ? `https://maps.googleapis.com/maps/api/streetview?size=600x400&location=${lat},${lng}&heading=0&pitch=25&fov=90&key=${apiKey}`
+        : null,
+      south_url: lat && lng && apiKey
+        ? `https://maps.googleapis.com/maps/api/streetview?size=600x400&location=${lat},${lng}&heading=180&pitch=25&fov=90&key=${apiKey}`
+        : null,
+      east_url: lat && lng && apiKey
+        ? `https://maps.googleapis.com/maps/api/streetview?size=600x400&location=${lat},${lng}&heading=90&pitch=25&fov=90&key=${apiKey}`
+        : null,
+      west_url: lat && lng && apiKey
+        ? `https://maps.googleapis.com/maps/api/streetview?size=600x400&location=${lat},${lng}&heading=270&pitch=25&fov=90&key=${apiKey}`
+        : null,
     },
     quality: {
       imagery_quality: 'BASE',
@@ -1126,6 +1152,10 @@ function generateProfessionalReportHTML(report: RoofReport): string {
   const nailLbs = Math.ceil(grossSquares * 1.5)
   const cementTubes = Math.max(2, Math.ceil(grossSquares / 15))
   const satelliteUrl = report.imagery?.satellite_url || ''
+  const northUrl = report.imagery?.north_url || ''
+  const southUrl = report.imagery?.south_url || ''
+  const eastUrl = report.imagery?.east_url || ''
+  const westUrl = report.imagery?.west_url || ''
   // Facet colors for the roof diagram
   const facetColors = ['#FF6B8A','#5B9BD5','#70C070','#FFB347','#C084FC','#F472B6','#34D399','#FBBF24','#60A5FA','#A78BFA','#FB923C','#4ADE80']
 
@@ -1273,20 +1303,33 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
   </div>
   <div class="p1-addr">${fullAddress}</div>
 
-  <!-- Aerial Views -->
-  <div class="p1-section-label">AERIAL VIEWS</div>
-  <div class="p1-aerial">
-    <div class="p1-aerial-card">
-      ${satelliteUrl ? `<img src="${satelliteUrl}" alt="Top View" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-aerial-placeholder" style="display:none">TOP</div>` : '<div class="p1-aerial-placeholder">TOP</div>'}
-      <div class="p1-aerial-label">Top</div>
+  <!-- Aerial & Directional Roof Views -->
+  <div class="p1-section-label">ROOF IMAGERY</div>
+  <div style="display:grid;grid-template-columns:1.6fr 1fr 1fr;grid-template-rows:auto auto;gap:8px;margin-bottom:14px">
+    <!-- Top satellite (large, spans 2 rows) -->
+    <div class="p1-aerial-card" style="grid-row:1/3">
+      ${satelliteUrl ? `<img src="${satelliteUrl}" alt="Top View" style="height:100%;min-height:160px" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-aerial-placeholder" style="display:none;height:100%">TOP</div>` : '<div class="p1-aerial-placeholder" style="height:100%">TOP</div>'}
+      <div class="p1-aerial-label">Satellite (Top-Down)</div>
     </div>
+    <!-- North -->
     <div class="p1-aerial-card">
-      <div class="p1-aerial-placeholder">NORTH</div>
+      ${northUrl ? `<img src="${northUrl}" alt="North View" style="height:80px" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-aerial-placeholder" style="display:none;height:80px">N</div>` : '<div class="p1-aerial-placeholder" style="height:80px">N</div>'}
       <div class="p1-aerial-label">North</div>
     </div>
+    <!-- East -->
     <div class="p1-aerial-card">
-      <div class="p1-aerial-placeholder">EAST</div>
+      ${eastUrl ? `<img src="${eastUrl}" alt="East View" style="height:80px" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-aerial-placeholder" style="display:none;height:80px">E</div>` : '<div class="p1-aerial-placeholder" style="height:80px">E</div>'}
       <div class="p1-aerial-label">East</div>
+    </div>
+    <!-- South -->
+    <div class="p1-aerial-card">
+      ${southUrl ? `<img src="${southUrl}" alt="South View" style="height:80px" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-aerial-placeholder" style="display:none;height:80px">S</div>` : '<div class="p1-aerial-placeholder" style="height:80px">S</div>'}
+      <div class="p1-aerial-label">South</div>
+    </div>
+    <!-- West -->
+    <div class="p1-aerial-card">
+      ${westUrl ? `<img src="${westUrl}" alt="West View" style="height:80px" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-aerial-placeholder" style="display:none;height:80px">W</div>` : '<div class="p1-aerial-placeholder" style="height:80px">W</div>'}
+      <div class="p1-aerial-label">West</div>
     </div>
   </div>
 
@@ -1326,10 +1369,17 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
     <div class="p1-lin-item">RAKE: <b>${es.total_rake_ft} ft</b></div>
   </div>
 
-  <!-- Customer Preview -->
-  <div class="p1-section-label">CUSTOMER PREVIEW</div>
-  <div class="p1-preview">
-    ${satelliteUrl ? `<img src="${satelliteUrl}" alt="Satellite View" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-preview-placeholder" style="display:none">Satellite imagery unavailable</div>` : '<div class="p1-preview-placeholder">Satellite imagery - configure GOOGLE_MAPS_API_KEY</div>'}
+  <!-- Additional Views -->
+  <div class="p1-section-label">PROPERTY OVERVIEW</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+    <div class="p1-aerial-card">
+      ${satelliteUrl ? `<img src="${satelliteUrl.replace('zoom=20','zoom=19')}" alt="Property Overview" style="height:120px" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-aerial-placeholder" style="display:none;height:120px">OVERVIEW</div>` : '<div class="p1-aerial-placeholder" style="height:120px">OVERVIEW</div>'}
+      <div class="p1-aerial-label">Property Context (Wider View)</div>
+    </div>
+    <div class="p1-aerial-card">
+      ${satelliteUrl ? `<img src="${satelliteUrl.replace('zoom=20','zoom=21').replace('600x400','600x400')}" alt="Close-up" style="height:120px" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-aerial-placeholder" style="display:none;height:120px">CLOSE-UP</div>` : '<div class="p1-aerial-placeholder" style="height:120px">CLOSE-UP</div>'}
+      <div class="p1-aerial-label">Roof Close-Up (Max Zoom)</div>
+    </div>
   </div>
 
   <!-- Badges -->

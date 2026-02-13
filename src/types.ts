@@ -391,6 +391,11 @@ export interface RoofReport {
     dsm_url: string | null
     mask_url: string | null
     flux_url: string | null
+    // Directional roof views (Street View Static API with heading toward house)
+    north_url: string | null
+    south_url: string | null
+    east_url: string | null
+    west_url: string | null
   }
 
   // ---- DATA QUALITY ----
