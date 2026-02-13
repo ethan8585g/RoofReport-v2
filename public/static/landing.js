@@ -68,7 +68,7 @@ function renderHero() {
             </h1>
 
             <p class="text-lg lg:text-xl text-gray-300 mb-8 max-w-xl leading-relaxed">
-              Get accurate roof area, pitch analysis, edge breakdowns, material estimates, and solar potential — all from a satellite image. Delivered to your inbox starting at <strong class="text-white">$10 CAD</strong>.
+              Get accurate roof area, pitch analysis, edge breakdowns, material estimates, and solar potential — all from a satellite image. Delivered to your inbox starting at <strong class="text-white">$8 CAD</strong>.
             </p>
 
             <div class="flex flex-col sm:flex-row gap-4 mb-8">
@@ -86,11 +86,11 @@ function renderHero() {
             <div class="flex items-center gap-8 text-sm">
               <div class="flex items-center gap-2">
                 <i class="fas fa-check-circle text-green-400"></i>
-                <span class="text-gray-300">Reports from <strong class="text-white">$10</strong></span>
+                <span class="text-gray-300">Reports from <strong class="text-white">$8</strong></span>
               </div>
               <div class="flex items-center gap-2">
                 <i class="fas fa-check-circle text-green-400"></i>
-                <span class="text-gray-300">Under <strong class="text-white">5 min</strong> delivery</span>
+                <span class="text-gray-300">As fast as <strong class="text-white">10 min</strong> delivery</span>
               </div>
               <div class="flex items-center gap-2">
                 <i class="fas fa-check-circle text-green-400"></i>
@@ -227,7 +227,7 @@ function renderHowItWorks() {
       icon: 'fas fa-credit-card',
       color: 'bg-accent-500',
       title: 'Pay & Order',
-      desc: 'Secure checkout. From $10 CAD. Payment processes instantly and your report starts generating immediately.'
+      desc: 'Secure checkout. From $8 CAD. Payment processes instantly and your report starts generating immediately.'
     },
     {
       num: 4,
@@ -316,10 +316,10 @@ function renderFeatures() {
 function renderPricing() {
   const plans = [
     {
-      id: 'regular',
-      name: 'Regular',
-      price: 10,
-      time: '45 min — 1.5 hours',
+      id: 'standard',
+      name: 'Standard',
+      price: 8,
+      time: '1 hour',
       icon: 'fas fa-clock',
       color: 'brand',
       gradient: 'from-brand-500 to-brand-600',
@@ -327,26 +327,15 @@ function renderPricing() {
       features: ['Full measurement report', 'Edge breakdown', 'Material BOM', 'Solar potential analysis', 'PDF download', 'Email delivery']
     },
     {
-      id: 'urgent',
-      name: 'Urgent',
-      price: 15,
-      time: '15 — 30 minutes',
+      id: 'express',
+      name: 'Express',
+      price: 12,
+      time: '10 minutes',
       icon: 'fas fa-bolt',
       color: 'accent',
       gradient: 'from-accent-500 to-accent-600',
       popular: true,
-      features: ['Everything in Regular', 'Priority processing', 'Faster satellite fetch', 'Rush queue placement', 'SMS notification', 'Email delivery']
-    },
-    {
-      id: 'immediate',
-      name: 'Immediate',
-      price: 25,
-      time: 'Under 5 minutes',
-      icon: 'fas fa-rocket',
-      color: 'red',
-      gradient: 'from-red-500 to-red-600',
-      popular: false,
-      features: ['Everything in Urgent', 'Instant processing', 'Dedicated server queue', 'Real-time status updates', 'Priority support', 'Instant PDF + Email']
+      features: ['Everything in Standard', 'Priority processing', 'Faster satellite fetch', 'Rush queue placement', 'Email notification', 'Instant PDF + Email']
     }
   ];
 
@@ -358,7 +347,7 @@ function renderPricing() {
           <p class="text-lg text-gray-500 max-w-2xl mx-auto">Every plan includes the full professional report. The only difference is how fast you get it.</p>
         </div>
 
-        <div class="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto">
+        <div class="grid md:grid-cols-2 gap-8 max-w-3xl mx-auto">
           ${plans.map((p, i) => `
             <div class="scroll-animate opacity-0 translate-y-8 transition-all duration-700 relative ${p.popular ? 'md:-mt-4 md:mb-[-16px]' : ''}" style="transition-delay: ${i * 150}ms">
               ${p.popular ? '<div class="absolute -top-4 left-1/2 -translate-x-1/2 bg-accent-500 text-white text-xs font-bold px-4 py-1 rounded-full shadow-lg">MOST POPULAR</div>' : ''}
@@ -522,13 +511,13 @@ function renderTestimonials() {
       avatar: "MD"
     },
     {
-      quote: "The material BOM alone is worth the $10. I get shingle counts, underlayment rolls, even nail quantities. My supplier orders are accurate every time.",
+      quote: "The material BOM alone is worth the $8. I get shingle counts, underlayment rolls, even nail quantities. My supplier orders are accurate every time.",
       name: "Sarah K.",
       title: "Project Manager, Edmonton",
       avatar: "SK"
     },
     {
-      quote: "We run 15-20 estimates a week. At $10 per report, we save thousands compared to drone surveys. Plus we get the solar data for free — our customers love it.",
+      quote: "We run 15-20 estimates a week. At $8 per report, we save thousands compared to drone surveys. Plus we get the solar data for free — our customers love it.",
       name: "James R.",
       title: "Owner, Prairie Roofing Co.",
       avatar: "JR"
@@ -640,7 +629,7 @@ function renderFinalCTA() {
         <div class="flex flex-col sm:flex-row gap-4 justify-center mb-8">
           <a href="/login" class="inline-flex items-center justify-center gap-2 bg-accent-500 hover:bg-accent-600 text-white font-bold py-4 px-10 rounded-xl text-lg shadow-xl shadow-accent-500/25 transition-all hover:scale-105">
             <i class="fas fa-ruler-combined"></i>
-            Order Your First Report — $10
+            Order Your First Report — $8
           </a>
         </div>
 

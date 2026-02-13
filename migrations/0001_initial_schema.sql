@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS orders (
   requester_email TEXT,
   requester_phone TEXT,
   -- Service tier
-  service_tier TEXT NOT NULL CHECK(service_tier IN ('immediate', 'urgent', 'regular')),
+  service_tier TEXT NOT NULL CHECK(service_tier IN ('express', 'standard', 'immediate', 'urgent', 'regular')),
   price REAL NOT NULL,
   -- Status
   status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'paid', 'processing', 'completed', 'failed', 'refunded', 'cancelled')),

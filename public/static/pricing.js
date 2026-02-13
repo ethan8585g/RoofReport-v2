@@ -19,9 +19,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 function renderPricing(root, packages) {
   // Per-report pricing
   const perReport = [
-    { tier: 'regular', label: 'Regular', desc: 'Delivered in ~1.5 hours', price: 10, icon: 'fa-clock', color: 'green' },
-    { tier: 'urgent', label: 'Urgent', desc: 'Delivered in ~30 minutes', price: 15, icon: 'fa-bolt', color: 'amber' },
-    { tier: 'immediate', label: 'Immediate', desc: 'Delivered in ~5 minutes', price: 25, icon: 'fa-rocket', color: 'red' },
+    { tier: 'standard', label: 'Standard', desc: 'Delivered in ~1 hour', price: 8, icon: 'fa-clock', color: 'green' },
+    { tier: 'express', label: 'Express', desc: 'Delivered in ~10 minutes', price: 12, icon: 'fa-bolt', color: 'red', popular: true },
   ];
 
   root.innerHTML = `
@@ -67,10 +66,10 @@ function renderPricing(root, packages) {
 
     <!-- Per-Report Pricing -->
     <h2 class="text-2xl font-bold text-gray-800 mb-6 text-center">Per-Report Pricing</h2>
-    <div class="grid md:grid-cols-3 gap-6 mb-16">
+    <div class="grid md:grid-cols-2 gap-6 mb-16 max-w-3xl mx-auto">
       ${perReport.map(p => `
-        <div class="bg-white rounded-2xl border border-gray-200 p-6 hover:shadow-lg transition-shadow ${p.tier === 'urgent' ? 'ring-2 ring-brand-500 relative' : ''}">
-          ${p.tier === 'urgent' ? '<div class="absolute -top-3 left-1/2 -translate-x-1/2 bg-brand-500 text-white px-4 py-1 rounded-full text-xs font-bold">POPULAR</div>' : ''}
+        <div class="bg-white rounded-2xl border border-gray-200 p-6 hover:shadow-lg transition-shadow ${p.popular ? 'ring-2 ring-brand-500 relative' : ''}">
+          ${p.popular ? '<div class="absolute -top-3 left-1/2 -translate-x-1/2 bg-brand-500 text-white px-4 py-1 rounded-full text-xs font-bold">POPULAR</div>' : ''}
           <div class="text-center mb-6">
             <div class="w-14 h-14 bg-${p.color}-100 rounded-xl flex items-center justify-center mx-auto mb-3">
               <i class="fas ${p.icon} text-${p.color}-500 text-xl"></i>
@@ -90,7 +89,7 @@ function renderPricing(root, packages) {
             <li class="flex items-center gap-2 text-gray-600"><i class="fas fa-check text-green-500"></i>Solar potential data</li>
             <li class="flex items-center gap-2 text-gray-600"><i class="fas fa-check text-green-500"></i>AI complexity scoring</li>
           </ul>
-          <a href="/customer/login" class="block w-full py-3 text-center font-bold rounded-xl transition-all hover:scale-[1.02] ${p.tier === 'urgent' ? 'bg-brand-600 hover:bg-brand-700 text-white shadow-lg' : 'bg-gray-100 hover:bg-gray-200 text-gray-800'}">
+          <a href="/customer/login" class="block w-full py-3 text-center font-bold rounded-xl transition-all hover:scale-[1.02] ${p.popular ? 'bg-brand-600 hover:bg-brand-700 text-white shadow-lg' : 'bg-gray-100 hover:bg-gray-200 text-gray-800'}">
             Get Started
           </a>
         </div>

@@ -15,12 +15,10 @@ function generateOrderNumber(): string {
 function getDeliveryEstimate(tier: string): string {
   const now = new Date()
   switch (tier) {
-    case 'immediate':
-      return new Date(now.getTime() + 5 * 60000).toISOString() // 5 min
-    case 'urgent':
-      return new Date(now.getTime() + 30 * 60000).toISOString() // 15-30 min
-    case 'regular':
-      return new Date(now.getTime() + 90 * 60000).toISOString() // 45min-1.5hr
+    case 'express':
+      return new Date(now.getTime() + 10 * 60000).toISOString() // 10 min
+    case 'standard':
+      return new Date(now.getTime() + 60 * 60000).toISOString() // 1 hour
     default:
       return new Date(now.getTime() + 60 * 60000).toISOString()
   }
@@ -29,10 +27,9 @@ function getDeliveryEstimate(tier: string): string {
 // Get price by tier
 function getTierPrice(tier: string): number {
   switch (tier) {
-    case 'immediate': return 25.00
-    case 'urgent': return 15.00
-    case 'regular': return 10.00
-    default: return 10.00
+    case 'express': return 12.00
+    case 'standard': return 8.00
+    default: return 8.00
   }
 }
 
@@ -53,8 +50,8 @@ ordersRoutes.post('/', async (c) => {
       return c.json({ error: 'Missing required fields: property_address, homeowner_name, requester_name, service_tier' }, 400)
     }
 
-    if (!['immediate', 'urgent', 'regular'].includes(service_tier)) {
-      return c.json({ error: 'Invalid service_tier. Must be: immediate, urgent, or regular' }, 400)
+    if (!['express', 'standard'].includes(service_tier)) {
+      return c.json({ error: 'Invalid service_tier. Must be: express or standard' }, 400)
     }
 
     const orderNumber = generateOrderNumber()
@@ -248,9 +245,8 @@ ordersRoutes.get('/stats/summary', async (c) => {
         SUM(CASE WHEN status = 'processing' THEN 1 ELSE 0 END) as processing_orders,
         SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_orders,
         SUM(CASE WHEN payment_status = 'paid' THEN price ELSE 0 END) as total_revenue,
-        SUM(CASE WHEN service_tier = 'immediate' THEN 1 ELSE 0 END) as immediate_orders,
-        SUM(CASE WHEN service_tier = 'urgent' THEN 1 ELSE 0 END) as urgent_orders,
-        SUM(CASE WHEN service_tier = 'regular' THEN 1 ELSE 0 END) as regular_orders
+        SUM(CASE WHEN service_tier = 'express' THEN 1 ELSE 0 END) as express_orders,
+        SUM(CASE WHEN service_tier = 'standard' THEN 1 ELSE 0 END) as standard_orders
       FROM orders
     `).first()
 

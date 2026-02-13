@@ -229,10 +229,10 @@ stripeRoutes.post('/checkout/report', async (c) => {
 
     if (!property_address) return c.json({ error: 'Property address is required' }, 400)
 
-    const tier = service_tier || 'regular'
-    const prices: Record<string, number> = { immediate: 2500, urgent: 1500, regular: 1000 }
-    const priceCents = prices[tier] || 1000
-    const tierLabels: Record<string, string> = { immediate: 'Immediate (5 min)', urgent: 'Urgent (30 min)', regular: 'Regular (1.5 hr)' }
+    const tier = service_tier || 'standard'
+    const prices: Record<string, number> = { express: 1200, standard: 800 }
+    const priceCents = prices[tier] || 800
+    const tierLabels: Record<string, string> = { express: 'Express (10 min)', standard: 'Standard (1 hour)' }
 
     // Ensure Stripe customer
     let stripeCustomerId = customer.stripe_customer_id
@@ -319,9 +319,9 @@ stripeRoutes.post('/use-credit', async (c) => {
 
     if (!property_address) return c.json({ error: 'Property address is required' }, 400)
 
-    const tier = service_tier || 'regular'
-    const tierPrices: Record<string, number> = { immediate: 25, urgent: 15, regular: 10 }
-    const price = tierPrices[tier] || 10
+    const tier = service_tier || 'standard'
+    const tierPrices: Record<string, number> = { express: 12, standard: 8 }
+    const price = tierPrices[tier] || 8
 
     // Ensure master company exists
     await c.env.DB.prepare(
@@ -335,7 +335,7 @@ stripeRoutes.post('/use-credit', async (c) => {
 
     // Delivery estimate
     const now = Date.now()
-    const deliveryMs: Record<string, number> = { immediate: 5 * 60000, urgent: 30 * 60000, regular: 90 * 60000 }
+    const deliveryMs: Record<string, number> = { express: 10 * 60000, standard: 60 * 60000 }
     const estimatedDelivery = new Date(now + (deliveryMs[tier] || 60 * 60000)).toISOString()
 
     // Create order (already paid via credits)
@@ -441,15 +441,15 @@ stripeRoutes.post('/webhook', async (c) => {
 
         if (meta.payment_type === 'one_time_report') {
           // Single report purchase — create order automatically
-          const tier = meta.service_tier || 'regular'
+          const tier = meta.service_tier || 'standard'
           const address = meta.property_address || 'Unknown address'
-          const tierPrices: Record<string, number> = { immediate: 25, urgent: 15, regular: 10 }
-          const price = tierPrices[tier] || 10
+          const tierPrices: Record<string, number> = { express: 12, standard: 8 }
+          const price = tierPrices[tier] || 8
 
           const d = new Date().toISOString().slice(0, 10).replace(/-/g, '')
           const rand = Math.floor(Math.random() * 9999).toString().padStart(4, '0')
           const orderNumber = `RM-${d}-${rand}`
-          const deliveryMs: Record<string, number> = { immediate: 5 * 60000, urgent: 30 * 60000, regular: 90 * 60000 }
+          const deliveryMs: Record<string, number> = { express: 10 * 60000, standard: 60 * 60000 }
           const estimatedDelivery = new Date(Date.now() + (deliveryMs[tier] || 60 * 60000)).toISOString()
 
           // Ensure master company exists

@@ -22,9 +22,8 @@ adminRoutes.get('/dashboard', async (c) => {
     const revenueStats = await c.env.DB.prepare(`
       SELECT
         SUM(CASE WHEN payment_status = 'paid' THEN price ELSE 0 END) as total_revenue,
-        SUM(CASE WHEN payment_status = 'paid' AND service_tier = 'immediate' THEN price ELSE 0 END) as immediate_revenue,
-        SUM(CASE WHEN payment_status = 'paid' AND service_tier = 'urgent' THEN price ELSE 0 END) as urgent_revenue,
-        SUM(CASE WHEN payment_status = 'paid' AND service_tier = 'regular' THEN price ELSE 0 END) as regular_revenue
+        SUM(CASE WHEN payment_status = 'paid' AND service_tier = 'express' THEN price ELSE 0 END) as express_revenue,
+        SUM(CASE WHEN payment_status = 'paid' AND service_tier = 'standard' THEN price ELSE 0 END) as standard_revenue
       FROM orders
     `).first()
 

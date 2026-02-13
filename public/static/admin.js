@@ -105,8 +105,8 @@ function statusBadge(s) {
 }
 
 function tierBadge(t) {
-  const m = { immediate:'bg-red-100 text-red-700', urgent:'bg-amber-100 text-amber-700', regular:'bg-green-100 text-green-700' };
-  const i = { immediate:'fa-rocket', urgent:'fa-bolt', regular:'fa-clock' };
+  const m = { express:'bg-red-100 text-red-700', standard:'bg-green-100 text-green-700', immediate:'bg-red-100 text-red-700', urgent:'bg-amber-100 text-amber-700', regular:'bg-green-100 text-green-700' };
+  const i = { express:'fa-bolt', standard:'fa-clock', immediate:'fa-rocket', urgent:'fa-bolt', regular:'fa-clock' };
   return `<span class="px-2 py-0.5 ${m[t]||'bg-gray-100'} rounded-full text-xs font-medium capitalize"><i class="fas ${i[t]||''} mr-0.5"></i>${t}</span>`;
 }
 
@@ -335,8 +335,8 @@ function renderEarnings() {
       ${section('Revenue by Service Tier', 'fa-layer-group', `
         <div class="space-y-4">
           ${(d.tier_stats||[]).map(t => {
-            const colors = { immediate:'red', urgent:'amber', regular:'green' };
-            const icons = { immediate:'fa-rocket', urgent:'fa-bolt', regular:'fa-clock' };
+            const colors = { express:'red', standard:'green', immediate:'red', urgent:'amber', regular:'green' };
+            const icons = { express:'fa-bolt', standard:'fa-clock', immediate:'fa-rocket', urgent:'fa-bolt', regular:'fa-clock' };
             return `<div class="flex items-center gap-4 p-3 bg-${colors[t.service_tier]||'gray'}-50 rounded-xl">
               <div class="w-10 h-10 bg-${colors[t.service_tier]||'gray'}-200 rounded-xl flex items-center justify-center"><i class="fas ${icons[t.service_tier]||'fa-tag'} text-${colors[t.service_tier]||'gray'}-600"></i></div>
               <div class="flex-1">
@@ -740,9 +740,8 @@ function renderNewOrder() {
         <div><label class="block text-xs font-semibold text-gray-500 mb-1">Your Name *</label><input type="text" id="noReq" value="Ethan Gourley" class="w-full px-3 py-2.5 border rounded-xl text-sm"></div>
         <div><label class="block text-xs font-semibold text-gray-500 mb-1">Service Tier</label>
           <select id="noTier" class="w-full px-3 py-2.5 border rounded-xl text-sm">
-            <option value="immediate">Immediate ($25) - Under 5 min</option>
-            <option value="urgent">Urgent ($15) - 15-30 min</option>
-            <option value="regular">Regular ($10) - 45 min+</option>
+            <option value="express">Express ($12) - 10 minutes</option>
+            <option value="standard">Standard ($8) - 1 hour</option>
           </select>
         </div>
       </div>

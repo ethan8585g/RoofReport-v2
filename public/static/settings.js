@@ -339,36 +339,26 @@ function renderPricingSection() {
       <p class="text-sm text-gray-500 mb-6">Configure pricing for each service tier (stored in database, not sensitive)</p>
 
       <div class="space-y-4">
-        <div class="grid md:grid-cols-3 gap-4">
+        <div class="grid md:grid-cols-2 gap-4 max-w-2xl">
           <div class="border border-red-200 rounded-lg p-4 bg-red-50">
             <div class="flex items-center space-x-2 mb-3">
-              <i class="fas fa-rocket text-red-500"></i>
-              <h4 class="font-semibold text-gray-800">Immediate</h4>
+              <i class="fas fa-bolt text-red-500"></i>
+              <h4 class="font-semibold text-gray-800">Express</h4>
             </div>
             <label class="block text-xs text-gray-500 mb-1">Price (CAD)</label>
-            <input type="number" id="price_immediate" value="${getVal('price_immediate') || '25'}" step="0.01"
+            <input type="number" id="price_express" value="${getVal('price_express') || '12'}" step="0.01"
               class="w-full px-3 py-2 border border-gray-300 rounded-lg text-lg font-bold text-center" />
-            <p class="text-xs text-gray-500 mt-2">Delivery: Under 5 min</p>
-          </div>
-          <div class="border border-amber-200 rounded-lg p-4 bg-amber-50">
-            <div class="flex items-center space-x-2 mb-3">
-              <i class="fas fa-bolt text-amber-500"></i>
-              <h4 class="font-semibold text-gray-800">Urgent</h4>
-            </div>
-            <label class="block text-xs text-gray-500 mb-1">Price (CAD)</label>
-            <input type="number" id="price_urgent" value="${getVal('price_urgent') || '15'}" step="0.01"
-              class="w-full px-3 py-2 border border-gray-300 rounded-lg text-lg font-bold text-center" />
-            <p class="text-xs text-gray-500 mt-2">Delivery: 15-30 min</p>
+            <p class="text-xs text-gray-500 mt-2">Delivery: 10 minutes</p>
           </div>
           <div class="border border-green-200 rounded-lg p-4 bg-green-50">
             <div class="flex items-center space-x-2 mb-3">
               <i class="fas fa-clock text-green-500"></i>
-              <h4 class="font-semibold text-gray-800">Regular</h4>
+              <h4 class="font-semibold text-gray-800">Standard</h4>
             </div>
             <label class="block text-xs text-gray-500 mb-1">Price (CAD)</label>
-            <input type="number" id="price_regular" value="${getVal('price_regular') || '10'}" step="0.01"
+            <input type="number" id="price_standard" value="${getVal('price_standard') || '8'}" step="0.01"
               class="w-full px-3 py-2 border border-gray-300 rounded-lg text-lg font-bold text-center" />
-            <p class="text-xs text-gray-500 mt-2">Delivery: 45min - 1.5hr</p>
+            <p class="text-xs text-gray-500 mt-2">Delivery: 1 hour</p>
           </div>
         </div>
       </div>
@@ -384,9 +374,8 @@ function renderPricingSection() {
 
 async function savePricing() {
   const settings = [
-    { key: 'price_immediate', value: document.getElementById('price_immediate')?.value || '25', encrypted: false },
-    { key: 'price_urgent', value: document.getElementById('price_urgent')?.value || '15', encrypted: false },
-    { key: 'price_regular', value: document.getElementById('price_regular')?.value || '10', encrypted: false }
+    { key: 'price_express', value: document.getElementById('price_express')?.value || '12', encrypted: false },
+    { key: 'price_standard', value: document.getElementById('price_standard')?.value || '8', encrypted: false }
   ];
 
   try {

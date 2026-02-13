@@ -5,7 +5,7 @@
 const orderState = {
   billing: null,
   packages: [],
-  selectedTier: 'regular',
+  selectedTier: 'standard',
   address: '',
   city: '',
   province: '',
@@ -65,9 +65,8 @@ function renderOrderPage() {
   const b = orderState.billing || {};
   const credits = b.credits_remaining || 0;
   const tiers = [
-    { id: 'regular', label: 'Regular', desc: '~1.5 hours', price: 10, icon: 'fa-clock', color: 'green' },
-    { id: 'urgent', label: 'Urgent', desc: '~30 min', price: 15, icon: 'fa-bolt', color: 'amber' },
-    { id: 'immediate', label: 'Immediate', desc: '~5 min', price: 25, icon: 'fa-rocket', color: 'red' },
+    { id: 'standard', label: 'Standard', desc: '~1 hour', price: 8, icon: 'fa-clock', color: 'green' },
+    { id: 'express', label: 'Express', desc: '~10 min', price: 12, icon: 'fa-bolt', color: 'red' },
   ];
 
   const selectedTierInfo = tiers.find(t => t.id === orderState.selectedTier) || tiers[0];

@@ -76,7 +76,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const urlParams = new URLSearchParams(window.location.search);
   const preselectedTier = urlParams.get('tier');
   if (preselectedTier) {
-    const tierPrices = { immediate: 25, urgent: 15, regular: 10 };
+    const tierPrices = { express: 12, standard: 8 };
     if (tierPrices[preselectedTier]) {
       state.formData.service_tier = preselectedTier;
       state.formData.price = tierPrices[preselectedTier];
@@ -194,37 +194,26 @@ function renderStepIndicators() {
 function renderStep1() {
   const tiers = [
     {
-      id: 'immediate',
-      name: 'Immediate',
-      price: 25,
-      time: 'Under 5 minutes',
-      icon: 'fas fa-rocket',
+      id: 'express',
+      name: 'Express',
+      price: 12,
+      time: '10 minutes',
+      icon: 'fas fa-bolt',
       color: 'red',
       bgGrad: 'from-red-500 to-red-600',
-      desc: 'Priority processing. Report delivered instantly after payment.',
-      features: ['Instant delivery', 'Priority queue', 'Dedicated processing']
+      desc: 'Fast-tracked report. Delivered in just 10 minutes.',
+      features: ['10 min delivery', 'Priority queue', 'Email notification']
     },
     {
-      id: 'urgent',
-      name: 'Urgent',
-      price: 15,
-      time: '15 - 30 minutes',
-      icon: 'fas fa-bolt',
-      color: 'amber',
-      bgGrad: 'from-amber-500 to-amber-600',
-      desc: 'Fast-tracked report. Perfect for same-day quotes.',
-      features: ['15-30 min delivery', 'Fast-track queue', 'Email notification']
-    },
-    {
-      id: 'regular',
-      name: 'Regular',
-      price: 10,
-      time: '45 min - 1.5 hours',
+      id: 'standard',
+      name: 'Standard',
+      price: 8,
+      time: '1 hour',
       icon: 'fas fa-clock',
       color: 'brand',
       bgGrad: 'from-brand-500 to-brand-600',
       desc: 'Standard processing. Great value for planning purposes.',
-      features: ['45min-1.5hr delivery', 'Standard queue', 'Email notification']
+      features: ['1 hour delivery', 'Standard queue', 'Email notification']
     }
   ];
 
@@ -233,7 +222,7 @@ function renderStep1() {
       <h2 class="text-2xl font-bold text-gray-800">Choose Your Report Speed</h2>
       <p class="text-gray-500 mt-2">Select how quickly you need the roof measurement report</p>
     </div>
-    <div class="grid md:grid-cols-3 gap-6 max-w-4xl mx-auto">
+    <div class="grid md:grid-cols-2 gap-6 max-w-3xl mx-auto">
       ${tiers.map(t => `
         <div class="tier-card bg-white rounded-xl border-2 ${state.formData.service_tier === t.id ? 'border-brand-500 selected' : 'border-gray-200'} p-6 relative overflow-hidden cursor-pointer"
              onclick="selectTier('${t.id}', ${t.price})">
@@ -967,11 +956,10 @@ function selectCustomerCompany(id) {
 // ============================================================
 function renderStep5() {
   const tierInfo = {
-    immediate: { name: 'Immediate', time: 'Under 5 minutes', color: 'red', icon: 'fa-rocket' },
-    urgent: { name: 'Urgent', time: '15-30 minutes', color: 'amber', icon: 'fa-bolt' },
-    regular: { name: 'Regular', time: '45 min - 1.5 hours', color: 'brand', icon: 'fa-clock' },
+    express: { name: 'Express', time: '10 minutes', color: 'red', icon: 'fa-bolt' },
+    standard: { name: 'Standard', time: '1 hour', color: 'brand', icon: 'fa-clock' },
   };
-  const tier = tierInfo[state.formData.service_tier] || tierInfo.regular;
+  const tier = tierInfo[state.formData.service_tier] || tierInfo.standard;
 
   return `
     <div class="max-w-2xl mx-auto">
