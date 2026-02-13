@@ -136,14 +136,12 @@ app.get('/api/config/client', (c) => {
   return c.json({
     google_maps_key: c.env.GOOGLE_MAPS_API_KEY || '',
     stripe_publishable_key: c.env.STRIPE_PUBLISHABLE_KEY || '',
-    google_oauth_client_id: (c.env as any).GOOGLE_OAUTH_CLIENT_ID || (c.env as any).GMAIL_CLIENT_ID || '',
     // Feature flags based on which keys are configured
     features: {
       google_maps: !!c.env.GOOGLE_MAPS_API_KEY,
       google_solar: !!c.env.GOOGLE_SOLAR_API_KEY,
       stripe_payments: !!c.env.STRIPE_SECRET_KEY && !!c.env.STRIPE_PUBLISHABLE_KEY,
-      self_service_orders: !!c.env.STRIPE_SECRET_KEY,
-      google_sign_in: !!((c.env as any).GOOGLE_OAUTH_CLIENT_ID || (c.env as any).GMAIL_CLIENT_ID)
+      self_service_orders: !!c.env.STRIPE_SECRET_KEY
     }
   })
 })
@@ -185,10 +183,9 @@ app.get('/login', (c) => {
   return c.html(getLoginPageHTML())
 })
 
-// Customer Login/Register Page (Google Sign-In + email/password)
+// Customer Login/Register Page (email/password)
 app.get('/customer/login', (c) => {
-  const googleClientId = (c.env as any).GOOGLE_OAUTH_CLIENT_ID || (c.env as any).GMAIL_CLIENT_ID || ''
-  return c.html(getCustomerLoginHTML(googleClientId))
+  return c.html(getCustomerLoginHTML())
 })
 
 // Customer Dashboard
@@ -713,32 +710,13 @@ function getSettingsPageHTML() {
 // CUSTOMER PAGES
 // ============================================================
 
-function getCustomerLoginHTML(googleClientId: string) {
-  const googleScript = googleClientId
-    ? '<script src="https://accounts.google.com/gsi/client" async defer></script>'
-    : ''
-
-  const googleSignInBlock = googleClientId
-    ? `<div id="g_id_onload"
-          data-client_id="${googleClientId}"
-          data-callback="handleGoogleSignIn"
-          data-auto_prompt="false">
-        </div>
-        <div class="flex justify-center mb-4">
-          <div class="g_id_signin" data-type="standard" data-size="large" data-theme="outline" data-text="sign_in_with" data-shape="rectangular" data-logo_alignment="left" data-width="360"></div>
-        </div>
-        <div class="relative my-5">
-          <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200"></div></div>
-          <div class="relative flex justify-center text-xs"><span class="px-3 bg-white text-gray-400">or sign in with email</span></div>
-        </div>`
-    : ''
+function getCustomerLoginHTML() {
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   ${getHeadTags()}
   <title>Customer Login - Reuse Canada Roof Reports</title>
-  ${googleScript}
 </head>
 <body class="bg-gradient-to-br from-brand-900 via-slate-900 to-brand-800 min-h-screen flex items-center justify-center">
   <div class="w-full max-w-md mx-auto px-4">
@@ -760,9 +738,6 @@ function getCustomerLoginHTML(googleClientId: string) {
       <div class="p-8">
         <h2 class="text-xl font-bold text-gray-800 mb-1">Welcome</h2>
         <p class="text-sm text-gray-500 mb-6">Sign in to view your roof reports, invoices, and order history</p>
-
-        <!-- Google Sign-In Button -->
-        ${googleSignInBlock}
 
         <!-- Tabs -->
         <div class="flex border border-gray-200 rounded-lg overflow-hidden mb-5">
@@ -856,29 +831,6 @@ function getCustomerLoginHTML(googleClientId: string) {
         rt.classList.remove('text-gray-500');
         lt.classList.remove('bg-brand-50','text-brand-700','border-b-2','border-brand-500');
         lt.classList.add('text-gray-500');
-      }
-    }
-
-    // Google Sign-In callback
-    async function handleGoogleSignIn(response) {
-      try {
-        const res = await fetch('/api/customer/google', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ credential: response.credential })
-        });
-        const data = await res.json();
-        if (res.ok && data.success) {
-          localStorage.setItem('rc_customer', JSON.stringify(data.customer));
-          localStorage.setItem('rc_customer_token', data.token);
-          window.location.href = '/customer/dashboard';
-        } else {
-          document.getElementById('custLoginError').textContent = data.error || 'Google sign-in failed';
-          document.getElementById('custLoginError').classList.remove('hidden');
-        }
-      } catch(e) {
-        document.getElementById('custLoginError').textContent = 'Network error. Please try again.';
-        document.getElementById('custLoginError').classList.remove('hidden');
       }
     }
 

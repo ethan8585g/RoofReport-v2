@@ -227,7 +227,7 @@ customerAuthRoutes.post('/login', async (c) => {
     }
 
     if (!customer.password_hash) {
-      return c.json({ error: 'This account uses Google Sign-In. Please sign in with Google.' }, 401)
+      return c.json({ error: 'This account was created via Google. Please register with email/password to set your credentials.' }, 401)
     }
 
     const valid = await verifyPassword(password, customer.password_hash)
