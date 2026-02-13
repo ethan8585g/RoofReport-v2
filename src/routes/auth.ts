@@ -3,6 +3,14 @@ import type { Bindings } from '../types'
 
 export const authRoutes = new Hono<{ Bindings: Bindings }>()
 
+// ============================================================
+// HARDCODED SUPERADMIN CREDENTIALS
+// Only this account gets admin access — no public registration
+// ============================================================
+const SUPERADMIN_EMAIL = 'ethangourley17@gmail.com'
+const SUPERADMIN_PASSWORD = 'Bean1234!'
+const SUPERADMIN_NAME = 'Ethan Gourley'
+
 // Simple password hashing using Web Crypto API (SHA-256 + salt)
 async function hashPassword(password: string, salt?: string): Promise<{ hash: string, salt: string }> {
   const s = salt || crypto.randomUUID()
@@ -14,7 +22,6 @@ async function hashPassword(password: string, salt?: string): Promise<{ hash: st
 }
 
 async function verifyPassword(password: string, storedHash: string): Promise<boolean> {
-  // storedHash format: salt:hash
   const parts = storedHash.split(':')
   if (parts.length !== 2) return false
   const [salt, hash] = parts
@@ -23,86 +30,7 @@ async function verifyPassword(password: string, storedHash: string): Promise<boo
 }
 
 // ============================================================
-// REGISTER
-// ============================================================
-authRoutes.post('/register', async (c) => {
-  try {
-    const { email, password, name, company_name, phone } = await c.req.json()
-
-    if (!email || !password || !name) {
-      return c.json({ error: 'Email, password, and name are required' }, 400)
-    }
-
-    if (password.length < 6) {
-      return c.json({ error: 'Password must be at least 6 characters' }, 400)
-    }
-
-    // Check if email already exists
-    const existing = await c.env.DB.prepare(
-      'SELECT id FROM admin_users WHERE email = ?'
-    ).bind(email.toLowerCase().trim()).first()
-
-    if (existing) {
-      return c.json({ error: 'An account with this email already exists' }, 409)
-    }
-
-    // Hash password
-    const { hash, salt } = await hashPassword(password)
-    const storedHash = `${salt}:${hash}`
-
-    // Determine role - first user gets superadmin
-    const userCount = await c.env.DB.prepare('SELECT COUNT(*) as count FROM admin_users').first<{ count: number }>()
-    const role = (userCount?.count || 0) === 0 ? 'superadmin' : 'admin'
-
-    // Create user
-    const result = await c.env.DB.prepare(`
-      INSERT INTO admin_users (email, password_hash, name, role, company_name, phone)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).bind(
-      email.toLowerCase().trim(),
-      storedHash,
-      name,
-      role,
-      company_name || null,
-      phone || null
-    ).run()
-
-    // Also ensure master company exists
-    const masterExists = await c.env.DB.prepare('SELECT id FROM master_companies LIMIT 1').first()
-    if (!masterExists) {
-      await c.env.DB.prepare(`
-        INSERT INTO master_companies (company_name, contact_name, email, phone)
-        VALUES (?, ?, ?, ?)
-      `).bind(
-        company_name || 'Reuse Canada',
-        name,
-        email.toLowerCase().trim(),
-        phone || ''
-      ).run()
-    }
-
-    // Generate session token
-    const sessionToken = crypto.randomUUID() + '-' + crypto.randomUUID()
-
-    return c.json({
-      success: true,
-      message: 'Account created successfully',
-      user: {
-        id: result.meta.last_row_id,
-        email: email.toLowerCase().trim(),
-        name,
-        role,
-        company_name
-      },
-      token: sessionToken
-    })
-  } catch (err: any) {
-    return c.json({ error: 'Registration failed', details: err.message }, 500)
-  }
-})
-
-// ============================================================
-// LOGIN
+// ADMIN LOGIN — Only ethangourley17@gmail.com can access admin
 // ============================================================
 authRoutes.post('/login', async (c) => {
   try {
@@ -112,66 +40,132 @@ authRoutes.post('/login', async (c) => {
       return c.json({ error: 'Email and password are required' }, 400)
     }
 
-    // Find user
+    const cleanEmail = email.toLowerCase().trim()
+
+    // ONLY allow the superadmin account
+    if (cleanEmail !== SUPERADMIN_EMAIL) {
+      return c.json({ error: 'Admin access is restricted. Use the customer portal at /customer/login' }, 403)
+    }
+
+    // Check plain-text password match first (for initial/reset)
+    if (password === SUPERADMIN_PASSWORD) {
+      // Ensure superadmin exists in DB (auto-create on first login)
+      let user = await c.env.DB.prepare(
+        'SELECT * FROM admin_users WHERE email = ?'
+      ).bind(SUPERADMIN_EMAIL).first<any>()
+
+      if (!user) {
+        // Auto-create superadmin account
+        const { hash, salt } = await hashPassword(SUPERADMIN_PASSWORD)
+        const storedHash = `${salt}:${hash}`
+        await c.env.DB.prepare(`
+          INSERT INTO admin_users (email, password_hash, name, role, company_name, is_active)
+          VALUES (?, ?, ?, 'superadmin', 'Reuse Canada', 1)
+        `).bind(SUPERADMIN_EMAIL, storedHash, SUPERADMIN_NAME).run()
+
+        user = await c.env.DB.prepare(
+          'SELECT * FROM admin_users WHERE email = ?'
+        ).bind(SUPERADMIN_EMAIL).first<any>()
+      }
+
+      // Update last login
+      await c.env.DB.prepare(
+        "UPDATE admin_users SET last_login = datetime('now'), updated_at = datetime('now') WHERE id = ?"
+      ).bind(user.id).run()
+
+      // Ensure master company exists
+      const masterExists = await c.env.DB.prepare('SELECT id FROM master_companies LIMIT 1').first()
+      if (!masterExists) {
+        await c.env.DB.prepare(`
+          INSERT INTO master_companies (company_name, contact_name, email, phone)
+          VALUES ('Reuse Canada', ?, ?, '')
+        `).bind(SUPERADMIN_NAME, SUPERADMIN_EMAIL).run()
+      }
+
+      const sessionToken = crypto.randomUUID() + '-' + crypto.randomUUID()
+
+      return c.json({
+        success: true,
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.name || SUPERADMIN_NAME,
+          role: 'superadmin',
+          company_name: 'Reuse Canada',
+          last_login: new Date().toISOString()
+        },
+        token: sessionToken
+      })
+    }
+
+    // Also check hashed password in DB (if password was changed via hash)
     const user = await c.env.DB.prepare(
       'SELECT * FROM admin_users WHERE email = ? AND is_active = 1'
-    ).bind(email.toLowerCase().trim()).first<any>()
+    ).bind(SUPERADMIN_EMAIL).first<any>()
 
-    if (!user) {
-      return c.json({ error: 'Invalid email or password' }, 401)
+    if (user && user.password_hash) {
+      const valid = await verifyPassword(password, user.password_hash)
+      if (valid) {
+        await c.env.DB.prepare(
+          "UPDATE admin_users SET last_login = datetime('now'), updated_at = datetime('now') WHERE id = ?"
+        ).bind(user.id).run()
+
+        const sessionToken = crypto.randomUUID() + '-' + crypto.randomUUID()
+
+        return c.json({
+          success: true,
+          user: {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            role: 'superadmin',
+            company_name: 'Reuse Canada',
+            last_login: new Date().toISOString()
+          },
+          token: sessionToken
+        })
+      }
     }
 
-    // Verify password
-    const valid = await verifyPassword(password, user.password_hash)
-    if (!valid) {
-      return c.json({ error: 'Invalid email or password' }, 401)
-    }
-
-    // Update last login
-    await c.env.DB.prepare(
-      'UPDATE admin_users SET last_login = datetime(\'now\'), updated_at = datetime(\'now\') WHERE id = ?'
-    ).bind(user.id).run()
-
-    // Generate session token
-    const sessionToken = crypto.randomUUID() + '-' + crypto.randomUUID()
-
-    return c.json({
-      success: true,
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-        company_name: user.company_name,
-        last_login: new Date().toISOString()
-      },
-      token: sessionToken
-    })
+    return c.json({ error: 'Invalid password' }, 401)
   } catch (err: any) {
     return c.json({ error: 'Login failed', details: err.message }, 500)
   }
 })
 
 // ============================================================
+// REGISTER — Disabled for admin. Returns redirect to customer portal.
+// ============================================================
+authRoutes.post('/register', async (c) => {
+  return c.json({
+    error: 'Admin registration is disabled. Only the owner account has admin access.',
+    redirect: '/customer/login',
+    message: 'Please use the customer portal to create an account.'
+  }, 403)
+})
+
+// ============================================================
 // GET CURRENT USER (validate session)
 // ============================================================
 authRoutes.get('/me', async (c) => {
-  // For now, check via a simple auth header token pattern
-  // In production, use JWT or session-based auth
   const authHeader = c.req.header('Authorization')
   if (!authHeader) {
     return c.json({ error: 'Not authenticated' }, 401)
   }
 
-  // Simple: extract email from X-User-Email header (set by frontend from localStorage)
   const userEmail = c.req.header('X-User-Email')
   if (!userEmail) {
     return c.json({ error: 'No user context' }, 401)
   }
 
+  // Only superadmin can use admin endpoints
+  if (userEmail.toLowerCase().trim() !== SUPERADMIN_EMAIL) {
+    return c.json({ error: 'Admin access denied' }, 403)
+  }
+
   const user = await c.env.DB.prepare(
     'SELECT id, email, name, role, company_name, phone, last_login, created_at FROM admin_users WHERE email = ? AND is_active = 1'
-  ).bind(userEmail).first()
+  ).bind(SUPERADMIN_EMAIL).first()
 
   if (!user) {
     return c.json({ error: 'User not found' }, 404)
@@ -181,7 +175,7 @@ authRoutes.get('/me', async (c) => {
 })
 
 // ============================================================
-// LIST USERS (admin only)
+// LIST USERS (admin only — returns customers, not admin users)
 // ============================================================
 authRoutes.get('/users', async (c) => {
   try {
@@ -195,13 +189,235 @@ authRoutes.get('/users', async (c) => {
 })
 
 // ============================================================
+// ADMIN DASHBOARD API — Extended stats for all tabs
+// ============================================================
+authRoutes.get('/admin-stats', async (c) => {
+  try {
+    // All customers with order/invoice aggregates
+    const customers = await c.env.DB.prepare(`
+      SELECT c.*,
+        (SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id) as order_count,
+        (SELECT COALESCE(SUM(o.price), 0) FROM orders o WHERE o.customer_id = c.id AND o.payment_status = 'paid') as total_spent,
+        (SELECT COUNT(*) FROM invoices i WHERE i.customer_id = c.id) as invoice_count,
+        (SELECT COALESCE(SUM(i.total), 0) FROM invoices i WHERE i.customer_id = c.id AND i.status = 'paid') as invoices_paid,
+        (SELECT MAX(o.created_at) FROM orders o WHERE o.customer_id = c.id) as last_order_date
+      FROM customers c
+      ORDER BY c.created_at DESC
+    `).all()
+
+    // Earnings by month (last 12 months)
+    const monthlyEarnings = await c.env.DB.prepare(`
+      SELECT 
+        strftime('%Y-%m', created_at) as month,
+        COUNT(*) as order_count,
+        SUM(CASE WHEN payment_status = 'paid' THEN price ELSE 0 END) as revenue,
+        SUM(price) as total_value
+      FROM orders
+      WHERE created_at >= date('now', '-12 months')
+      GROUP BY strftime('%Y-%m', created_at)
+      ORDER BY month DESC
+    `).all()
+
+    // Earnings by week (last 8 weeks)
+    const weeklyEarnings = await c.env.DB.prepare(`
+      SELECT 
+        strftime('%Y-W%W', created_at) as week,
+        COUNT(*) as order_count,
+        SUM(CASE WHEN payment_status = 'paid' THEN price ELSE 0 END) as revenue
+      FROM orders
+      WHERE created_at >= date('now', '-8 weeks')
+      GROUP BY strftime('%Y-W%W', created_at)
+      ORDER BY week DESC
+    `).all()
+
+    // Today's earnings
+    const todayStats = await c.env.DB.prepare(`
+      SELECT 
+        COUNT(*) as orders_today,
+        SUM(CASE WHEN payment_status = 'paid' THEN price ELSE 0 END) as revenue_today,
+        SUM(price) as value_today
+      FROM orders
+      WHERE date(created_at) = date('now')
+    `).first()
+
+    // This week's earnings
+    const weekStats = await c.env.DB.prepare(`
+      SELECT 
+        COUNT(*) as orders_week,
+        SUM(CASE WHEN payment_status = 'paid' THEN price ELSE 0 END) as revenue_week
+      FROM orders
+      WHERE created_at >= date('now', 'weekday 0', '-7 days')
+    `).first()
+
+    // This month's earnings
+    const monthStats = await c.env.DB.prepare(`
+      SELECT 
+        COUNT(*) as orders_month,
+        SUM(CASE WHEN payment_status = 'paid' THEN price ELSE 0 END) as revenue_month
+      FROM orders
+      WHERE strftime('%Y-%m', created_at) = strftime('%Y-%m', 'now')
+    `).first()
+
+    // All-time revenue
+    const allTimeStats = await c.env.DB.prepare(`
+      SELECT 
+        COUNT(*) as total_orders,
+        SUM(price) as total_value,
+        SUM(CASE WHEN payment_status = 'paid' THEN price ELSE 0 END) as total_collected,
+        SUM(CASE WHEN payment_status != 'paid' THEN price ELSE 0 END) as total_outstanding,
+        AVG(price) as avg_order_value,
+        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_orders,
+        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending_orders,
+        SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled_orders
+      FROM orders
+    `).first()
+
+    // Payments received
+    const payments = await c.env.DB.prepare(`
+      SELECT p.*, o.order_number, o.property_address, o.homeowner_name
+      FROM payments p
+      LEFT JOIN orders o ON p.order_id = o.id
+      ORDER BY p.created_at DESC
+      LIMIT 50
+    `).all()
+
+    // Invoice stats
+    const invoiceStats = await c.env.DB.prepare(`
+      SELECT 
+        COUNT(*) as total_invoices,
+        SUM(CASE WHEN status = 'paid' THEN total ELSE 0 END) as total_collected,
+        SUM(CASE WHEN status IN ('sent','viewed') THEN total ELSE 0 END) as total_outstanding,
+        SUM(CASE WHEN status = 'overdue' THEN total ELSE 0 END) as total_overdue,
+        SUM(CASE WHEN status = 'draft' THEN total ELSE 0 END) as total_draft
+      FROM invoices
+    `).first()
+
+    // All invoices
+    const invoices = await c.env.DB.prepare(`
+      SELECT i.*, c.name as customer_name, c.email as customer_email, c.company_name as customer_company,
+        o.order_number, o.property_address
+      FROM invoices i
+      LEFT JOIN customers c ON i.customer_id = c.id
+      LEFT JOIN orders o ON i.order_id = o.id
+      ORDER BY i.created_at DESC
+    `).all()
+
+    // Sales pipeline
+    const salesPipeline = await c.env.DB.prepare(`
+      SELECT 
+        status,
+        COUNT(*) as count,
+        SUM(price) as total_value
+      FROM orders
+      GROUP BY status
+    `).all()
+
+    // Conversion rate: orders that became completed
+    const conversionStats = await c.env.DB.prepare(`
+      SELECT 
+        COUNT(*) as total,
+        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as converted
+      FROM orders
+    `).first()
+
+    // Top customers by revenue
+    const topCustomers = await c.env.DB.prepare(`
+      SELECT c.name, c.email, c.company_name,
+        COUNT(o.id) as order_count,
+        SUM(o.price) as total_value,
+        SUM(CASE WHEN o.payment_status = 'paid' THEN o.price ELSE 0 END) as paid_value
+      FROM customers c
+      JOIN orders o ON o.customer_id = c.id
+      GROUP BY c.id
+      ORDER BY total_value DESC
+      LIMIT 10
+    `).all()
+
+    // Tier breakdown
+    const tierStats = await c.env.DB.prepare(`
+      SELECT service_tier, COUNT(*) as count, SUM(price) as total_value,
+        SUM(CASE WHEN payment_status = 'paid' THEN price ELSE 0 END) as paid_value
+      FROM orders GROUP BY service_tier
+    `).all()
+
+    // Customer growth (signups by month)
+    const customerGrowth = await c.env.DB.prepare(`
+      SELECT strftime('%Y-%m', created_at) as month, COUNT(*) as signups
+      FROM customers
+      WHERE created_at >= date('now', '-12 months')
+      GROUP BY strftime('%Y-%m', created_at)
+      ORDER BY month DESC
+    `).all()
+
+    // Recent activity
+    const recentActivity = await c.env.DB.prepare(`
+      SELECT * FROM user_activity_log ORDER BY created_at DESC LIMIT 30
+    `).all()
+
+    // API usage
+    const apiUsage = await c.env.DB.prepare(`
+      SELECT request_type, COUNT(*) as count, 
+        AVG(duration_ms) as avg_duration,
+        SUM(CASE WHEN response_status >= 200 AND response_status < 300 THEN 1 ELSE 0 END) as success_count
+      FROM api_requests_log
+      WHERE created_at >= date('now', '-30 days')
+      GROUP BY request_type
+    `).all()
+
+    // Recent orders
+    const recentOrders = await c.env.DB.prepare(`
+      SELECT o.*, c.name as customer_name, c.email as customer_email
+      FROM orders o
+      LEFT JOIN customers c ON o.customer_id = c.id
+      ORDER BY o.created_at DESC
+      LIMIT 50
+    `).all()
+
+    // Report stats
+    let reportStats: any = {}
+    try {
+      reportStats = await c.env.DB.prepare(`
+        SELECT
+          COUNT(*) as total_reports,
+          SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_reports,
+          AVG(gross_squares) as avg_squares,
+          AVG(total_material_cost_cad) as avg_material_cost,
+          SUM(total_material_cost_cad) as total_material_value,
+          AVG(confidence_score) as avg_confidence
+        FROM reports
+      `).first() || {}
+    } catch (e) {}
+
+    return c.json({
+      customers: customers.results,
+      monthly_earnings: monthlyEarnings.results,
+      weekly_earnings: weeklyEarnings.results,
+      today: todayStats,
+      this_week: weekStats,
+      this_month: monthStats,
+      all_time: allTimeStats,
+      payments: payments.results,
+      invoice_stats: invoiceStats,
+      invoices: invoices.results,
+      sales_pipeline: salesPipeline.results,
+      conversion: conversionStats,
+      top_customers: topCustomers.results,
+      tier_stats: tierStats.results,
+      customer_growth: customerGrowth.results,
+      recent_activity: recentActivity.results,
+      api_usage: apiUsage.results,
+      recent_orders: recentOrders.results,
+      report_stats: reportStats
+    })
+  } catch (err: any) {
+    return c.json({ error: 'Failed to load admin stats', details: err.message }, 500)
+  }
+})
+
+// ============================================================
 // GMAIL OAUTH2 — One-time authorization for personal Gmail
-// Step 1: Visit /api/auth/gmail → redirects to Google consent screen
-// Step 2: After consent → /api/auth/gmail/callback → gets refresh token
-// Step 3: Store refresh token in GMAIL_REFRESH_TOKEN env var
 // ============================================================
 
-// Step 1: Generate Google OAuth2 consent URL
 authRoutes.get('/gmail', async (c) => {
   const clientId = (c.env as any).GMAIL_CLIENT_ID
   if (!clientId) {
@@ -217,7 +433,6 @@ authRoutes.get('/gmail', async (c) => {
     }, 400)
   }
 
-  // Determine the callback URL based on the current request
   const url = new URL(c.req.url)
   const redirectUri = `${url.protocol}//${url.host}/api/auth/gmail/callback`
 
@@ -226,13 +441,12 @@ authRoutes.get('/gmail', async (c) => {
   authUrl.searchParams.set('redirect_uri', redirectUri)
   authUrl.searchParams.set('response_type', 'code')
   authUrl.searchParams.set('scope', 'https://www.googleapis.com/auth/gmail.send')
-  authUrl.searchParams.set('access_type', 'offline')  // Required to get refresh token
-  authUrl.searchParams.set('prompt', 'consent')        // Force consent to always get refresh token
+  authUrl.searchParams.set('access_type', 'offline')
+  authUrl.searchParams.set('prompt', 'consent')
 
   return c.redirect(authUrl.toString())
 })
 
-// Step 2: OAuth2 callback — exchange code for tokens
 authRoutes.get('/gmail/callback', async (c) => {
   const code = c.req.query('code')
   const error = c.req.query('error')
@@ -248,7 +462,6 @@ authRoutes.get('/gmail/callback', async (c) => {
   if (!code) {
     return c.html(`<html><body style="font-family:sans-serif;padding:40px;max-width:600px;margin:auto">
       <h2 style="color:#dc2626">No Authorization Code</h2>
-      <p>No authorization code received from Google.</p>
       <a href="/api/auth/gmail" style="color:#2563eb">Try again</a>
     </body></html>`)
   }
@@ -263,7 +476,6 @@ authRoutes.get('/gmail/callback', async (c) => {
   const url = new URL(c.req.url)
   const redirectUri = `${url.protocol}//${url.host}/api/auth/gmail/callback`
 
-  // Exchange authorization code for tokens
   const tokenResp = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -289,7 +501,6 @@ authRoutes.get('/gmail/callback', async (c) => {
   const refreshToken = tokenData.refresh_token
   const accessToken = tokenData.access_token
 
-  // Get the user's email to confirm
   let userEmail = ''
   try {
     const profileResp = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', {
@@ -299,7 +510,6 @@ authRoutes.get('/gmail/callback', async (c) => {
     userEmail = profile.emailAddress || ''
   } catch (e) {}
 
-  // Store refresh token in the database settings table for persistence
   if (refreshToken) {
     try {
       await c.env.DB.prepare(`
@@ -311,7 +521,7 @@ authRoutes.get('/gmail/callback', async (c) => {
         INSERT OR REPLACE INTO settings (master_company_id, setting_key, setting_value, is_encrypted)
         VALUES (1, 'gmail_sender_email', ?, 0)
       `).bind(userEmail).run()
-    } catch (e) { /* settings table might not exist yet */ }
+    } catch (e) {}
   }
 
   return c.html(`<!DOCTYPE html>
@@ -328,41 +538,30 @@ authRoutes.get('/gmail/callback', async (c) => {
     <h2 class="text-2xl font-bold text-gray-800">Gmail Connected!</h2>
     <p class="text-gray-500 mt-2">Reports will now be sent from <strong>${userEmail}</strong></p>
   </div>
-
   ${refreshToken ? `
   <div class="bg-gray-50 rounded-xl p-4 mb-6">
     <p class="text-sm font-semibold text-gray-700 mb-2">Refresh Token (save to .dev.vars):</p>
-    <div class="bg-white border border-gray-200 rounded-lg p-3 font-mono text-xs break-all select-all" id="token">${refreshToken}</div>
-    <p class="text-xs text-gray-500 mt-2">Add to your <code>.dev.vars</code> file:<br>
-    <code class="bg-gray-100 px-1 py-0.5 rounded">GMAIL_REFRESH_TOKEN=${refreshToken}</code></p>
+    <div class="bg-white border border-gray-200 rounded-lg p-3 font-mono text-xs break-all select-all">${refreshToken}</div>
+    <p class="text-xs text-gray-500 mt-2">Add to .dev.vars: <code class="bg-gray-100 px-1 rounded">GMAIL_REFRESH_TOKEN=${refreshToken}</code></p>
   </div>
-  ` : '<p class="text-yellow-600 text-sm mb-4">No refresh token received. The token may already be stored from a previous authorization.</p>'}
-
-  <div class="flex gap-3">
-    <a href="/admin" class="flex-1 text-center bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-xl transition-colors">
-      Go to Admin Dashboard
-    </a>
-  </div>
+  ` : ''}
+  <a href="/admin" class="block text-center bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-xl transition-colors">Go to Admin Dashboard</a>
 </div>
 </body></html>`)
 })
 
-// Check Gmail OAuth2 status
 authRoutes.get('/gmail/status', async (c) => {
   const hasClientId = !!(c.env as any).GMAIL_CLIENT_ID
   const hasClientSecret = !!(c.env as any).GMAIL_CLIENT_SECRET
   const hasRefreshToken = !!(c.env as any).GMAIL_REFRESH_TOKEN
 
-  // Also check DB for stored refresh token
   let dbRefreshToken = false
   let dbSenderEmail = ''
   try {
     const row = await c.env.DB.prepare(
       "SELECT setting_value FROM settings WHERE setting_key = 'gmail_refresh_token' AND master_company_id = 1"
     ).first<any>()
-    if (row?.setting_value) {
-      dbRefreshToken = true
-    }
+    if (row?.setting_value) dbRefreshToken = true
     const emailRow = await c.env.DB.prepare(
       "SELECT setting_value FROM settings WHERE setting_key = 'gmail_sender_email' AND master_company_id = 1"
     ).first<any>()
@@ -378,13 +577,6 @@ authRoutes.get('/gmail/status', async (c) => {
       sender_email: dbSenderEmail || (c.env as any).GMAIL_SENDER_EMAIL || '',
       ready: hasClientId && hasClientSecret && (hasRefreshToken || dbRefreshToken),
       authorize_url: hasClientId ? '/api/auth/gmail' : null
-    },
-    setup_needed: !hasClientId ? {
-      step1: 'Go to https://console.cloud.google.com/apis/credentials',
-      step2: 'Create OAuth 2.0 Client ID (Web application)',
-      step3: 'Add redirect URI: {your_domain}/api/auth/gmail/callback',
-      step4: 'Set GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET in .dev.vars',
-      step5: 'Visit /api/auth/gmail to authorize'
-    } : null
+    }
   })
 })
