@@ -111,8 +111,8 @@ function tierBadge(t) {
 }
 
 function payBadge(s) {
-  const m = { unpaid:'bg-yellow-100 text-yellow-800', paid:'bg-green-100 text-green-800', refunded:'bg-purple-100 text-purple-800' };
-  return `<span class="px-2 py-0.5 ${m[s]||'bg-gray-100 text-gray-600'} rounded-full text-xs font-medium capitalize">${s}</span>`;
+  const m = { unpaid:'bg-yellow-100 text-yellow-800', paid:'bg-green-100 text-green-800', refunded:'bg-purple-100 text-purple-800', trial:'bg-blue-100 text-blue-800' };
+  return `<span class="px-2 py-0.5 ${m[s]||'bg-gray-100 text-gray-600'} rounded-full text-xs font-medium capitalize">${s === 'trial' ? 'Free Trial' : s}</span>`;
 }
 
 function invBadge(s) {
@@ -140,14 +140,48 @@ function renderOverview() {
   const tw = d.this_week || {};
   const tm = d.this_month || {};
   const custs = d.customers || [];
+  const ts = d.trial_stats || {};
 
   return `
-    <!-- Quick Stats Row -->
+    <!-- Free Trial Banner -->
+    <div class="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-2xl p-5 mb-6">
+      <div class="flex items-center gap-3 mb-3">
+        <div class="w-10 h-10 bg-blue-500 rounded-xl flex items-center justify-center"><i class="fas fa-gift text-white"></i></div>
+        <div>
+          <h3 class="font-bold text-blue-900 text-sm">Free Trial Program</h3>
+          <p class="text-xs text-blue-600">Every new user gets 3 free reports. Trial orders are $0 and excluded from revenue.</p>
+        </div>
+      </div>
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div class="bg-white/80 rounded-xl p-3 text-center">
+          <p class="text-[10px] font-semibold text-gray-500 uppercase">Total Users</p>
+          <p class="text-xl font-black text-blue-700">${ts.total_customers || custs.length}</p>
+        </div>
+        <div class="bg-white/80 rounded-xl p-3 text-center">
+          <p class="text-[10px] font-semibold text-gray-500 uppercase">Trial Reports Used</p>
+          <p class="text-xl font-black text-indigo-700">${ts.total_trial_reports_used || 0} <span class="text-xs font-normal text-gray-400">/ ${ts.total_trial_reports_available || 0}</span></p>
+        </div>
+        <div class="bg-white/80 rounded-xl p-3 text-center">
+          <p class="text-[10px] font-semibold text-gray-500 uppercase">Used a Trial</p>
+          <p class="text-xl font-black text-green-700">${ts.customers_who_used_trial || 0}</p>
+        </div>
+        <div class="bg-white/80 rounded-xl p-3 text-center">
+          <p class="text-[10px] font-semibold text-gray-500 uppercase">Trial Exhausted</p>
+          <p class="text-xl font-black text-amber-700">${ts.exhausted_trial || 0}</p>
+        </div>
+        <div class="bg-white/80 rounded-xl p-3 text-center">
+          <p class="text-[10px] font-semibold text-gray-500 uppercase">Converted to Paid</p>
+          <p class="text-xl font-black text-green-600">${ts.paying_customers || 0}</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Revenue Stats Row (REAL revenue only — excludes trial) -->
     <div class="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
-      ${mc('Today Revenue', $$(td.revenue_today), 'fa-calendar-day', 'green', td.orders_today+' orders')}
-      ${mc('This Week', $$(tw.revenue_week), 'fa-calendar-week', 'blue', tw.orders_week+' orders')}
-      ${mc('This Month', $$(tm.revenue_month), 'fa-calendar-alt', 'indigo', tm.orders_month+' orders')}
-      ${mc('All-Time Revenue', $$(at.total_collected), 'fa-coins', 'amber', at.total_orders+' total orders')}
+      ${mc('Today Revenue', $$(td.revenue_today), 'fa-calendar-day', 'green', (td.orders_today||0)+' orders'+(td.trial_orders_today > 0 ? ' ('+td.trial_orders_today+' trial)':''))}
+      ${mc('This Week', $$(tw.revenue_week), 'fa-calendar-week', 'blue', (tw.orders_week||0)+' orders'+(tw.trial_orders_week > 0 ? ' ('+tw.trial_orders_week+' trial)':''))}
+      ${mc('This Month', $$(tm.revenue_month), 'fa-calendar-alt', 'indigo', (tm.orders_month||0)+' orders'+(tm.trial_orders_month > 0 ? ' ('+tm.trial_orders_month+' trial)':''))}
+      ${mc('All-Time Revenue', $$(at.total_collected), 'fa-coins', 'amber', (at.paid_orders||0)+' paid orders')}
       ${mc('Total Customers', custs.length, 'fa-users', 'purple', custs.filter(c=>c.order_count>0).length+' with orders')}
     </div>
 
@@ -221,17 +255,19 @@ function renderGmailCard() {
 // ============================================================
 function renderUsers() {
   const custs = A.data?.customers || [];
+  const ts = A.data?.trial_stats || {};
   const withOrders = custs.filter(c => c.order_count > 0);
   const totalSpent = custs.reduce((s, c) => s + (c.total_spent || 0), 0);
   const googleUsers = custs.filter(c => c.google_id);
 
   return `
-    <div class="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+    <div class="grid grid-cols-2 lg:grid-cols-6 gap-4 mb-6">
       ${mc('Total Users', custs.length, 'fa-users', 'blue')}
       ${mc('Active (With Orders)', withOrders.length, 'fa-user-check', 'green')}
+      ${mc('On Free Trial', (ts.trial_eligible||0) - (ts.exhausted_trial||0), 'fa-gift', 'indigo', (ts.total_trial_reports_used||0)+'/'+((ts.total_trial_reports_available||0))+' used')}
+      ${mc('Converted to Paid', ts.paying_customers || 0, 'fa-star', 'amber')}
       ${mc('Google Sign-In', googleUsers.length, 'fa-google', 'red')}
-      ${mc('Email/Password', custs.length - googleUsers.length, 'fa-envelope', 'indigo')}
-      ${mc('Total Spent', $$(totalSpent), 'fa-dollar-sign', 'amber')}
+      ${mc('Total Paid Revenue', $$(totalSpent), 'fa-dollar-sign', 'green')}
     </div>
 
     ${section('All Registered Users (' + custs.length + ')', 'fa-users', `
@@ -243,8 +279,9 @@ function renderUsers() {
               <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Company</th>
               <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Email</th>
               <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Phone</th>
+              <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Trial</th>
               <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Orders</th>
-              <th class="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Total Spent</th>
+              <th class="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Paid Revenue</th>
               <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Invoices</th>
               <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Last Order</th>
               <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Joined</th>
@@ -266,6 +303,7 @@ function renderUsers() {
                 <td class="px-4 py-3 text-gray-600 text-xs">${c.company_name || '<span class="text-gray-300">-</span>'}</td>
                 <td class="px-4 py-3 text-gray-600 text-xs">${c.email}</td>
                 <td class="px-4 py-3 text-gray-600 text-xs">${c.phone || '-'}</td>
+                <td class="px-4 py-3 text-center"><span class="inline-flex items-center justify-center px-2 py-0.5 ${(c.free_trial_used||0) > 0 ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-400'} rounded-full text-xs font-bold">${c.free_trial_used||0}/${c.free_trial_total||3}</span></td>
                 <td class="px-4 py-3 text-center"><span class="inline-flex items-center justify-center w-7 h-7 ${c.order_count > 0 ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-400'} rounded-full text-xs font-bold">${c.order_count||0}</span></td>
                 <td class="px-4 py-3 text-right font-bold text-sm ${c.total_spent > 0 ? 'text-green-600' : 'text-gray-300'}">${$$(c.total_spent)}</td>
                 <td class="px-4 py-3 text-center"><span class="inline-flex items-center justify-center w-7 h-7 bg-green-100 text-green-700 rounded-full text-xs font-bold">${c.invoice_count||0}</span></td>
@@ -279,7 +317,7 @@ function renderUsers() {
                 </td>
               </tr>
             `).join('')}
-            ${custs.length === 0 ? '<tr><td colspan="10" class="px-4 py-12 text-center text-gray-400"><i class="fas fa-users text-3xl mb-3 block"></i>No users registered yet.<br><span class="text-xs">Share <a href="/customer/login" class="text-blue-600 underline">/customer/login</a> with your clients.</span></td></tr>' : ''}
+            ${custs.length === 0 ? '<tr><td colspan="11" class="px-4 py-12 text-center text-gray-400"><i class="fas fa-users text-3xl mb-3 block"></i>No users registered yet.<br><span class="text-xs">Share <a href="/customer/login" class="text-blue-600 underline">/customer/login</a> with your clients.</span></td></tr>' : ''}
           </tbody>
         </table>
       </div>
@@ -471,7 +509,7 @@ function renderOrdersTable(orders) {
           <td class="px-3 py-2 text-gray-600 text-xs max-w-[180px] truncate">${o.property_address}</td>
           <td class="px-3 py-2 text-gray-600 text-xs">${o.customer_name || o.homeowner_name || '-'}</td>
           <td class="px-3 py-2">${tierBadge(o.service_tier)}</td>
-          <td class="px-3 py-2 text-right font-bold text-sm">$${o.price}</td>
+          <td class="px-3 py-2 text-right font-bold text-sm ${o.is_trial ? 'text-blue-500' : ''}">${o.is_trial ? '<span class="text-blue-500">$0 <span class="text-[10px] font-normal">(trial)</span></span>' : '$'+o.price}</td>
           <td class="px-3 py-2">${statusBadge(o.status)}</td>
           <td class="px-3 py-2">${payBadge(o.payment_status)}</td>
           <td class="px-3 py-2 text-gray-500 text-xs">${fmtDate(o.created_at)}</td>

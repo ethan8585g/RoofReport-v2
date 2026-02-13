@@ -193,25 +193,27 @@ authRoutes.get('/users', async (c) => {
 // ============================================================
 authRoutes.get('/admin-stats', async (c) => {
   try {
-    // All customers with order/invoice aggregates
+    // All customers with order/invoice aggregates (revenue excludes trial orders)
     const customers = await c.env.DB.prepare(`
       SELECT c.*,
         (SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id) as order_count,
-        (SELECT COALESCE(SUM(o.price), 0) FROM orders o WHERE o.customer_id = c.id AND o.payment_status = 'paid') as total_spent,
+        (SELECT COALESCE(SUM(o.price), 0) FROM orders o WHERE o.customer_id = c.id AND o.payment_status = 'paid' AND (o.is_trial IS NULL OR o.is_trial = 0)) as total_spent,
         (SELECT COUNT(*) FROM invoices i WHERE i.customer_id = c.id) as invoice_count,
         (SELECT COALESCE(SUM(i.total), 0) FROM invoices i WHERE i.customer_id = c.id AND i.status = 'paid') as invoices_paid,
-        (SELECT MAX(o.created_at) FROM orders o WHERE o.customer_id = c.id) as last_order_date
+        (SELECT MAX(o.created_at) FROM orders o WHERE o.customer_id = c.id) as last_order_date,
+        (SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id AND o.is_trial = 1) as trial_orders
       FROM customers c
       ORDER BY c.created_at DESC
     `).all()
 
-    // Earnings by month (last 12 months)
+    // Earnings by month (last 12 months) — revenue EXCLUDES trial orders
     const monthlyEarnings = await c.env.DB.prepare(`
       SELECT 
         strftime('%Y-%m', created_at) as month,
         COUNT(*) as order_count,
-        SUM(CASE WHEN payment_status = 'paid' THEN price ELSE 0 END) as revenue,
-        SUM(price) as total_value
+        SUM(CASE WHEN payment_status = 'paid' AND (is_trial IS NULL OR is_trial = 0) THEN price ELSE 0 END) as revenue,
+        SUM(CASE WHEN is_trial IS NULL OR is_trial = 0 THEN price ELSE 0 END) as total_value,
+        SUM(CASE WHEN is_trial = 1 THEN 1 ELSE 0 END) as trial_count
       FROM orders
       WHERE created_at >= date('now', '-12 months')
       GROUP BY strftime('%Y-%m', created_at)
@@ -230,47 +232,70 @@ authRoutes.get('/admin-stats', async (c) => {
       ORDER BY week DESC
     `).all()
 
-    // Today's earnings
+    // Today's earnings (EXCLUDES trial orders from revenue)
     const todayStats = await c.env.DB.prepare(`
       SELECT 
         COUNT(*) as orders_today,
-        SUM(CASE WHEN payment_status = 'paid' THEN price ELSE 0 END) as revenue_today,
-        SUM(price) as value_today
+        SUM(CASE WHEN payment_status = 'paid' AND (is_trial IS NULL OR is_trial = 0) THEN price ELSE 0 END) as revenue_today,
+        SUM(CASE WHEN is_trial IS NULL OR is_trial = 0 THEN price ELSE 0 END) as value_today,
+        SUM(CASE WHEN is_trial = 1 THEN 1 ELSE 0 END) as trial_orders_today
       FROM orders
       WHERE date(created_at) = date('now')
     `).first()
 
-    // This week's earnings
+    // This week's earnings (EXCLUDES trial orders from revenue)
     const weekStats = await c.env.DB.prepare(`
       SELECT 
         COUNT(*) as orders_week,
-        SUM(CASE WHEN payment_status = 'paid' THEN price ELSE 0 END) as revenue_week
+        SUM(CASE WHEN payment_status = 'paid' AND (is_trial IS NULL OR is_trial = 0) THEN price ELSE 0 END) as revenue_week,
+        SUM(CASE WHEN is_trial = 1 THEN 1 ELSE 0 END) as trial_orders_week
       FROM orders
       WHERE created_at >= date('now', 'weekday 0', '-7 days')
     `).first()
 
-    // This month's earnings
+    // This month's earnings (EXCLUDES trial orders from revenue)
     const monthStats = await c.env.DB.prepare(`
       SELECT 
         COUNT(*) as orders_month,
-        SUM(CASE WHEN payment_status = 'paid' THEN price ELSE 0 END) as revenue_month
+        SUM(CASE WHEN payment_status = 'paid' AND (is_trial IS NULL OR is_trial = 0) THEN price ELSE 0 END) as revenue_month,
+        SUM(CASE WHEN is_trial = 1 THEN 1 ELSE 0 END) as trial_orders_month
       FROM orders
       WHERE strftime('%Y-%m', created_at) = strftime('%Y-%m', 'now')
     `).first()
 
-    // All-time revenue
+    // All-time revenue (EXCLUDES trial orders from revenue calculations)
     const allTimeStats = await c.env.DB.prepare(`
       SELECT 
         COUNT(*) as total_orders,
         SUM(price) as total_value,
-        SUM(CASE WHEN payment_status = 'paid' THEN price ELSE 0 END) as total_collected,
-        SUM(CASE WHEN payment_status != 'paid' THEN price ELSE 0 END) as total_outstanding,
-        AVG(price) as avg_order_value,
+        SUM(CASE WHEN payment_status = 'paid' AND (is_trial IS NULL OR is_trial = 0) THEN price ELSE 0 END) as total_collected,
+        SUM(CASE WHEN payment_status NOT IN ('paid','trial') THEN price ELSE 0 END) as total_outstanding,
+        AVG(CASE WHEN is_trial = 0 OR is_trial IS NULL THEN price ELSE NULL END) as avg_order_value,
         SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_orders,
         SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending_orders,
-        SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled_orders
+        SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled_orders,
+        SUM(CASE WHEN is_trial = 1 THEN 1 ELSE 0 END) as trial_orders,
+        SUM(CASE WHEN is_trial = 0 OR is_trial IS NULL THEN 1 ELSE 0 END) as paid_orders
       FROM orders
     `).first()
+
+    // Free trial statistics
+    let trialStats: any = {}
+    try {
+      trialStats = await c.env.DB.prepare(`
+        SELECT
+          COUNT(*) as total_customers,
+          SUM(CASE WHEN free_trial_total > 0 THEN 1 ELSE 0 END) as trial_eligible,
+          SUM(free_trial_used) as total_trial_reports_used,
+          SUM(free_trial_total) as total_trial_reports_available,
+          SUM(CASE WHEN free_trial_used > 0 THEN 1 ELSE 0 END) as customers_who_used_trial,
+          SUM(CASE WHEN free_trial_used >= free_trial_total AND free_trial_total > 0 THEN 1 ELSE 0 END) as exhausted_trial,
+          SUM(CASE WHEN report_credits > 0 OR credits_used > 0 THEN 1 ELSE 0 END) as paying_customers,
+          SUM(report_credits) as total_paid_credits_purchased,
+          SUM(credits_used) as total_paid_credits_used
+        FROM customers
+      `).first() || {}
+    } catch(e) {}
 
     // Payments received
     const payments = await c.env.DB.prepare(`
@@ -320,12 +345,13 @@ authRoutes.get('/admin-stats', async (c) => {
       FROM orders
     `).first()
 
-    // Top customers by revenue
+    // Top customers by revenue (excludes trial orders from value)
     const topCustomers = await c.env.DB.prepare(`
       SELECT c.name, c.email, c.company_name,
         COUNT(o.id) as order_count,
-        SUM(o.price) as total_value,
-        SUM(CASE WHEN o.payment_status = 'paid' THEN o.price ELSE 0 END) as paid_value
+        SUM(CASE WHEN o.is_trial IS NULL OR o.is_trial = 0 THEN o.price ELSE 0 END) as total_value,
+        SUM(CASE WHEN o.payment_status = 'paid' AND (o.is_trial IS NULL OR o.is_trial = 0) THEN o.price ELSE 0 END) as paid_value,
+        SUM(CASE WHEN o.is_trial = 1 THEN 1 ELSE 0 END) as trial_orders
       FROM customers c
       JOIN orders o ON o.customer_id = c.id
       GROUP BY c.id
@@ -396,6 +422,7 @@ authRoutes.get('/admin-stats', async (c) => {
       this_week: weekStats,
       this_month: monthStats,
       all_time: allTimeStats,
+      trial_stats: trialStats,
       payments: payments.results,
       invoice_stats: invoiceStats,
       invoices: invoices.results,

@@ -76,6 +76,8 @@ function renderCustomerDashboard() {
   const b = custState.billing || {};
   // Credits from billing endpoint, fallback to customer profile data
   const credits = b.credits_remaining || (c ? c.credits_remaining : 0) || 0;
+  const freeTrialRemaining = (c ? c.free_trial_remaining : 0) || 0;
+  const paidCredits = (c ? c.paid_credits_remaining : 0) || 0;
 
   const tabs = [
     { id: 'orders', label: 'My Orders', icon: 'fa-clipboard-list', count: custState.orders.length },
@@ -85,21 +87,21 @@ function renderCustomerDashboard() {
   ];
 
   root.innerHTML = `
-    <!-- Free Credits Banner (only shown when credits > 0 and no orders yet) -->
-    ${credits > 0 && custState.orders.length === 0 ? `
-    <div class="bg-gradient-to-r from-green-500 to-emerald-600 rounded-xl p-6 mb-6 text-white shadow-lg">
+    <!-- Free Trial Banner (only shown when trial reports remaining) -->
+    ${freeTrialRemaining > 0 ? `
+    <div class="bg-gradient-to-r from-blue-500 to-indigo-600 rounded-xl p-6 mb-6 text-white shadow-lg">
       <div class="flex items-center justify-between flex-wrap gap-4">
         <div class="flex items-center gap-4">
           <div class="w-14 h-14 bg-white/20 rounded-xl flex items-center justify-center">
             <i class="fas fa-gift text-3xl"></i>
           </div>
           <div>
-            <h2 class="text-xl font-bold">Welcome! You have ${credits} free roof report${credits !== 1 ? 's' : ''}!</h2>
-            <p class="text-green-100 text-sm mt-1">Get started with your free reports — no credit card needed</p>
+            <h2 class="text-xl font-bold">You have ${freeTrialRemaining} free trial report${freeTrialRemaining !== 1 ? 's' : ''} remaining!</h2>
+            <p class="text-blue-100 text-sm mt-1">${(c ? c.free_trial_used : 0) || 0} of ${(c ? c.free_trial_total : 3) || 3} free trial reports used — no credit card needed</p>
           </div>
         </div>
-        <a href="/customer/order" class="bg-white text-green-700 font-bold py-3 px-6 rounded-xl transition-all hover:scale-105 shadow-lg hover:bg-green-50">
-          <i class="fas fa-plus mr-2"></i>Use Free Report
+        <a href="/customer/order" class="bg-white text-blue-700 font-bold py-3 px-6 rounded-xl transition-all hover:scale-105 shadow-lg hover:bg-blue-50">
+          <i class="fas fa-plus mr-2"></i>Use Free Trial Report
         </a>
       </div>
     </div>
@@ -121,9 +123,13 @@ function renderCustomerDashboard() {
             <p class="text-lg font-bold text-brand-700">${custState.orders.length}</p>
             <p class="text-xs text-gray-500">Orders</p>
           </div>
-          <div class="text-center px-4 py-2 ${credits > 0 ? 'bg-green-50' : 'bg-gray-50'} rounded-lg">
-            <p class="text-lg font-bold ${credits > 0 ? 'text-green-700' : 'text-gray-500'}">${credits}</p>
-            <p class="text-xs text-gray-500">${credits > 0 ? 'Free Reports' : 'Credits'}</p>
+          ${freeTrialRemaining > 0 ? `<div class="text-center px-4 py-2 bg-blue-50 rounded-lg">
+            <p class="text-lg font-bold text-blue-700">${freeTrialRemaining}</p>
+            <p class="text-xs text-gray-500">Free Trial</p>
+          </div>` : ''}
+          <div class="text-center px-4 py-2 ${paidCredits > 0 ? 'bg-green-50' : 'bg-gray-50'} rounded-lg">
+            <p class="text-lg font-bold ${paidCredits > 0 ? 'text-green-700' : 'text-gray-500'}">${paidCredits}</p>
+            <p class="text-xs text-gray-500">Paid Credits</p>
           </div>
           <div class="text-center px-4 py-2 bg-purple-50 rounded-lg">
             <p class="text-lg font-bold text-purple-700">${custState.orders.filter(function(o){return o.status==='completed'}).length}</p>
@@ -215,9 +221,14 @@ function renderCustOrders() {
 // ============================================================
 function renderBillingTab() {
   var b = custState.billing || {};
-  var credits = b.credits_remaining || 0;
-  var used = b.credits_used || 0;
-  var total = b.credits_total || 0;
+  var c = custState.customer || {};
+  var paidCredits = b.credits_remaining || (c.paid_credits_remaining || 0);
+  var paidUsed = b.credits_used || (c.paid_credits_used || 0);
+  var paidTotal = b.credits_total || (c.paid_credits_total || 0);
+  var freeTrialRemaining = c.free_trial_remaining || 0;
+  var freeTrialUsed = c.free_trial_used || 0;
+  var freeTrialTotal = c.free_trial_total || 3;
+  var totalAvailable = freeTrialRemaining + paidCredits;
   var payments = b.payments || [];
 
   // Fetch payments if not in billing object
@@ -225,16 +236,30 @@ function renderBillingTab() {
   
   var html = '<div class="space-y-6">';
 
-  // Credits Card
+  // Free Trial Card (only if trial remaining)
+  if (freeTrialTotal > 0) {
+    html += '<div class="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-6">' +
+      '<div class="flex items-center gap-3 mb-4">' +
+      '<div class="w-10 h-10 bg-blue-500 rounded-xl flex items-center justify-center"><i class="fas fa-gift text-white"></i></div>' +
+      '<div><h3 class="font-bold text-blue-900">Free Trial Reports</h3><p class="text-xs text-blue-600">Every new account gets ' + freeTrialTotal + ' free reports</p></div>' +
+      '</div>' +
+      '<div class="grid grid-cols-3 gap-4">' +
+      '<div class="bg-white/80 rounded-xl p-4 text-center"><p class="text-3xl font-black text-blue-700">' + freeTrialRemaining + '</p><p class="text-xs text-gray-500">Remaining</p></div>' +
+      '<div class="bg-white/80 rounded-xl p-4 text-center"><p class="text-3xl font-black text-indigo-700">' + freeTrialUsed + '</p><p class="text-xs text-gray-500">Used</p></div>' +
+      '<div class="bg-white/80 rounded-xl p-4 text-center"><p class="text-3xl font-black text-gray-700">' + freeTrialTotal + '</p><p class="text-xs text-gray-500">Total</p></div>' +
+      '</div></div>';
+  }
+
+  // Paid Credits Card
   html += '<div class="bg-white rounded-xl border border-gray-200 p-6">' +
     '<div class="flex items-center justify-between mb-6">' +
-    '<h3 class="text-lg font-bold text-gray-800"><i class="fas fa-coins text-brand-500 mr-2"></i>Report Credits</h3>' +
+    '<h3 class="text-lg font-bold text-gray-800"><i class="fas fa-coins text-brand-500 mr-2"></i>Paid Report Credits</h3>' +
     '<a href="/customer/order" class="bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 rounded-lg text-sm font-semibold"><i class="fas fa-plus mr-1"></i>Order Report</a>' +
     '</div>' +
     '<div class="grid grid-cols-3 gap-4 mb-6">' +
-    '<div class="bg-green-50 rounded-xl p-4 text-center"><p class="text-3xl font-black text-green-700">' + credits + '</p><p class="text-xs text-gray-500">Available</p></div>' +
-    '<div class="bg-blue-50 rounded-xl p-4 text-center"><p class="text-3xl font-black text-blue-700">' + used + '</p><p class="text-xs text-gray-500">Used</p></div>' +
-    '<div class="bg-gray-50 rounded-xl p-4 text-center"><p class="text-3xl font-black text-gray-700">' + total + '</p><p class="text-xs text-gray-500">Total Purchased</p></div>' +
+    '<div class="bg-green-50 rounded-xl p-4 text-center"><p class="text-3xl font-black text-green-700">' + paidCredits + '</p><p class="text-xs text-gray-500">Available</p></div>' +
+    '<div class="bg-blue-50 rounded-xl p-4 text-center"><p class="text-3xl font-black text-blue-700">' + paidUsed + '</p><p class="text-xs text-gray-500">Used</p></div>' +
+    '<div class="bg-gray-50 rounded-xl p-4 text-center"><p class="text-3xl font-black text-gray-700">' + paidTotal + '</p><p class="text-xs text-gray-500">Total Purchased</p></div>' +
     '</div>';
 
   // Buy credits section

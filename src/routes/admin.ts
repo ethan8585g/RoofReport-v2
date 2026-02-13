@@ -18,12 +18,13 @@ adminRoutes.get('/dashboard', async (c) => {
       FROM orders
     `).first()
 
-    // Revenue stats
+    // Revenue stats (EXCLUDES trial orders)
     const revenueStats = await c.env.DB.prepare(`
       SELECT
-        SUM(CASE WHEN payment_status = 'paid' THEN price ELSE 0 END) as total_revenue,
-        SUM(CASE WHEN payment_status = 'paid' AND service_tier = 'express' THEN price ELSE 0 END) as express_revenue,
-        SUM(CASE WHEN payment_status = 'paid' AND service_tier = 'standard' THEN price ELSE 0 END) as standard_revenue
+        SUM(CASE WHEN payment_status = 'paid' AND (is_trial IS NULL OR is_trial = 0) THEN price ELSE 0 END) as total_revenue,
+        SUM(CASE WHEN payment_status = 'paid' AND service_tier = 'express' AND (is_trial IS NULL OR is_trial = 0) THEN price ELSE 0 END) as express_revenue,
+        SUM(CASE WHEN payment_status = 'paid' AND service_tier = 'standard' AND (is_trial IS NULL OR is_trial = 0) THEN price ELSE 0 END) as standard_revenue,
+        SUM(CASE WHEN is_trial = 1 THEN 1 ELSE 0 END) as trial_orders
       FROM orders
     `).first()
 
@@ -296,6 +297,18 @@ adminRoutes.post('/init-db', async (c) => {
       try { await c.env.DB.prepare(`ALTER TABLE customers ADD COLUMN ${col}`).run() } catch(e) {}
     }
 
+    // Migration 0008: Free trial tracking (separate from paid credits)
+    const trialCols = [
+      'free_trial_total INTEGER DEFAULT 3',
+      'free_trial_used INTEGER DEFAULT 0'
+    ]
+    for (const col of trialCols) {
+      try { await c.env.DB.prepare(`ALTER TABLE customers ADD COLUMN ${col}`).run() } catch(e) {}
+    }
+
+    // Migration 0009: Trial flag on orders (so admin can filter trial vs paid)
+    try { await c.env.DB.prepare('ALTER TABLE orders ADD COLUMN is_trial INTEGER DEFAULT 0').run() } catch(e) {}
+
     // Stripe tables
     await c.env.DB.prepare(`
       CREATE TABLE IF NOT EXISTS stripe_payments (
@@ -330,15 +343,17 @@ adminRoutes.post('/init-db', async (c) => {
       )
     `).run()
 
-    // Seed default credit packages
+    // Seed default credit packages (minimum $5.50/report)
+    // Update existing packages to new pricing
+    await c.env.DB.prepare(`DELETE FROM credit_packages`).run()
     await c.env.DB.prepare(`
-      INSERT OR IGNORE INTO credit_packages (id, name, description, credits, price_cents, sort_order)
+      INSERT INTO credit_packages (id, name, description, credits, price_cents, sort_order)
       VALUES
-        (1, '5 Pack', '5 reports — best for trying out', 5, 3500, 1),
-        (2, '10 Pack', '10 reports — most popular', 10, 6000, 2),
-        (3, '25 Pack', '25 reports — pro value', 25, 12500, 3),
-        (4, '50 Pack', '50 reports — team deal', 50, 20000, 4),
-        (5, '100 Pack', '100 reports — enterprise', 100, 35000, 5)
+        (1, '5 Pack', '5 reports — $5.50/ea', 5, 2750, 1),
+        (2, '10 Pack', '10 reports — most popular — $5.00/ea', 10, 5000, 2),
+        (3, '25 Pack', '25 reports — pro value — $4.50/ea', 25, 11250, 3),
+        (4, '50 Pack', '50 reports — team deal — $4.00/ea', 50, 20000, 4),
+        (5, '100 Pack', '100 reports — enterprise — $3.50/ea', 100, 35000, 5)
     `).run()
 
     // Customer portal indexes

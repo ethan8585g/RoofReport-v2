@@ -76,23 +76,25 @@ customerAuthRoutes.post('/google', async (c) => {
         WHERE id = ?
       `).bind(googleId, avatar, name, customer.id).run()
     } else {
-      // Create new customer with 3 free signup credits
+      // Create new customer with 3 free trial reports (NOT paid credits)
       const result = await c.env.DB.prepare(`
-        INSERT INTO customers (email, name, google_id, google_avatar, email_verified, report_credits, credits_used)
-        VALUES (?, ?, ?, ?, 1, 3, 0)
+        INSERT INTO customers (email, name, google_id, google_avatar, email_verified, report_credits, credits_used, free_trial_total, free_trial_used)
+        VALUES (?, ?, ?, ?, 1, 0, 0, 3, 0)
       `).bind(email, name, googleId, avatar).run()
       
       customer = {
         id: result.meta.last_row_id,
         email, name, google_id: googleId, google_avatar: avatar,
-        report_credits: 3, credits_used: 0, is_new_signup: true
+        report_credits: 0, credits_used: 0,
+        free_trial_total: 3, free_trial_used: 0,
+        is_new_signup: true
       }
 
-      // Log the free credits
+      // Log the free trial
       await c.env.DB.prepare(`
         INSERT INTO user_activity_log (company_id, action, details)
-        VALUES (1, 'free_credits_granted', ?)
-      `).bind(`3 free signup credits granted to ${email} (Google sign-in)`).run()
+        VALUES (1, 'free_trial_granted', ?)
+      `).bind(`3 free trial reports granted to ${email} (Google sign-in)`).run()
     }
 
     // Create session
@@ -111,7 +113,9 @@ customerAuthRoutes.post('/google', async (c) => {
     `).bind(`Customer ${email} signed in via Google`).run()
 
     const isNew = customer.is_new_signup || false
-    const creditsRemaining = (customer.report_credits || 0) - (customer.credits_used || 0)
+    const paidCreditsRemaining = (customer.report_credits || 0) - (customer.credits_used || 0)
+    const freeTrialRemaining = (customer.free_trial_total || 3) - (customer.free_trial_used || 0)
+    const totalRemaining = Math.max(0, freeTrialRemaining) + Math.max(0, paidCreditsRemaining)
 
     return c.json({
       success: true,
@@ -123,10 +127,13 @@ customerAuthRoutes.post('/google', async (c) => {
         phone: customer.phone,
         google_avatar: customer.google_avatar || avatar,
         role: 'customer',
-        credits_remaining: isNew ? 3 : creditsRemaining
+        credits_remaining: totalRemaining,
+        free_trial_remaining: Math.max(0, freeTrialRemaining),
+        free_trial_total: customer.free_trial_total || 3,
+        paid_credits_remaining: Math.max(0, paidCreditsRemaining)
       },
       token,
-      ...(isNew ? { welcome: true, message: 'Welcome! You have 3 free roof reports to get started.' } : {})
+      ...(isNew ? { welcome: true, message: 'Welcome! You have 3 free trial roof reports to get started.' } : {})
     })
   } catch (err: any) {
     return c.json({ error: 'Google sign-in failed', details: err.message }, 500)
@@ -158,10 +165,10 @@ customerAuthRoutes.post('/register', async (c) => {
     const { hash, salt } = await hashPassword(password)
     const storedHash = `${salt}:${hash}`
 
-    // Insert with 3 free signup credits
+    // Insert with 3 free trial reports (NOT paid credits)
     const result = await c.env.DB.prepare(`
-      INSERT INTO customers (email, name, phone, company_name, password_hash, report_credits, credits_used)
-      VALUES (?, ?, ?, ?, ?, 3, 0)
+      INSERT INTO customers (email, name, phone, company_name, password_hash, report_credits, credits_used, free_trial_total, free_trial_used)
+      VALUES (?, ?, ?, ?, ?, 0, 0, 3, 0)
     `).bind(email.toLowerCase().trim(), name, phone || null, company_name || null, storedHash).run()
 
     const token = generateSessionToken()
@@ -175,7 +182,7 @@ customerAuthRoutes.post('/register', async (c) => {
     await c.env.DB.prepare(`
       INSERT INTO user_activity_log (company_id, action, details)
       VALUES (1, 'customer_registered', ?)
-    `).bind(`New customer: ${name} (${email}) — 3 free credits granted`).run()
+    `).bind(`New customer: ${name} (${email}) — 3 free trial reports granted`).run()
 
     return c.json({
       success: true,
@@ -186,11 +193,14 @@ customerAuthRoutes.post('/register', async (c) => {
         company_name,
         phone,
         role: 'customer',
-        free_credits: 3
+        credits_remaining: 3,
+        free_trial_remaining: 3,
+        free_trial_total: 3,
+        paid_credits_remaining: 0
       },
       token,
       welcome: true,
-      message: 'Welcome! You have 3 free roof reports to get started.'
+      message: 'Welcome! You have 3 free trial roof reports to get started.'
     })
   } catch (err: any) {
     return c.json({ error: 'Registration failed', details: err.message }, 500)
@@ -274,7 +284,9 @@ customerAuthRoutes.get('/me', async (c) => {
     return c.json({ error: 'Session expired or invalid' }, 401)
   }
 
-  const creditsRemaining = (session.report_credits || 0) - (session.credits_used || 0)
+  const paidCreditsRemaining = (session.report_credits || 0) - (session.credits_used || 0)
+  const freeTrialRemaining = (session.free_trial_total || 0) - (session.free_trial_used || 0)
+  const totalRemaining = Math.max(0, freeTrialRemaining) + Math.max(0, paidCreditsRemaining)
 
   return c.json({
     customer: {
@@ -289,9 +301,13 @@ customerAuthRoutes.get('/me', async (c) => {
       province: session.province,
       postal_code: session.postal_code,
       role: 'customer',
-      credits_remaining: creditsRemaining,
-      credits_total: session.report_credits || 0,
-      credits_used: session.credits_used || 0
+      credits_remaining: totalRemaining,
+      free_trial_remaining: Math.max(0, freeTrialRemaining),
+      free_trial_total: session.free_trial_total || 0,
+      free_trial_used: session.free_trial_used || 0,
+      paid_credits_remaining: Math.max(0, paidCreditsRemaining),
+      paid_credits_total: session.report_credits || 0,
+      paid_credits_used: session.credits_used || 0
     }
   })
 })

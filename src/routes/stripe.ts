@@ -101,13 +101,20 @@ stripeRoutes.get('/billing', async (c) => {
     ORDER BY sp.created_at DESC LIMIT 20
   `).bind(customer.customer_id).all()
 
+  const freeTrialRemaining = Math.max(0, (customer.free_trial_total || 0) - (customer.free_trial_used || 0))
+  const paidRemaining = Math.max(0, (customer.report_credits || 0) - (customer.credits_used || 0))
+
   return c.json({
     billing: {
       plan: customer.subscription_plan || 'free',
       status: customer.subscription_status || 'none',
-      credits_remaining: (customer.report_credits || 0) - (customer.credits_used || 0),
+      credits_remaining: freeTrialRemaining + paidRemaining,
       credits_total: customer.report_credits || 0,
       credits_used: customer.credits_used || 0,
+      free_trial_remaining: freeTrialRemaining,
+      free_trial_total: customer.free_trial_total || 0,
+      free_trial_used: customer.free_trial_used || 0,
+      paid_credits_remaining: paidRemaining,
       subscription_start: customer.subscription_start,
       subscription_end: customer.subscription_end,
       stripe_customer_id: customer.stripe_customer_id || null,
@@ -300,8 +307,8 @@ stripeRoutes.post('/checkout/report', async (c) => {
 })
 
 // ============================================================
-// USE CREDITS — Deduct a credit and create order
-// For customers who pre-bought credit packs
+// USE CREDITS — Free trial first, then paid credits
+// New users get 3 free trial reports. After that, paid credits.
 // ============================================================
 stripeRoutes.post('/use-credit', async (c) => {
   try {
@@ -309,9 +316,18 @@ stripeRoutes.post('/use-credit', async (c) => {
     const customer = await getCustomerFromToken(c.env.DB, token)
     if (!customer) return c.json({ error: 'Not authenticated' }, 401)
 
-    const remaining = (customer.report_credits || 0) - (customer.credits_used || 0)
-    if (remaining <= 0) {
-      return c.json({ error: 'No credits remaining. Please purchase a credit pack.', credits_remaining: 0 }, 402)
+    // Check free trial first, then paid credits
+    const freeTrialRemaining = Math.max(0, (customer.free_trial_total || 0) - (customer.free_trial_used || 0))
+    const paidRemaining = Math.max(0, (customer.report_credits || 0) - (customer.credits_used || 0))
+    const totalRemaining = freeTrialRemaining + paidRemaining
+
+    if (totalRemaining <= 0) {
+      return c.json({ 
+        error: 'No credits remaining. Please purchase a credit pack.', 
+        credits_remaining: 0,
+        free_trial_remaining: 0,
+        paid_credits_remaining: 0
+      }, 402)
     }
 
     const { property_address, property_city, property_province, property_postal_code,
@@ -320,8 +336,14 @@ stripeRoutes.post('/use-credit', async (c) => {
     if (!property_address) return c.json({ error: 'Property address is required' }, 400)
 
     const tier = service_tier || 'standard'
-    const tierPrices: Record<string, number> = { express: 12, standard: 8 }
-    const price = tierPrices[tier] || 8
+
+    // Determine if this is a free trial order or paid order
+    const isTrial = freeTrialRemaining > 0
+    const price = isTrial ? 0 : ((tier === 'express') ? 12 : 8)
+    const paymentStatus = isTrial ? 'trial' : 'paid'
+    const notes = isTrial 
+      ? `Free trial report (${(customer.free_trial_used || 0) + 1} of ${customer.free_trial_total || 3})` 
+      : 'Paid via credit balance'
 
     // Ensure master company exists
     await c.env.DB.prepare(
@@ -338,7 +360,7 @@ stripeRoutes.post('/use-credit', async (c) => {
     const deliveryMs: Record<string, number> = { express: 10 * 60000, standard: 60 * 60000 }
     const estimatedDelivery = new Date(now + (deliveryMs[tier] || 60 * 60000)).toISOString()
 
-    // Create order (already paid via credits)
+    // Create order
     const result = await c.env.DB.prepare(`
       INSERT INTO orders (
         order_number, master_company_id, customer_id,
@@ -347,22 +369,28 @@ stripeRoutes.post('/use-credit', async (c) => {
         homeowner_name, homeowner_email,
         requester_name, requester_email,
         service_tier, price, status, payment_status, estimated_delivery,
-        notes
-      ) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'processing', 'paid', ?, ?)
+        notes, is_trial
+      ) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'processing', ?, ?, ?, ?)
     `).bind(
       orderNumber, customer.customer_id,
       property_address, property_city || null, property_province || null, property_postal_code || null,
       latitude || null, longitude || null,
       customer.name, customer.email,
       customer.name, customer.email,
-      tier, price, estimatedDelivery,
-      'Paid via credit balance'
+      tier, price, paymentStatus, estimatedDelivery,
+      notes, isTrial ? 1 : 0
     ).run()
 
-    // Deduct credit
-    await c.env.DB.prepare(
-      'UPDATE customers SET credits_used = credits_used + 1, updated_at = datetime("now") WHERE id = ?'
-    ).bind(customer.customer_id).run()
+    // Deduct from the correct bucket
+    if (isTrial) {
+      await c.env.DB.prepare(
+        'UPDATE customers SET free_trial_used = free_trial_used + 1, updated_at = datetime("now") WHERE id = ?'
+      ).bind(customer.customer_id).run()
+    } else {
+      await c.env.DB.prepare(
+        'UPDATE customers SET credits_used = credits_used + 1, updated_at = datetime("now") WHERE id = ?'
+      ).bind(customer.customer_id).run()
+    }
 
     // Create placeholder report
     await c.env.DB.prepare(
@@ -370,10 +398,14 @@ stripeRoutes.post('/use-credit', async (c) => {
     ).bind(result.meta.last_row_id).run()
 
     // Log activity
+    const actionType = isTrial ? 'free_trial_used' : 'credit_used'
     await c.env.DB.prepare(`
       INSERT INTO user_activity_log (company_id, action, details)
-      VALUES (1, 'credit_used', ?)
-    `).bind(`${customer.email} used 1 credit for ${property_address} (${orderNumber})`).run()
+      VALUES (1, ?, ?)
+    `).bind(actionType, `${customer.email} used 1 ${isTrial ? 'free trial' : 'paid credit'} for ${property_address} (${orderNumber})`).run()
+
+    const newFreeTrialRemaining = isTrial ? freeTrialRemaining - 1 : freeTrialRemaining
+    const newPaidRemaining = isTrial ? paidRemaining : paidRemaining - 1
 
     return c.json({
       success: true,
@@ -384,9 +416,12 @@ stripeRoutes.post('/use-credit', async (c) => {
         service_tier: tier,
         price,
         status: 'processing',
-        payment_status: 'paid'
+        payment_status: paymentStatus,
+        is_trial: isTrial
       },
-      credits_remaining: remaining - 1
+      credits_remaining: newFreeTrialRemaining + newPaidRemaining,
+      free_trial_remaining: newFreeTrialRemaining,
+      paid_credits_remaining: newPaidRemaining
     })
   } catch (err: any) {
     return c.json({ error: 'Failed to use credit', details: err.message }, 500)

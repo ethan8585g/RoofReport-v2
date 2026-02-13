@@ -244,9 +244,10 @@ ordersRoutes.get('/stats/summary', async (c) => {
         SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending_orders,
         SUM(CASE WHEN status = 'processing' THEN 1 ELSE 0 END) as processing_orders,
         SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_orders,
-        SUM(CASE WHEN payment_status = 'paid' THEN price ELSE 0 END) as total_revenue,
+        SUM(CASE WHEN payment_status = 'paid' AND (is_trial IS NULL OR is_trial = 0) THEN price ELSE 0 END) as total_revenue,
         SUM(CASE WHEN service_tier = 'express' THEN 1 ELSE 0 END) as express_orders,
-        SUM(CASE WHEN service_tier = 'standard' THEN 1 ELSE 0 END) as standard_orders
+        SUM(CASE WHEN service_tier = 'standard' THEN 1 ELSE 0 END) as standard_orders,
+        SUM(CASE WHEN is_trial = 1 THEN 1 ELSE 0 END) as trial_orders
       FROM orders
     `).first()
 

@@ -64,6 +64,9 @@ function renderOrderPage() {
 
   const b = orderState.billing || {};
   const credits = b.credits_remaining || 0;
+  const freeTrialRemaining = b.free_trial_remaining || 0;
+  const paidCredits = b.paid_credits_remaining || 0;
+  const isTrialAvailable = freeTrialRemaining > 0;
   const tiers = [
     { id: 'standard', label: 'Standard', desc: '~1 hour', price: 8, icon: 'fa-clock', color: 'green' },
     { id: 'express', label: 'Express', desc: '~10 min', price: 12, icon: 'fa-bolt', color: 'red' },
@@ -74,17 +77,30 @@ function renderOrderPage() {
   root.innerHTML = `
     <div class="max-w-3xl mx-auto">
       <!-- Credits Banner -->
-      ${credits > 0 ? `
+      ${isTrialAvailable ? `
+        <div class="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center"><i class="fas fa-gift text-blue-600"></i></div>
+              <div>
+                <p class="font-semibold text-blue-800"><i class="fas fa-star text-yellow-500 mr-1"></i>Free Trial: ${freeTrialRemaining} of ${b.free_trial_total || 3} reports remaining!</p>
+                <p class="text-sm text-blue-600">Use your free trial reports on any address — no credit card needed</p>
+              </div>
+            </div>
+            <span class="bg-blue-600 text-white px-3 py-1.5 rounded-full text-lg font-bold">${freeTrialRemaining}</span>
+          </div>
+        </div>
+      ` : paidCredits > 0 ? `
         <div class="bg-green-50 border border-green-200 rounded-xl p-4 mb-6">
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-3">
-              <div class="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center"><i class="fas fa-gift text-green-600"></i></div>
+              <div class="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center"><i class="fas fa-coins text-green-600"></i></div>
               <div>
-                <p class="font-semibold text-green-800"><i class="fas fa-star text-yellow-500 mr-1"></i>You have ${credits} free report${credits !== 1 ? 's' : ''} remaining!</p>
-                <p class="text-sm text-green-600">Use your free credits on any report — no payment needed</p>
+                <p class="font-semibold text-green-800">You have ${paidCredits} paid credit${paidCredits !== 1 ? 's' : ''} remaining</p>
+                <p class="text-sm text-green-600">Use your credits on any report</p>
               </div>
             </div>
-            <span class="bg-green-600 text-white px-3 py-1.5 rounded-full text-lg font-bold">${credits}</span>
+            <span class="bg-green-600 text-white px-3 py-1.5 rounded-full text-lg font-bold">${paidCredits}</span>
           </div>
         </div>
       ` : `
@@ -92,8 +108,8 @@ function renderOrderPage() {
           <div class="flex items-center gap-3">
             <div class="w-10 h-10 bg-amber-100 rounded-lg flex items-center justify-center"><i class="fas fa-credit-card text-amber-600"></i></div>
             <div>
-              <p class="font-semibold text-amber-800">No free reports left — pay per report</p>
-              <p class="text-sm text-amber-600">Starting at $8 CAD per report, or buy credit packs to save</p>
+              <p class="font-semibold text-amber-800">No credits remaining — pay per report or buy a credit pack</p>
+              <p class="text-sm text-amber-600">Starting at $5.50 CAD per report with credit packs</p>
             </div>
           </div>
           <a href="/pricing" class="bg-brand-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-brand-700">Buy Credits</a>
@@ -161,9 +177,16 @@ function renderOrderPage() {
 
           <!-- Action Buttons -->
           <div class="flex gap-4">
-            ${credits > 0 ? `
+            ${isTrialAvailable ? `
+              <button onclick="useCredit()" id="creditBtn" class="flex-1 py-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition-all hover:scale-[1.02] shadow-lg text-lg">
+                <i class="fas fa-gift mr-2"></i>Use Free Trial Report (${freeTrialRemaining} left)
+              </button>
+              <button onclick="payWithStripe()" id="stripeBtn" class="py-4 px-6 bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold rounded-xl transition-all text-sm">
+                <i class="fab fa-stripe mr-1"></i>Pay $${selectedTierInfo.price} instead
+              </button>
+            ` : paidCredits > 0 ? `
               <button onclick="useCredit()" id="creditBtn" class="flex-1 py-4 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl transition-all hover:scale-[1.02] shadow-lg text-lg">
-                <i class="fas fa-gift mr-2"></i>Use Free Report (${credits} left)
+                <i class="fas fa-coins mr-2"></i>Use Paid Credit (${paidCredits} left)
               </button>
               <button onclick="payWithStripe()" id="stripeBtn" class="py-4 px-6 bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold rounded-xl transition-all text-sm">
                 <i class="fab fa-stripe mr-1"></i>Pay $${selectedTierInfo.price} instead
@@ -175,7 +198,7 @@ function renderOrderPage() {
             `}
           </div>
 
-          ${credits > 0 ? '<p class="text-center text-xs text-gray-400"><i class="fas fa-check-circle text-green-500 mr-1"></i>Your free credits work for any delivery speed at no cost</p>' : ''}
+          ${isTrialAvailable ? '<p class="text-center text-xs text-gray-400"><i class="fas fa-check-circle text-blue-500 mr-1"></i>Free trial reports work for any delivery speed at no cost</p>' : paidCredits > 0 ? '<p class="text-center text-xs text-gray-400"><i class="fas fa-check-circle text-green-500 mr-1"></i>Your credits work for any delivery speed</p>' : ''}
         </div>
       </div>
 
