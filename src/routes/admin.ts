@@ -309,6 +309,54 @@ adminRoutes.post('/init-db', async (c) => {
     // Migration 0009: Trial flag on orders (so admin can filter trial vs paid)
     try { await c.env.DB.prepare('ALTER TABLE orders ADD COLUMN is_trial INTEGER DEFAULT 0').run() } catch(e) {}
 
+    // Migration 0010: Remove old CHECK constraint on service_tier
+    // Old production DB had CHECK(service_tier IN ('immediate','urgent','regular'))
+    // New tiers are 'express' and 'standard'. SQLite requires table recreation to drop constraints.
+    try {
+      const checkRow = await c.env.DB.prepare(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='orders'"
+      ).first<any>()
+      if (checkRow?.sql && checkRow.sql.includes("'immediate'")) {
+        // Old constraint detected — recreate orders table without it
+        await c.env.DB.prepare(`CREATE TABLE IF NOT EXISTS orders_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          order_number TEXT UNIQUE NOT NULL,
+          master_company_id INTEGER NOT NULL,
+          customer_company_id INTEGER,
+          customer_id INTEGER,
+          property_address TEXT NOT NULL, property_city TEXT, property_province TEXT, property_postal_code TEXT,
+          latitude REAL, longitude REAL,
+          homeowner_name TEXT NOT NULL, homeowner_phone TEXT, homeowner_email TEXT,
+          requester_name TEXT NOT NULL, requester_company TEXT, requester_email TEXT, requester_phone TEXT,
+          service_tier TEXT NOT NULL, price REAL NOT NULL,
+          status TEXT DEFAULT 'pending', payment_status TEXT DEFAULT 'unpaid',
+          payment_intent_id TEXT, estimated_delivery TEXT, delivered_at TEXT, notes TEXT,
+          is_trial INTEGER DEFAULT 0,
+          created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')),
+          FOREIGN KEY (master_company_id) REFERENCES master_companies(id),
+          FOREIGN KEY (customer_company_id) REFERENCES customer_companies(id),
+          FOREIGN KEY (customer_id) REFERENCES customers(id)
+        )`).run()
+        await c.env.DB.prepare(`INSERT INTO orders_new SELECT
+          id, order_number, master_company_id, customer_company_id, customer_id,
+          property_address, property_city, property_province, property_postal_code,
+          latitude, longitude,
+          homeowner_name, homeowner_phone, homeowner_email,
+          requester_name, requester_company, requester_email, requester_phone,
+          service_tier, price, status, payment_status,
+          payment_intent_id, estimated_delivery, delivered_at, notes, is_trial,
+          created_at, updated_at
+        FROM orders`).run()
+        await c.env.DB.prepare('DROP TABLE orders').run()
+        await c.env.DB.prepare('ALTER TABLE orders_new RENAME TO orders').run()
+        // Recreate indexes
+        await c.env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)').run()
+        await c.env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at)').run()
+        await c.env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_orders_order_number ON orders(order_number)').run()
+        await c.env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_orders_customer_id ON orders(customer_id)').run()
+      }
+    } catch(e) {}
+
     // Stripe tables
     await c.env.DB.prepare(`
       CREATE TABLE IF NOT EXISTS stripe_payments (
