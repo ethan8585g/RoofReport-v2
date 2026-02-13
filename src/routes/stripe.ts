@@ -4,6 +4,50 @@ import type { Bindings } from '../types'
 export const stripeRoutes = new Hono<{ Bindings: Bindings }>()
 
 // ============================================================
+// GEOCODING HELPER — Convert address to lat/lng
+// Uses Google Maps Geocoding API
+// ============================================================
+async function geocodeAddress(address: string, apiKey: string): Promise<{ lat: number; lng: number } | null> {
+  try {
+    const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${apiKey}`
+    const resp = await fetch(url)
+    if (!resp.ok) return null
+    const data: any = await resp.json()
+    if (data.status === 'OK' && data.results?.[0]?.geometry?.location) {
+      const loc = data.results[0].geometry.location
+      return { lat: loc.lat, lng: loc.lng }
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+// ============================================================
+// AUTO-GENERATE REPORT — Trigger report generation after order creation
+// Calls the internal /api/reports/:orderId/generate endpoint
+// ============================================================
+async function triggerReportGeneration(orderId: number, requestUrl: string, headers?: Record<string, string>): Promise<boolean> {
+  try {
+    // Use the same host as the incoming request to call the internal endpoint
+    const url = new URL(requestUrl)
+    const generateUrl = `${url.protocol}//${url.host}/api/reports/${orderId}/generate`
+    console.log(`[Auto-Generate] Triggering report for order ${orderId}: ${generateUrl}`)
+    
+    const resp = await fetch(generateUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    })
+    const result: any = await resp.json()
+    console.log(`[Auto-Generate] Order ${orderId}: ${resp.status} — ${result.success ? 'SUCCESS' : result.error || 'FAILED'}`)
+    return result.success === true
+  } catch (err: any) {
+    console.error(`[Auto-Generate] Order ${orderId} failed:`, err.message)
+    return false
+  }
+}
+
+// ============================================================
 // STRIPE API HELPER — All calls go through Stripe REST API
 // No SDK needed — Cloudflare Workers compatible
 // ============================================================
@@ -392,10 +436,56 @@ stripeRoutes.post('/use-credit', async (c) => {
       ).bind(customer.customer_id).run()
     }
 
+    const newOrderId = result.meta.last_row_id as number
+
+    // ============================================================
+    // GEOCODE ADDRESS — Convert to lat/lng for Solar API
+    // ============================================================
+    const mapsKey = c.env.GOOGLE_MAPS_API_KEY || c.env.GOOGLE_SOLAR_API_KEY
+    let geocodedLat: number | null = null
+    let geocodedLng: number | null = null
+
+    if (mapsKey) {
+      const fullAddress = [property_address, property_city, property_province, property_postal_code]
+        .filter(Boolean).join(', ')
+      const geo = await geocodeAddress(fullAddress, mapsKey)
+      if (geo) {
+        geocodedLat = geo.lat
+        geocodedLng = geo.lng
+        // Update order with coordinates
+        await c.env.DB.prepare(
+          'UPDATE orders SET latitude = ?, longitude = ?, updated_at = datetime("now") WHERE id = ?'
+        ).bind(geocodedLat, geocodedLng, newOrderId).run()
+        console.log(`[Use-Credit] Geocoded "${fullAddress}" → ${geocodedLat}, ${geocodedLng}`)
+      } else {
+        console.warn(`[Use-Credit] Geocoding failed for: ${fullAddress}`)
+      }
+    }
+
     // Create placeholder report
     await c.env.DB.prepare(
       "INSERT OR IGNORE INTO reports (order_id, status) VALUES (?, 'pending')"
-    ).bind(result.meta.last_row_id).run()
+    ).bind(newOrderId).run()
+
+    // ============================================================
+    // AUTO-GENERATE REPORT — Trigger immediately after order creation
+    // This runs the full Solar API + report generation pipeline
+    // ============================================================
+    const requestUrl = c.req.url
+    // Fire-and-forget: use waitUntil if available, otherwise try inline
+    try {
+      // In Cloudflare Workers, c.executionCtx.waitUntil keeps the worker alive
+      // In local dev (wrangler pages dev), we just await it inline
+      const generatePromise = triggerReportGeneration(newOrderId, requestUrl)
+      if ((c as any).executionCtx?.waitUntil) {
+        ;(c as any).executionCtx.waitUntil(generatePromise)
+      } else {
+        // Local dev: await inline (adds latency but ensures report generates)
+        await generatePromise
+      }
+    } catch (e: any) {
+      console.warn(`[Use-Credit] Auto-generate fire-and-forget error (non-fatal): ${e.message}`)
+    }
 
     // Log activity
     const actionType = isTrial ? 'free_trial_used' : 'credit_used'
@@ -410,14 +500,16 @@ stripeRoutes.post('/use-credit', async (c) => {
     return c.json({
       success: true,
       order: {
-        id: result.meta.last_row_id,
+        id: newOrderId,
         order_number: orderNumber,
         property_address,
         service_tier: tier,
         price,
         status: 'processing',
         payment_status: paymentStatus,
-        is_trial: isTrial
+        is_trial: isTrial,
+        latitude: geocodedLat,
+        longitude: geocodedLng
       },
       credits_remaining: newFreeTrialRemaining + newPaidRemaining,
       free_trial_remaining: newFreeTrialRemaining,
@@ -514,15 +606,44 @@ stripeRoutes.post('/webhook', async (c) => {
             `Paid via Stripe (${session.payment_intent})`
           ).run()
 
+          const webhookOrderId = orderResult.meta.last_row_id as number
+
           // Update stripe payment with order_id
           await c.env.DB.prepare(
             'UPDATE stripe_payments SET order_id = ? WHERE stripe_checkout_session_id = ?'
-          ).bind(orderResult.meta.last_row_id, session.id).run()
+          ).bind(webhookOrderId, session.id).run()
+
+          // Geocode address if not already geocoded
+          const mapsKey = c.env.GOOGLE_MAPS_API_KEY || c.env.GOOGLE_SOLAR_API_KEY
+          if (mapsKey && !meta.latitude) {
+            const fullAddr = [address, meta.property_city, meta.property_province, meta.property_postal_code]
+              .filter(Boolean).join(', ')
+            const geo = await geocodeAddress(fullAddr, mapsKey)
+            if (geo) {
+              await c.env.DB.prepare(
+                'UPDATE orders SET latitude = ?, longitude = ?, updated_at = datetime("now") WHERE id = ?'
+              ).bind(geo.lat, geo.lng, webhookOrderId).run()
+              console.log(`[Webhook] Geocoded "${fullAddr}" → ${geo.lat}, ${geo.lng}`)
+            }
+          }
 
           // Create placeholder report
           await c.env.DB.prepare(
             "INSERT OR IGNORE INTO reports (order_id, status) VALUES (?, 'pending')"
-          ).bind(orderResult.meta.last_row_id).run()
+          ).bind(webhookOrderId).run()
+
+          // Auto-trigger report generation
+          try {
+            const requestUrl = c.req.url
+            const generatePromise = triggerReportGeneration(webhookOrderId, requestUrl)
+            if ((c as any).executionCtx?.waitUntil) {
+              ;(c as any).executionCtx.waitUntil(generatePromise)
+            } else {
+              await generatePromise
+            }
+          } catch (e: any) {
+            console.warn(`[Webhook] Auto-generate error (non-fatal): ${e.message}`)
+          }
 
           await c.env.DB.prepare(`
             INSERT INTO user_activity_log (company_id, action, details)
