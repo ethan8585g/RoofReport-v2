@@ -10,6 +10,7 @@ import { aiAnalysisRoutes } from './routes/ai-analysis'
 import { authRoutes } from './routes/auth'
 import { customerAuthRoutes } from './routes/customer-auth'
 import { invoiceRoutes } from './routes/invoices'
+import { stripeRoutes } from './routes/stripe'
 import type { Bindings } from './types'
 
 const app = new Hono<{ Bindings: Bindings }>()
@@ -27,6 +28,7 @@ app.route('/api/ai', aiAnalysisRoutes)
 app.route('/api/auth', authRoutes)
 app.route('/api/customer', customerAuthRoutes)
 app.route('/api/invoices', invoiceRoutes)
+app.route('/api/stripe', stripeRoutes)
 
 // Health check
 app.get('/api/health', (c) => {
@@ -50,6 +52,7 @@ app.get('/api/health', (c) => {
       GMAIL_CLIENT_SECRET: !!(c.env as any).GMAIL_CLIENT_SECRET,
       GMAIL_REFRESH_TOKEN: !!(c.env as any).GMAIL_REFRESH_TOKEN,
       RESEND_API_KEY: !!(c.env as any).RESEND_API_KEY,
+      STRIPE_WEBHOOK_SECRET: !!(c.env as any).STRIPE_WEBHOOK_SECRET,
       DB: !!c.env.DB
     },
     vertex_ai: {
@@ -139,6 +142,7 @@ app.get('/api/config/client', (c) => {
       google_maps: !!c.env.GOOGLE_MAPS_API_KEY,
       google_solar: !!c.env.GOOGLE_SOLAR_API_KEY,
       stripe_payments: !!c.env.STRIPE_SECRET_KEY && !!c.env.STRIPE_PUBLISHABLE_KEY,
+      self_service_orders: !!c.env.STRIPE_SECRET_KEY,
       google_sign_in: !!((c.env as any).GOOGLE_OAUTH_CLIENT_ID || (c.env as any).GMAIL_CLIENT_ID)
     }
   })
@@ -195,6 +199,17 @@ app.get('/customer/dashboard', (c) => {
 // Customer Invoice View
 app.get('/customer/invoice/:id', (c) => {
   return c.html(getCustomerInvoiceHTML())
+})
+
+// Pricing Page (public)
+app.get('/pricing', (c) => {
+  return c.html(getPricingPageHTML())
+})
+
+// Customer Order & Pay page
+app.get('/customer/order', (c) => {
+  const mapsKey = c.env.GOOGLE_MAPS_API_KEY || ''
+  return c.html(getCustomerOrderPageHTML(mapsKey))
 })
 
 export default app
@@ -669,7 +684,7 @@ function getLandingPageHTML() {
       <div class="hidden md:flex items-center gap-6">
         <a href="#how-it-works" class="text-brand-200 hover:text-white text-sm transition-colors">How It Works</a>
         <a href="#features" class="text-brand-200 hover:text-white text-sm transition-colors">Features</a>
-        <a href="#pricing" class="text-brand-200 hover:text-white text-sm transition-colors">Pricing</a>
+        <a href="/pricing" class="text-brand-200 hover:text-white text-sm transition-colors">Pricing</a>
         <a href="#faq" class="text-brand-200 hover:text-white text-sm transition-colors">FAQ</a>
         <a href="/customer/login" class="bg-accent-500 hover:bg-accent-600 text-white font-semibold py-2 px-5 rounded-lg text-sm transition-all hover:scale-105 shadow-lg shadow-accent-500/25">
           <i class="fas fa-sign-in-alt mr-1"></i>Customer Login
@@ -687,7 +702,7 @@ function getLandingPageHTML() {
       <div class="max-w-7xl mx-auto px-4 py-4 flex flex-col gap-3">
         <a href="#how-it-works" class="text-brand-200 hover:text-white text-sm py-2" onclick="document.getElementById('mobile-menu').classList.add('hidden')">How It Works</a>
         <a href="#features" class="text-brand-200 hover:text-white text-sm py-2" onclick="document.getElementById('mobile-menu').classList.add('hidden')">Features</a>
-        <a href="#pricing" class="text-brand-200 hover:text-white text-sm py-2" onclick="document.getElementById('mobile-menu').classList.add('hidden')">Pricing</a>
+        <a href="/pricing" class="text-brand-200 hover:text-white text-sm py-2" onclick="document.getElementById('mobile-menu').classList.add('hidden')">Pricing</a>
         <a href="#faq" class="text-brand-200 hover:text-white text-sm py-2" onclick="document.getElementById('mobile-menu').classList.add('hidden')">FAQ</a>
         <a href="/customer/login" class="bg-accent-500 text-white font-semibold py-2.5 px-5 rounded-lg text-sm text-center mt-2"><i class="fas fa-sign-in-alt mr-1"></i>Customer Login</a>
       </div>
@@ -1118,6 +1133,88 @@ function getCustomerInvoiceHTML() {
     })();
   </script>
   <script src="/static/customer-invoice.js"></script>
+</body>
+</html>`
+}
+
+// ============================================================
+// PRICING PAGE — Public, shows credit packs & per-report pricing
+// ============================================================
+function getPricingPageHTML() {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  ${getHeadTags()}
+  <title>Pricing - Reuse Canada Roof Reports</title>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <nav class="bg-brand-800 text-white shadow-lg">
+    <div class="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+      <a href="/" class="flex items-center gap-3">
+        <div class="w-9 h-9 bg-accent-500 rounded-lg flex items-center justify-center"><i class="fas fa-home text-white"></i></div>
+        <span class="text-white font-bold text-lg">Reuse Canada</span>
+      </a>
+      <div class="flex items-center gap-4">
+        <a href="/" class="text-brand-200 hover:text-white text-sm">Home</a>
+        <a href="/customer/login" class="bg-accent-500 hover:bg-accent-600 text-white font-semibold py-2 px-5 rounded-lg text-sm"><i class="fas fa-sign-in-alt mr-1"></i>Get Started</a>
+      </div>
+    </div>
+  </nav>
+  <main class="max-w-6xl mx-auto px-4 py-16">
+    <div id="pricing-root">
+      <div class="text-center mb-12">
+        <h1 class="text-4xl font-bold text-gray-900 mb-4">Simple, Transparent Pricing</h1>
+        <p class="text-lg text-gray-600 max-w-2xl mx-auto">Professional AI-powered roof measurement reports. Pay per report or save with credit packs.</p>
+      </div>
+      <div class="text-center animate-pulse text-gray-400 py-8">Loading pricing...</div>
+    </div>
+  </main>
+  <script src="/static/pricing.js"></script>
+</body>
+</html>`
+}
+
+// ============================================================
+// CUSTOMER ORDER PAGE — Address entry + pay or use credit
+// ============================================================
+function getCustomerOrderPageHTML(mapsApiKey: string) {
+  const mapsScript = mapsApiKey
+    ? '<script src="https://maps.googleapis.com/maps/api/js?key=' + mapsApiKey + '&libraries=places" async defer></script>'
+    : ''
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  ${getHeadTags()}
+  <title>Order a Report - Reuse Canada</title>
+  ${mapsScript}
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <header class="bg-brand-800 text-white shadow-lg">
+    <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
+      <a href="/customer/dashboard" class="flex items-center space-x-3 hover:opacity-90">
+        <div class="w-10 h-10 bg-accent-500 rounded-lg flex items-center justify-center"><i class="fas fa-home text-white text-lg"></i></div>
+        <div>
+          <h1 class="text-xl font-bold">Order a Report</h1>
+          <p class="text-brand-200 text-xs">Reuse Canada</p>
+        </div>
+      </a>
+      <nav class="flex items-center space-x-4">
+        <span id="creditsBadge" class="hidden bg-green-500/20 text-green-300 px-3 py-1.5 rounded-full text-sm font-medium"><i class="fas fa-coins mr-1"></i><span id="creditsCount">0</span> credits</span>
+        <a href="/customer/dashboard" class="text-brand-200 hover:text-white text-sm"><i class="fas fa-arrow-left mr-1"></i>Dashboard</a>
+      </nav>
+    </div>
+  </header>
+  <main class="max-w-4xl mx-auto px-4 py-8">
+    <div id="order-root"></div>
+  </main>
+  <script>
+    (function() {
+      var c = localStorage.getItem('rc_customer');
+      if (!c) { window.location.href = '/customer/login'; return; }
+    })();
+  </script>
+  <script src="/static/customer-order.js"></script>
 </body>
 </html>`
 }

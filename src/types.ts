@@ -52,6 +52,9 @@ export type Bindings = {
   // Google Sign-In for customers
   // Uses the same OAuth 2.0 Client ID as Gmail OAuth2 (or a separate one)
   GOOGLE_OAUTH_CLIENT_ID: string
+
+  // Stripe Webhook Secret — verifies webhook signatures
+  STRIPE_WEBHOOK_SECRET: string
 }
 
 // ============================================================
