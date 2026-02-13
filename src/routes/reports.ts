@@ -1230,6 +1230,12 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
 .p1-footer{text-align:center;margin-top:12px;padding-top:10px;border-top:1px solid rgba(0,229,255,0.1)}
 .p1-footer-text{color:#5A7A96;font-size:8px;letter-spacing:0.5px}
 
+/* Street View placeholder detection — hide "no imagery" grey images */
+.p1-sv-img { transition: opacity 0.3s }
+.p1-sv-nodata { display:none; align-items:center; justify-content:center; height:80px;
+  background:rgba(0,229,255,0.05); border-radius:6px; color:rgba(0,229,255,0.4); font-size:11px;
+  text-align:center; line-height:1.3; padding:8px }
+
 /* ==================== PAGE 2: MATERIAL ORDER (Light) ==================== */
 .p2{background:#E8F4FD;min-height:11in;max-width:8.5in;margin:0 auto;padding:32px 36px;font-family:'Inter',system-ui,sans-serif}
 .p2-title{font-size:24px;font-weight:900;color:#002F6C;text-align:center;text-transform:uppercase;letter-spacing:1px}
@@ -1313,22 +1319,22 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
     </div>
     <!-- North -->
     <div class="p1-aerial-card">
-      ${northUrl ? `<img src="${northUrl}" alt="North View" style="height:80px" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-aerial-placeholder" style="display:none;height:80px">N</div>` : '<div class="p1-aerial-placeholder" style="height:80px">N</div>'}
+      ${northUrl ? `<img class="p1-sv-img" src="${northUrl}" alt="North View" style="height:80px" data-dir="N" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-sv-nodata">No Street View<br>coverage (N)</div>` : '<div class="p1-sv-nodata" style="display:flex">N/A</div>'}
       <div class="p1-aerial-label">North</div>
     </div>
     <!-- East -->
     <div class="p1-aerial-card">
-      ${eastUrl ? `<img src="${eastUrl}" alt="East View" style="height:80px" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-aerial-placeholder" style="display:none;height:80px">E</div>` : '<div class="p1-aerial-placeholder" style="height:80px">E</div>'}
+      ${eastUrl ? `<img class="p1-sv-img" src="${eastUrl}" alt="East View" style="height:80px" data-dir="E" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-sv-nodata">No Street View<br>coverage (E)</div>` : '<div class="p1-sv-nodata" style="display:flex">N/A</div>'}
       <div class="p1-aerial-label">East</div>
     </div>
     <!-- South -->
     <div class="p1-aerial-card">
-      ${southUrl ? `<img src="${southUrl}" alt="South View" style="height:80px" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-aerial-placeholder" style="display:none;height:80px">S</div>` : '<div class="p1-aerial-placeholder" style="height:80px">S</div>'}
+      ${southUrl ? `<img class="p1-sv-img" src="${southUrl}" alt="South View" style="height:80px" data-dir="S" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-sv-nodata">No Street View<br>coverage (S)</div>` : '<div class="p1-sv-nodata" style="display:flex">N/A</div>'}
       <div class="p1-aerial-label">South</div>
     </div>
     <!-- West -->
     <div class="p1-aerial-card">
-      ${westUrl ? `<img src="${westUrl}" alt="West View" style="height:80px" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-aerial-placeholder" style="display:none;height:80px">W</div>` : '<div class="p1-aerial-placeholder" style="height:80px">W</div>'}
+      ${westUrl ? `<img class="p1-sv-img" src="${westUrl}" alt="West View" style="height:80px" data-dir="W" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-sv-nodata">No Street View<br>coverage (W)</div>` : '<div class="p1-sv-nodata" style="display:flex">N/A</div>'}
       <div class="p1-aerial-label">West</div>
     </div>
   </div>
@@ -1377,7 +1383,7 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
       <div class="p1-aerial-label">Property Context (Wider View)</div>
     </div>
     <div class="p1-aerial-card">
-      ${satelliteUrl ? `<img src="${satelliteUrl.replace('zoom=20','zoom=21').replace('600x400','600x400')}" alt="Close-up" style="height:120px" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-aerial-placeholder" style="display:none;height:120px">CLOSE-UP</div>` : '<div class="p1-aerial-placeholder" style="height:120px">CLOSE-UP</div>'}
+      ${satelliteUrl ? `<img src="${satelliteUrl.replace('600x400','400x400')}" alt="Close-up" style="height:120px" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-aerial-placeholder" style="display:none;height:120px">CLOSE-UP</div>` : '<div class="p1-aerial-placeholder" style="height:120px">CLOSE-UP</div>'}
       <div class="p1-aerial-label">Roof Close-Up (Max Zoom)</div>
     </div>
   </div>
@@ -1535,6 +1541,27 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
   </div>
 </div>
 
+<script>
+// Detect Google Street View "no imagery" placeholders
+// Google returns a grey image saying "Sorry, we have no imagery here" (~6KB)
+// This loads fine (200 OK) but isn't useful — detect and show a message instead
+document.querySelectorAll('.p1-sv-img').forEach(function(img) {
+  img.addEventListener('load', function() {
+    try {
+      var c = document.createElement('canvas');
+      c.width = 4; c.height = 4;
+      var ctx = c.getContext('2d');
+      ctx.drawImage(img, 0, 0, 4, 4);
+      var px = ctx.getImageData(0, 0, 4, 4).data;
+      var grey = 0;
+      for (var i = 0; i < px.length; i += 4) {
+        if (px[i] > 200 && px[i+1] > 200 && px[i+2] > 190 && Math.abs(px[i]-px[i+1]) < 15) grey++;
+      }
+      if (grey >= 12) { img.style.display='none'; img.nextElementSibling.style.display='flex'; }
+    } catch(e) {}
+  });
+});
+</script>
 </body>
 </html>`
 }
