@@ -282,6 +282,65 @@ adminRoutes.post('/init-db', async (c) => {
     // Add customer_id to orders if not present
     try { await c.env.DB.prepare('ALTER TABLE orders ADD COLUMN customer_id INTEGER REFERENCES customers(id)').run() } catch(e) {}
 
+    // Migration 0007: Customer credits & Stripe columns
+    const customerCreditCols = [
+      'report_credits INTEGER DEFAULT 0',
+      'credits_used INTEGER DEFAULT 0',
+      'stripe_customer_id TEXT',
+      'subscription_plan TEXT DEFAULT \'free\'',
+      'subscription_status TEXT',
+      'subscription_start TEXT',
+      'subscription_end TEXT'
+    ]
+    for (const col of customerCreditCols) {
+      try { await c.env.DB.prepare(`ALTER TABLE customers ADD COLUMN ${col}`).run() } catch(e) {}
+    }
+
+    // Stripe tables
+    await c.env.DB.prepare(`
+      CREATE TABLE IF NOT EXISTS stripe_payments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_id INTEGER, order_id INTEGER,
+        stripe_checkout_session_id TEXT, stripe_payment_intent_id TEXT,
+        amount INTEGER DEFAULT 0, currency TEXT DEFAULT 'cad',
+        status TEXT DEFAULT 'pending', payment_type TEXT,
+        description TEXT,
+        created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (customer_id) REFERENCES customers(id),
+        FOREIGN KEY (order_id) REFERENCES orders(id)
+      )
+    `).run()
+
+    await c.env.DB.prepare(`
+      CREATE TABLE IF NOT EXISTS stripe_webhook_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        stripe_event_id TEXT UNIQUE NOT NULL,
+        event_type TEXT, payload TEXT, processed INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now'))
+      )
+    `).run()
+
+    await c.env.DB.prepare(`
+      CREATE TABLE IF NOT EXISTS credit_packages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL, description TEXT,
+        credits INTEGER NOT NULL, price_cents INTEGER NOT NULL,
+        is_active INTEGER DEFAULT 1, sort_order INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now'))
+      )
+    `).run()
+
+    // Seed default credit packages
+    await c.env.DB.prepare(`
+      INSERT OR IGNORE INTO credit_packages (id, name, description, credits, price_cents, sort_order)
+      VALUES
+        (1, '5 Pack', '5 reports — best for trying out', 5, 3500, 1),
+        (2, '10 Pack', '10 reports — most popular', 10, 6000, 2),
+        (3, '25 Pack', '25 reports — pro value', 25, 12500, 3),
+        (4, '50 Pack', '50 reports — team deal', 50, 20000, 4),
+        (5, '100 Pack', '100 reports — enterprise', 100, 35000, 5)
+    `).run()
+
     // Customer portal indexes
     const custIndexes = [
       'CREATE INDEX IF NOT EXISTS idx_customers_email ON customers(email)',

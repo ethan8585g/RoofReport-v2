@@ -75,23 +75,25 @@ function renderOrderPage() {
     <div class="max-w-3xl mx-auto">
       <!-- Credits Banner -->
       ${credits > 0 ? `
-        <div class="bg-green-50 border border-green-200 rounded-xl p-4 mb-6 flex items-center justify-between">
-          <div class="flex items-center gap-3">
-            <div class="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center"><i class="fas fa-coins text-green-600"></i></div>
-            <div>
-              <p class="font-semibold text-green-800">You have ${credits} credit${credits !== 1 ? 's' : ''} available</p>
-              <p class="text-sm text-green-600">Each credit = 1 roof measurement report, any tier</p>
+        <div class="bg-green-50 border border-green-200 rounded-xl p-4 mb-6">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center"><i class="fas fa-gift text-green-600"></i></div>
+              <div>
+                <p class="font-semibold text-green-800"><i class="fas fa-star text-yellow-500 mr-1"></i>You have ${credits} free report${credits !== 1 ? 's' : ''} remaining!</p>
+                <p class="text-sm text-green-600">Use your free credits on any report — no payment needed</p>
+              </div>
             </div>
+            <span class="bg-green-600 text-white px-3 py-1.5 rounded-full text-lg font-bold">${credits}</span>
           </div>
-          <span class="bg-green-600 text-white px-3 py-1 rounded-full text-sm font-bold">${credits}</span>
         </div>
       ` : `
         <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 flex items-center justify-between">
           <div class="flex items-center gap-3">
             <div class="w-10 h-10 bg-amber-100 rounded-lg flex items-center justify-center"><i class="fas fa-credit-card text-amber-600"></i></div>
             <div>
-              <p class="font-semibold text-amber-800">No credits — pay per report</p>
-              <p class="text-sm text-amber-600">You'll be redirected to Stripe to pay securely</p>
+              <p class="font-semibold text-amber-800">No free reports left — pay per report</p>
+              <p class="text-sm text-amber-600">Starting at $8 CAD per report, or buy credit packs to save</p>
             </div>
           </div>
           <a href="/pricing" class="bg-brand-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-brand-700">Buy Credits</a>
@@ -161,15 +163,19 @@ function renderOrderPage() {
           <div class="flex gap-4">
             ${credits > 0 ? `
               <button onclick="useCredit()" id="creditBtn" class="flex-1 py-4 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl transition-all hover:scale-[1.02] shadow-lg text-lg">
-                <i class="fas fa-coins mr-2"></i>Use 1 Credit
+                <i class="fas fa-gift mr-2"></i>Use Free Report (${credits} left)
               </button>
-            ` : ''}
-            <button onclick="payWithStripe()" id="stripeBtn" class="flex-1 py-4 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-xl transition-all hover:scale-[1.02] shadow-lg text-lg">
-              <i class="fab fa-stripe mr-2"></i>Pay $${selectedTierInfo.price} with Stripe
-            </button>
+              <button onclick="payWithStripe()" id="stripeBtn" class="py-4 px-6 bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold rounded-xl transition-all text-sm">
+                <i class="fab fa-stripe mr-1"></i>Pay $${selectedTierInfo.price} instead
+              </button>
+            ` : `
+              <button onclick="payWithStripe()" id="stripeBtn" class="flex-1 py-4 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-xl transition-all hover:scale-[1.02] shadow-lg text-lg">
+                <i class="fab fa-stripe mr-2"></i>Pay $${selectedTierInfo.price} with Stripe
+              </button>
+            `}
           </div>
 
-          ${credits > 0 ? '<p class="text-center text-xs text-gray-400">Using a credit works for any tier at no additional cost</p>' : ''}
+          ${credits > 0 ? '<p class="text-center text-xs text-gray-400"><i class="fas fa-check-circle text-green-500 mr-1"></i>Your free credits work for any delivery speed at no cost</p>' : ''}
         </div>
       </div>
 

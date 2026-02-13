@@ -542,7 +542,7 @@ function getLandingPageHTML() {
 <head>
   ${getHeadTags()}
   <title>Professional Roof Measurement Reports - Reuse Canada</title>
-  <meta name="description" content="Get accurate roof area, pitch analysis, edge breakdowns, material estimates, and solar potential from satellite imagery. Professional reports starting at $8 CAD.">
+  <meta name="description" content="Get accurate roof area, pitch analysis, edge breakdowns, material estimates, and solar potential from satellite imagery. Sign up and get 3 free reports instantly.">
   <style>
     /* Landing page scroll animations */
     .scroll-animate {

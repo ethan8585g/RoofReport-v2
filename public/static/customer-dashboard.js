@@ -74,7 +74,8 @@ function renderCustomerDashboard() {
 
   const c = custState.customer;
   const b = custState.billing || {};
-  const credits = b.credits_remaining || 0;
+  // Credits from billing endpoint, fallback to customer profile data
+  const credits = b.credits_remaining || (c ? c.credits_remaining : 0) || 0;
 
   const tabs = [
     { id: 'orders', label: 'My Orders', icon: 'fa-clipboard-list', count: custState.orders.length },
@@ -84,6 +85,26 @@ function renderCustomerDashboard() {
   ];
 
   root.innerHTML = `
+    <!-- Free Credits Banner (only shown when credits > 0 and no orders yet) -->
+    ${credits > 0 && custState.orders.length === 0 ? `
+    <div class="bg-gradient-to-r from-green-500 to-emerald-600 rounded-xl p-6 mb-6 text-white shadow-lg">
+      <div class="flex items-center justify-between flex-wrap gap-4">
+        <div class="flex items-center gap-4">
+          <div class="w-14 h-14 bg-white/20 rounded-xl flex items-center justify-center">
+            <i class="fas fa-gift text-3xl"></i>
+          </div>
+          <div>
+            <h2 class="text-xl font-bold">Welcome! You have ${credits} free roof report${credits !== 1 ? 's' : ''}!</h2>
+            <p class="text-green-100 text-sm mt-1">Get started with your free reports — no credit card needed</p>
+          </div>
+        </div>
+        <a href="/customer/order" class="bg-white text-green-700 font-bold py-3 px-6 rounded-xl transition-all hover:scale-105 shadow-lg hover:bg-green-50">
+          <i class="fas fa-plus mr-2"></i>Use Free Report
+        </a>
+      </div>
+    </div>
+    ` : ''}
+
     <!-- Welcome Banner -->
     <div class="bg-white rounded-xl border border-gray-200 p-6 mb-6">
       <div class="flex items-center justify-between flex-wrap gap-4">
@@ -100,9 +121,9 @@ function renderCustomerDashboard() {
             <p class="text-lg font-bold text-brand-700">${custState.orders.length}</p>
             <p class="text-xs text-gray-500">Orders</p>
           </div>
-          <div class="text-center px-4 py-2 bg-green-50 rounded-lg">
-            <p class="text-lg font-bold text-green-700">${credits}</p>
-            <p class="text-xs text-gray-500">Credits</p>
+          <div class="text-center px-4 py-2 ${credits > 0 ? 'bg-green-50' : 'bg-gray-50'} rounded-lg">
+            <p class="text-lg font-bold ${credits > 0 ? 'text-green-700' : 'text-gray-500'}">${credits}</p>
+            <p class="text-xs text-gray-500">${credits > 0 ? 'Free Reports' : 'Credits'}</p>
           </div>
           <div class="text-center px-4 py-2 bg-purple-50 rounded-lg">
             <p class="text-lg font-bold text-purple-700">${custState.orders.filter(function(o){return o.status==='completed'}).length}</p>
@@ -145,11 +166,13 @@ function renderCustOrders() {
   var orders = custState.orders;
   
   if (orders.length === 0) {
+    var b2 = custState.billing || {};
+    var cr = b2.credits_remaining || (custState.customer ? custState.customer.credits_remaining : 0) || 0;
     return '<div class="bg-white rounded-xl border border-gray-200 p-12 text-center">' +
-      '<div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4"><i class="fas fa-clipboard-list text-gray-400 text-2xl"></i></div>' +
-      '<h3 class="text-lg font-semibold text-gray-700 mb-2">No Orders Yet</h3>' +
-      '<p class="text-gray-500 mb-6">Order your first roof measurement report to get started.</p>' +
-      '<a href="/customer/order" class="inline-block bg-brand-600 hover:bg-brand-700 text-white font-bold py-3 px-8 rounded-xl transition-all hover:scale-105"><i class="fas fa-plus mr-2"></i>Order a Report</a>' +
+      '<div class="w-16 h-16 ' + (cr > 0 ? 'bg-green-100' : 'bg-gray-100') + ' rounded-full flex items-center justify-center mx-auto mb-4"><i class="fas ' + (cr > 0 ? 'fa-gift text-green-500' : 'fa-clipboard-list text-gray-400') + ' text-2xl"></i></div>' +
+      '<h3 class="text-lg font-semibold text-gray-700 mb-2">' + (cr > 0 ? 'You have ' + cr + ' free report' + (cr !== 1 ? 's' : '') + '!' : 'No Orders Yet') + '</h3>' +
+      '<p class="text-gray-500 mb-6">' + (cr > 0 ? 'Use your free credits to get your first roof measurement report — no payment required.' : 'Order your first roof measurement report to get started.') + '</p>' +
+      '<a href="/customer/order" class="inline-block bg-' + (cr > 0 ? 'green' : 'brand') + '-600 hover:bg-' + (cr > 0 ? 'green' : 'brand') + '-700 text-white font-bold py-3 px-8 rounded-xl transition-all hover:scale-105"><i class="fas ' + (cr > 0 ? 'fa-gift' : 'fa-plus') + ' mr-2"></i>' + (cr > 0 ? 'Use Free Report' : 'Order a Report') + '</a>' +
       '</div>';
   }
 

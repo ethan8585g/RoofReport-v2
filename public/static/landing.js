@@ -68,13 +68,13 @@ function renderHero() {
             </h1>
 
             <p class="text-lg lg:text-xl text-gray-300 mb-8 max-w-xl leading-relaxed">
-              Get accurate roof area, pitch analysis, edge breakdowns, material estimates, and solar potential — all from a satellite image. Delivered to your inbox starting at <strong class="text-white">$8 CAD</strong>.
+              Get accurate roof area, pitch analysis, edge breakdowns, material estimates, and solar potential — all from a satellite image. <strong class="text-white">Start with 3 free reports</strong> when you sign up.
             </p>
 
             <div class="flex flex-col sm:flex-row gap-4 mb-8">
-              <a href="/login" class="inline-flex items-center justify-center gap-2 bg-accent-500 hover:bg-accent-600 text-white font-bold py-4 px-8 rounded-xl text-lg shadow-xl shadow-accent-500/25 transition-all hover:scale-105">
-                <i class="fas fa-ruler-combined"></i>
-                Order a Report Now
+              <a href="/customer/login" class="inline-flex items-center justify-center gap-2 bg-green-500 hover:bg-green-600 text-white font-bold py-4 px-8 rounded-xl text-lg shadow-xl shadow-green-500/25 transition-all hover:scale-105">
+                <i class="fas fa-gift"></i>
+                Get 3 Free Reports
               </a>
               <a href="#how-it-works" class="inline-flex items-center justify-center gap-2 bg-white/10 hover:bg-white/20 backdrop-blur text-white font-semibold py-4 px-8 rounded-xl text-lg border border-white/20 transition-all">
                 <i class="fas fa-play-circle"></i>
@@ -85,8 +85,8 @@ function renderHero() {
             <!-- Quick stats -->
             <div class="flex items-center gap-8 text-sm">
               <div class="flex items-center gap-2">
-                <i class="fas fa-check-circle text-green-400"></i>
-                <span class="text-gray-300">Reports from <strong class="text-white">$8</strong></span>
+                <i class="fas fa-gift text-green-400"></i>
+                <span class="text-gray-300"><strong class="text-white">3 free reports</strong> on signup</span>
               </div>
               <div class="flex items-center gap-2">
                 <i class="fas fa-check-circle text-green-400"></i>
@@ -226,8 +226,8 @@ function renderHowItWorks() {
       num: 3,
       icon: 'fas fa-credit-card',
       color: 'bg-accent-500',
-      title: 'Pay & Order',
-      desc: 'Secure checkout. From $8 CAD. Payment processes instantly and your report starts generating immediately.'
+      title: 'Order — Free or Paid',
+      desc: 'Your first 3 reports are free! After that, pay from $8 CAD per report. Payment is instant and generation starts immediately.'
     },
     {
       num: 4,
@@ -263,9 +263,9 @@ function renderHowItWorks() {
         </div>
 
         <div class="text-center mt-12 scroll-animate opacity-0 translate-y-8 transition-all duration-700">
-          <a href="/login" class="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white font-bold py-3 px-8 rounded-xl shadow-lg transition-all hover:scale-105">
-            <i class="fas fa-arrow-right"></i>
-            Start Your First Report
+          <a href="/customer/login" class="inline-flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-8 rounded-xl shadow-lg transition-all hover:scale-105">
+            <i class="fas fa-gift"></i>
+            Start Free — 3 Reports Included
           </a>
         </div>
       </div>
@@ -627,14 +627,14 @@ function renderFinalCTA() {
         </p>
 
         <div class="flex flex-col sm:flex-row gap-4 justify-center mb-8">
-          <a href="/login" class="inline-flex items-center justify-center gap-2 bg-accent-500 hover:bg-accent-600 text-white font-bold py-4 px-10 rounded-xl text-lg shadow-xl shadow-accent-500/25 transition-all hover:scale-105">
-            <i class="fas fa-ruler-combined"></i>
-            Order Your First Report — $8
+          <a href="/customer/login" class="inline-flex items-center justify-center gap-2 bg-green-500 hover:bg-green-600 text-white font-bold py-4 px-10 rounded-xl text-lg shadow-xl shadow-green-500/25 transition-all hover:scale-105">
+            <i class="fas fa-gift"></i>
+            Sign Up Free — 3 Reports On Us
           </a>
         </div>
 
         <p class="text-sm text-brand-300">
-          No subscription. No commitment. Pay per report.
+          No credit card required. 3 free reports when you sign up. Then $8 per report.
           <br/>Questions? Email <strong>reports@reusecanada.ca</strong>
         </p>
       </div>
