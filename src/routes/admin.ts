@@ -230,6 +230,73 @@ adminRoutes.post('/init-db', async (c) => {
     `).run()
     try { await c.env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_admin_users_email ON admin_users(email)').run() } catch(e) {}
 
+    // Migration 0006: Customer Portal, Invoices & Sales Tracking
+    await c.env.DB.prepare(`
+      CREATE TABLE IF NOT EXISTS customers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email TEXT UNIQUE NOT NULL, name TEXT NOT NULL, phone TEXT, company_name TEXT,
+        google_id TEXT UNIQUE, google_avatar TEXT, password_hash TEXT,
+        address TEXT, city TEXT, province TEXT, postal_code TEXT,
+        is_active INTEGER DEFAULT 1, email_verified INTEGER DEFAULT 0,
+        last_login TEXT, notes TEXT, tags TEXT,
+        created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
+      )
+    `).run()
+
+    await c.env.DB.prepare(`
+      CREATE TABLE IF NOT EXISTS invoices (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        invoice_number TEXT UNIQUE NOT NULL, customer_id INTEGER NOT NULL,
+        order_id INTEGER, subtotal REAL DEFAULT 0, tax_rate REAL DEFAULT 5.0,
+        tax_amount REAL DEFAULT 0, discount_amount REAL DEFAULT 0,
+        total REAL DEFAULT 0, currency TEXT DEFAULT 'CAD',
+        status TEXT DEFAULT 'draft', issue_date TEXT DEFAULT (date('now')),
+        due_date TEXT, paid_date TEXT, sent_date TEXT,
+        payment_method TEXT, payment_reference TEXT, notes TEXT,
+        terms TEXT DEFAULT 'Payment due within 30 days of invoice date.',
+        created_by TEXT, created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (customer_id) REFERENCES customers(id),
+        FOREIGN KEY (order_id) REFERENCES orders(id)
+      )
+    `).run()
+
+    await c.env.DB.prepare(`
+      CREATE TABLE IF NOT EXISTS invoice_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        invoice_id INTEGER NOT NULL, description TEXT NOT NULL,
+        quantity REAL DEFAULT 1, unit_price REAL DEFAULT 0,
+        amount REAL DEFAULT 0, sort_order INTEGER DEFAULT 0,
+        FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
+      )
+    `).run()
+
+    await c.env.DB.prepare(`
+      CREATE TABLE IF NOT EXISTS customer_sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_id INTEGER NOT NULL, session_token TEXT UNIQUE NOT NULL,
+        expires_at TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+      )
+    `).run()
+
+    // Add customer_id to orders if not present
+    try { await c.env.DB.prepare('ALTER TABLE orders ADD COLUMN customer_id INTEGER REFERENCES customers(id)').run() } catch(e) {}
+
+    // Customer portal indexes
+    const custIndexes = [
+      'CREATE INDEX IF NOT EXISTS idx_customers_email ON customers(email)',
+      'CREATE INDEX IF NOT EXISTS idx_customers_google_id ON customers(google_id)',
+      'CREATE INDEX IF NOT EXISTS idx_invoices_customer ON invoices(customer_id)',
+      'CREATE INDEX IF NOT EXISTS idx_invoices_status ON invoices(status)',
+      'CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items(invoice_id)',
+      'CREATE INDEX IF NOT EXISTS idx_customer_sessions_token ON customer_sessions(session_token)',
+      'CREATE INDEX IF NOT EXISTS idx_orders_customer_id ON orders(customer_id)'
+    ]
+    for (const idx of custIndexes) {
+      try { await c.env.DB.prepare(idx).run() } catch(e) {}
+    }
+
     return c.json({ success: true, message: 'Database initialized successfully' })
   } catch (err: any) {
     return c.json({ error: 'Failed to initialize database', details: err.message }, 500)

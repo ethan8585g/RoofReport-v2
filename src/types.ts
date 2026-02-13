@@ -48,6 +48,10 @@ export type Bindings = {
   GMAIL_CLIENT_ID: string
   GMAIL_CLIENT_SECRET: string
   GMAIL_REFRESH_TOKEN: string
+
+  // Google Sign-In for customers
+  // Uses the same OAuth 2.0 Client ID as Gmail OAuth2 (or a separate one)
+  GOOGLE_OAUTH_CLIENT_ID: string
 }
 
 // ============================================================

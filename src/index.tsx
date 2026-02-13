@@ -8,6 +8,8 @@ import { reportsRoutes } from './routes/reports'
 import { adminRoutes } from './routes/admin'
 import { aiAnalysisRoutes } from './routes/ai-analysis'
 import { authRoutes } from './routes/auth'
+import { customerAuthRoutes } from './routes/customer-auth'
+import { invoiceRoutes } from './routes/invoices'
 import type { Bindings } from './types'
 
 const app = new Hono<{ Bindings: Bindings }>()
@@ -23,6 +25,8 @@ app.route('/api/reports', reportsRoutes)
 app.route('/api/admin', adminRoutes)
 app.route('/api/ai', aiAnalysisRoutes)
 app.route('/api/auth', authRoutes)
+app.route('/api/customer', customerAuthRoutes)
+app.route('/api/invoices', invoiceRoutes)
 
 // Health check
 app.get('/api/health', (c) => {
@@ -129,11 +133,13 @@ app.get('/api/config/client', (c) => {
   return c.json({
     google_maps_key: c.env.GOOGLE_MAPS_API_KEY || '',
     stripe_publishable_key: c.env.STRIPE_PUBLISHABLE_KEY || '',
+    google_oauth_client_id: (c.env as any).GOOGLE_OAUTH_CLIENT_ID || (c.env as any).GMAIL_CLIENT_ID || '',
     // Feature flags based on which keys are configured
     features: {
       google_maps: !!c.env.GOOGLE_MAPS_API_KEY,
       google_solar: !!c.env.GOOGLE_SOLAR_API_KEY,
-      stripe_payments: !!c.env.STRIPE_SECRET_KEY && !!c.env.STRIPE_PUBLISHABLE_KEY
+      stripe_payments: !!c.env.STRIPE_SECRET_KEY && !!c.env.STRIPE_PUBLISHABLE_KEY,
+      google_sign_in: !!((c.env as any).GOOGLE_OAUTH_CLIENT_ID || (c.env as any).GMAIL_CLIENT_ID)
     }
   })
 })
@@ -170,9 +176,25 @@ app.get('/settings', (c) => {
   return c.html(getSettingsPageHTML())
 })
 
-// Login/Register Page
+// Login/Register Page (Admin)
 app.get('/login', (c) => {
   return c.html(getLoginPageHTML())
+})
+
+// Customer Login/Register Page (Google Sign-In + email/password)
+app.get('/customer/login', (c) => {
+  const googleClientId = (c.env as any).GOOGLE_OAUTH_CLIENT_ID || (c.env as any).GMAIL_CLIENT_ID || ''
+  return c.html(getCustomerLoginHTML(googleClientId))
+})
+
+// Customer Dashboard
+app.get('/customer/dashboard', (c) => {
+  return c.html(getCustomerDashboardHTML())
+})
+
+// Customer Invoice View
+app.get('/customer/invoice/:id', (c) => {
+  return c.html(getCustomerInvoiceHTML())
 })
 
 export default app
@@ -649,8 +671,8 @@ function getLandingPageHTML() {
         <a href="#features" class="text-brand-200 hover:text-white text-sm transition-colors">Features</a>
         <a href="#pricing" class="text-brand-200 hover:text-white text-sm transition-colors">Pricing</a>
         <a href="#faq" class="text-brand-200 hover:text-white text-sm transition-colors">FAQ</a>
-        <a href="/login" class="bg-accent-500 hover:bg-accent-600 text-white font-semibold py-2 px-5 rounded-lg text-sm transition-all hover:scale-105 shadow-lg shadow-accent-500/25">
-          <i class="fas fa-sign-in-alt mr-1"></i>Login / Order Report
+        <a href="/customer/login" class="bg-accent-500 hover:bg-accent-600 text-white font-semibold py-2 px-5 rounded-lg text-sm transition-all hover:scale-105 shadow-lg shadow-accent-500/25">
+          <i class="fas fa-sign-in-alt mr-1"></i>Customer Login
         </a>
       </div>
 
@@ -667,7 +689,7 @@ function getLandingPageHTML() {
         <a href="#features" class="text-brand-200 hover:text-white text-sm py-2" onclick="document.getElementById('mobile-menu').classList.add('hidden')">Features</a>
         <a href="#pricing" class="text-brand-200 hover:text-white text-sm py-2" onclick="document.getElementById('mobile-menu').classList.add('hidden')">Pricing</a>
         <a href="#faq" class="text-brand-200 hover:text-white text-sm py-2" onclick="document.getElementById('mobile-menu').classList.add('hidden')">FAQ</a>
-        <a href="/login" class="bg-accent-500 text-white font-semibold py-2.5 px-5 rounded-lg text-sm text-center mt-2"><i class="fas fa-sign-in-alt mr-1"></i>Login / Order Report</a>
+        <a href="/customer/login" class="bg-accent-500 text-white font-semibold py-2.5 px-5 rounded-lg text-sm text-center mt-2"><i class="fas fa-sign-in-alt mr-1"></i>Customer Login</a>
       </div>
     </div>
   </nav>
@@ -694,7 +716,7 @@ function getLandingPageHTML() {
             <li><a href="#features" class="hover:text-white transition-colors">Features</a></li>
             <li><a href="#pricing" class="hover:text-white transition-colors">Pricing</a></li>
             <li><a href="#how-it-works" class="hover:text-white transition-colors">How It Works</a></li>
-            <li><a href="/login" class="hover:text-white transition-colors">Login</a></li>
+            <li><a href="/customer/login" class="hover:text-white transition-colors">Customer Login</a></li>
           </ul>
         </div>
         <div>
@@ -708,8 +730,8 @@ function getLandingPageHTML() {
         <div>
           <h4 class="text-white font-semibold mb-4 text-sm uppercase tracking-wider">Get Started</h4>
           <p class="text-sm mb-4">Ready to save hours on every estimate?</p>
-          <a href="/login" class="inline-block bg-accent-500 hover:bg-accent-600 text-white font-semibold py-2.5 px-6 rounded-lg text-sm transition-all">
-            Login & Order
+          <a href="/customer/login" class="inline-block bg-accent-500 hover:bg-accent-600 text-white font-semibold py-2.5 px-6 rounded-lg text-sm transition-all">
+            Customer Login
           </a>
         </div>
       </div>
@@ -769,6 +791,333 @@ function getSettingsPageHTML() {
     <div id="settings-root"></div>
   </main>
   <script src="/static/settings.js"></script>
+</body>
+</html>`
+}
+
+// ============================================================
+// CUSTOMER PAGES
+// ============================================================
+
+function getCustomerLoginHTML(googleClientId: string) {
+  const googleScript = googleClientId
+    ? '<script src="https://accounts.google.com/gsi/client" async defer></script>'
+    : ''
+
+  const googleSignInBlock = googleClientId
+    ? `<div id="g_id_onload"
+          data-client_id="${googleClientId}"
+          data-callback="handleGoogleSignIn"
+          data-auto_prompt="false">
+        </div>
+        <div class="flex justify-center mb-4">
+          <div class="g_id_signin" data-type="standard" data-size="large" data-theme="outline" data-text="sign_in_with" data-shape="rectangular" data-logo_alignment="left" data-width="360"></div>
+        </div>
+        <div class="relative my-5">
+          <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200"></div></div>
+          <div class="relative flex justify-center text-xs"><span class="px-3 bg-white text-gray-400">or sign in with email</span></div>
+        </div>`
+    : ''
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  ${getHeadTags()}
+  <title>Customer Login - Reuse Canada Roof Reports</title>
+  ${googleScript}
+</head>
+<body class="bg-gradient-to-br from-brand-900 via-slate-900 to-brand-800 min-h-screen flex items-center justify-center">
+  <div class="w-full max-w-md mx-auto px-4">
+    <!-- Logo -->
+    <div class="text-center mb-8">
+      <a href="/" class="inline-flex items-center gap-3">
+        <div class="w-12 h-12 bg-accent-500 rounded-xl flex items-center justify-center shadow-lg">
+          <i class="fas fa-home text-white text-xl"></i>
+        </div>
+        <div class="text-left">
+          <span class="text-white font-bold text-2xl block">Reuse Canada</span>
+          <span class="text-brand-300 text-xs">Customer Portal - Roof Reports</span>
+        </div>
+      </a>
+    </div>
+
+    <!-- Auth Card -->
+    <div class="bg-white rounded-2xl shadow-2xl overflow-hidden">
+      <div class="p-8">
+        <h2 class="text-xl font-bold text-gray-800 mb-1">Welcome</h2>
+        <p class="text-sm text-gray-500 mb-6">Sign in to view your roof reports, invoices, and order history</p>
+
+        <!-- Google Sign-In Button -->
+        ${googleSignInBlock}
+
+        <!-- Tabs -->
+        <div class="flex border border-gray-200 rounded-lg overflow-hidden mb-5">
+          <button id="custLoginTab" onclick="showCustTab('login')" class="flex-1 py-2.5 text-center text-sm font-medium bg-brand-50 text-brand-700 border-b-2 border-brand-500">Sign In</button>
+          <button id="custRegTab" onclick="showCustTab('register')" class="flex-1 py-2.5 text-center text-sm font-medium text-gray-500 hover:text-gray-700">Register</button>
+        </div>
+
+        <!-- Login Form -->
+        <div id="custLoginForm">
+          <div class="space-y-4">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
+              <input type="email" id="custLoginEmail" placeholder="you@company.com" class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-brand-500 focus:border-brand-500 text-sm">
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Password</label>
+              <input type="password" id="custLoginPassword" placeholder="Enter your password" class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-brand-500 focus:border-brand-500 text-sm" onkeyup="if(event.key==='Enter')doCustLogin()">
+            </div>
+          </div>
+          <div id="custLoginError" class="hidden mt-4 p-3 bg-red-50 text-red-700 rounded-lg text-sm"></div>
+          <button onclick="doCustLogin()" class="w-full mt-5 py-3 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-xl transition-all hover:scale-[1.02] shadow-lg shadow-brand-500/25">
+            <i class="fas fa-sign-in-alt mr-2"></i>Sign In
+          </button>
+        </div>
+
+        <!-- Register Form -->
+        <div id="custRegForm" class="hidden">
+          <div class="space-y-3">
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Full Name *</label>
+                <input type="text" id="custRegName" placeholder="John Smith" class="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500">
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Company</label>
+                <input type="text" id="custRegCompany" placeholder="Smith Roofing" class="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500">
+              </div>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Email *</label>
+              <input type="email" id="custRegEmail" placeholder="you@company.com" class="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500">
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+              <input type="tel" id="custRegPhone" placeholder="(780) 555-1234" class="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500">
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Password *</label>
+              <input type="password" id="custRegPassword" placeholder="Min 6 characters" class="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500">
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Confirm Password *</label>
+              <input type="password" id="custRegConfirm" placeholder="Confirm password" class="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500" onkeyup="if(event.key==='Enter')doCustRegister()">
+            </div>
+          </div>
+          <div id="custRegError" class="hidden mt-4 p-3 bg-red-50 text-red-700 rounded-lg text-sm"></div>
+          <button onclick="doCustRegister()" class="w-full mt-5 py-3 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-xl transition-all hover:scale-[1.02] shadow-lg shadow-brand-500/25">
+            <i class="fas fa-user-plus mr-2"></i>Create Account
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Links -->
+    <div class="text-center mt-6 space-y-2">
+      <a href="/login" class="text-brand-300 hover:text-white text-sm transition-colors"><i class="fas fa-shield-alt mr-1"></i>Admin Login</a>
+      <span class="text-brand-700 mx-2">|</span>
+      <a href="/" class="text-brand-300 hover:text-white text-sm transition-colors"><i class="fas fa-arrow-left mr-1"></i>Back to homepage</a>
+    </div>
+  </div>
+
+  <script>
+    // Check if already logged in
+    (function() {
+      const c = localStorage.getItem('rc_customer');
+      if (c) window.location.href = '/customer/dashboard';
+    })();
+
+    function showCustTab(tab) {
+      document.getElementById('custLoginForm').classList.toggle('hidden', tab !== 'login');
+      document.getElementById('custRegForm').classList.toggle('hidden', tab !== 'register');
+      const lt = document.getElementById('custLoginTab');
+      const rt = document.getElementById('custRegTab');
+      if (tab === 'login') {
+        lt.classList.add('bg-brand-50','text-brand-700','border-b-2','border-brand-500');
+        lt.classList.remove('text-gray-500');
+        rt.classList.remove('bg-brand-50','text-brand-700','border-b-2','border-brand-500');
+        rt.classList.add('text-gray-500');
+      } else {
+        rt.classList.add('bg-brand-50','text-brand-700','border-b-2','border-brand-500');
+        rt.classList.remove('text-gray-500');
+        lt.classList.remove('bg-brand-50','text-brand-700','border-b-2','border-brand-500');
+        lt.classList.add('text-gray-500');
+      }
+    }
+
+    // Google Sign-In callback
+    async function handleGoogleSignIn(response) {
+      try {
+        const res = await fetch('/api/customer/google', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ credential: response.credential })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          localStorage.setItem('rc_customer', JSON.stringify(data.customer));
+          localStorage.setItem('rc_customer_token', data.token);
+          window.location.href = '/customer/dashboard';
+        } else {
+          document.getElementById('custLoginError').textContent = data.error || 'Google sign-in failed';
+          document.getElementById('custLoginError').classList.remove('hidden');
+        }
+      } catch(e) {
+        document.getElementById('custLoginError').textContent = 'Network error. Please try again.';
+        document.getElementById('custLoginError').classList.remove('hidden');
+      }
+    }
+
+    async function doCustLogin() {
+      const email = document.getElementById('custLoginEmail').value.trim();
+      const password = document.getElementById('custLoginPassword').value;
+      const err = document.getElementById('custLoginError');
+      err.classList.add('hidden');
+      if (!email || !password) { err.textContent = 'Email and password required.'; err.classList.remove('hidden'); return; }
+      try {
+        const res = await fetch('/api/customer/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          localStorage.setItem('rc_customer', JSON.stringify(data.customer));
+          localStorage.setItem('rc_customer_token', data.token);
+          window.location.href = '/customer/dashboard';
+        } else {
+          err.textContent = data.error || 'Login failed.';
+          err.classList.remove('hidden');
+        }
+      } catch(e) { err.textContent = 'Network error.'; err.classList.remove('hidden'); }
+    }
+
+    async function doCustRegister() {
+      const name = document.getElementById('custRegName').value.trim();
+      const company = document.getElementById('custRegCompany').value.trim();
+      const email = document.getElementById('custRegEmail').value.trim();
+      const phone = document.getElementById('custRegPhone').value.trim();
+      const password = document.getElementById('custRegPassword').value;
+      const confirm = document.getElementById('custRegConfirm').value;
+      const err = document.getElementById('custRegError');
+      err.classList.add('hidden');
+      if (!name || !email || !password) { err.textContent = 'Name, email, and password required.'; err.classList.remove('hidden'); return; }
+      if (password.length < 6) { err.textContent = 'Password must be at least 6 characters.'; err.classList.remove('hidden'); return; }
+      if (password !== confirm) { err.textContent = 'Passwords do not match.'; err.classList.remove('hidden'); return; }
+      try {
+        const res = await fetch('/api/customer/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password, name, phone, company_name: company })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          localStorage.setItem('rc_customer', JSON.stringify(data.customer));
+          localStorage.setItem('rc_customer_token', data.token);
+          window.location.href = '/customer/dashboard';
+        } else {
+          err.textContent = data.error || 'Registration failed.';
+          err.classList.remove('hidden');
+        }
+      } catch(e) { err.textContent = 'Network error.'; err.classList.remove('hidden'); }
+    }
+  </script>
+</body>
+</html>`
+}
+
+function getCustomerDashboardHTML() {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  ${getHeadTags()}
+  <title>My Dashboard - Reuse Canada Roof Reports</title>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <header class="bg-brand-800 text-white shadow-lg">
+    <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <a href="/" class="flex items-center space-x-3 hover:opacity-90 transition-opacity">
+          <div class="w-10 h-10 bg-accent-500 rounded-lg flex items-center justify-center">
+            <i class="fas fa-home text-white text-lg"></i>
+          </div>
+          <div>
+            <h1 class="text-xl font-bold">My Dashboard</h1>
+            <p class="text-brand-200 text-xs">Reuse Canada - Roof Reports</p>
+          </div>
+        </a>
+      </div>
+      <nav class="flex items-center space-x-4">
+        <span id="custGreeting" class="text-brand-200 text-sm hidden"><i class="fas fa-user-circle mr-1"></i><span id="custName"></span></span>
+        <a href="/" class="text-brand-200 hover:text-white text-sm"><i class="fas fa-home mr-1"></i>Home</a>
+        <button onclick="custLogout()" class="text-brand-200 hover:text-white text-sm"><i class="fas fa-sign-out-alt mr-1"></i>Logout</button>
+      </nav>
+    </div>
+  </header>
+  <main class="max-w-7xl mx-auto px-4 py-8">
+    <div id="customer-root"></div>
+  </main>
+  <script>
+    // Auth guard
+    (function() {
+      var c = localStorage.getItem('rc_customer');
+      if (!c) { window.location.href = '/customer/login'; return; }
+      try {
+        var u = JSON.parse(c);
+        var g = document.getElementById('custGreeting');
+        var n = document.getElementById('custName');
+        if (g && n) { n.textContent = u.name || u.email; g.classList.remove('hidden'); }
+      } catch(e) {}
+    })();
+    function custLogout() {
+      var token = localStorage.getItem('rc_customer_token');
+      if (token) fetch('/api/customer/logout', { method: 'POST', headers: { 'Authorization': 'Bearer ' + token } })['catch'](function(){});
+      localStorage.removeItem('rc_customer');
+      localStorage.removeItem('rc_customer_token');
+      window.location.href = '/customer/login';
+    }
+  </script>
+  <script src="/static/customer-dashboard.js"></script>
+</body>
+</html>`
+}
+
+function getCustomerInvoiceHTML() {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  ${getHeadTags()}
+  <title>Invoice - Reuse Canada</title>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <header class="bg-brand-800 text-white shadow-lg">
+    <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <a href="/customer/dashboard" class="flex items-center space-x-3 hover:opacity-90">
+          <div class="w-10 h-10 bg-accent-500 rounded-lg flex items-center justify-center">
+            <i class="fas fa-file-invoice-dollar text-white text-lg"></i>
+          </div>
+          <div>
+            <h1 class="text-xl font-bold">Invoice</h1>
+            <p class="text-brand-200 text-xs">Reuse Canada</p>
+          </div>
+        </a>
+      </div>
+      <nav class="flex items-center space-x-4">
+        <a href="/customer/dashboard" class="text-brand-200 hover:text-white text-sm"><i class="fas fa-arrow-left mr-1"></i>Back to Dashboard</a>
+      </nav>
+    </div>
+  </header>
+  <main class="max-w-4xl mx-auto px-4 py-8">
+    <div id="invoice-root"></div>
+  </main>
+  <script>
+    (function() {
+      var c = localStorage.getItem('rc_customer');
+      if (!c) { window.location.href = '/customer/login'; return; }
+    })();
+  </script>
+  <script src="/static/customer-invoice.js"></script>
 </body>
 </html>`
 }

@@ -8,7 +8,10 @@ const adminState = {
   activeTab: 'overview',
   orders: [],
   companies: [],
-  gmailStatus: null
+  gmailStatus: null,
+  customers: [],
+  invoices: [],
+  invoiceStats: null
 };
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -19,11 +22,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 async function loadDashboard() {
   adminState.loading = true;
   try {
-    const [dashRes, ordersRes, companiesRes, gmailRes] = await Promise.all([
+    const [dashRes, ordersRes, companiesRes, gmailRes, customersRes, invoicesRes, invoiceStatsRes] = await Promise.all([
       fetch('/api/admin/dashboard'),
       fetch('/api/orders?limit=50'),
       fetch('/api/companies/customers'),
-      fetch('/api/auth/gmail/status').catch(() => null)
+      fetch('/api/auth/gmail/status').catch(() => null),
+      fetch('/api/invoices/customers/list').catch(() => null),
+      fetch('/api/invoices').catch(() => null),
+      fetch('/api/invoices/stats/summary').catch(() => null)
     ]);
     adminState.dashboard = await dashRes.json();
     const ordersData = await ordersRes.json();
@@ -32,6 +38,18 @@ async function loadDashboard() {
     adminState.companies = companiesData.companies || [];
     if (gmailRes && gmailRes.ok) {
       adminState.gmailStatus = await gmailRes.json();
+    }
+    if (customersRes && customersRes.ok) {
+      const custData = await customersRes.json();
+      adminState.customers = custData.customers || [];
+    }
+    if (invoicesRes && invoicesRes.ok) {
+      const invData = await invoicesRes.json();
+      adminState.invoices = invData.invoices || [];
+    }
+    if (invoiceStatsRes && invoiceStatsRes.ok) {
+      const statsData = await invoiceStatsRes.json();
+      adminState.invoiceStats = statsData.stats;
     }
   } catch (e) {
     console.error('Dashboard load error:', e);
@@ -58,7 +76,9 @@ function renderAdmin() {
     { id: 'overview', label: 'Overview', icon: 'fa-chart-pie' },
     { id: 'orders', label: 'Orders', icon: 'fa-clipboard-list' },
     { id: 'neworder', label: 'New Order', icon: 'fa-plus-circle' },
-    { id: 'companies', label: 'Companies', icon: 'fa-building' },
+    { id: 'customers', label: 'Customers', icon: 'fa-users' },
+    { id: 'invoices', label: 'Invoices', icon: 'fa-file-invoice-dollar' },
+    { id: 'companies', label: 'B2B Partners', icon: 'fa-building' },
     { id: 'activity', label: 'Activity', icon: 'fa-history' }
   ];
 
@@ -79,6 +99,8 @@ function renderAdmin() {
       ${adminState.activeTab === 'overview' ? renderOverview(d) : ''}
       ${adminState.activeTab === 'orders' ? renderOrdersTab() : ''}
       ${adminState.activeTab === 'neworder' ? renderNewOrderTab() : ''}
+      ${adminState.activeTab === 'customers' ? renderCustomersTab() : ''}
+      ${adminState.activeTab === 'invoices' ? renderInvoicesTab() : ''}
       ${adminState.activeTab === 'companies' ? renderCompaniesTab() : ''}
       ${adminState.activeTab === 'activity' ? renderActivityTab(d) : ''}
     </div>
@@ -431,6 +453,311 @@ function renderActivityTab(d) {
       </div>
     </div>
   `;
+}
+
+// ============================================================
+// CUSTOMERS TAB — Customer accounts (Google Sign-In + email)
+// ============================================================
+function renderCustomersTab() {
+  const customers = adminState.customers;
+  
+  return `
+    <!-- Customer Stats -->
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      ${statCard('Total Customers', customers.length, 'fa-users', 'brand')}
+      ${statCard('With Orders', customers.filter(c => c.order_count > 0).length, 'fa-clipboard-check', 'green')}
+      ${statCard('Total Revenue', '$' + customers.reduce((s, c) => s + (c.total_spent || 0), 0).toFixed(0), 'fa-dollar-sign', 'accent')}
+      ${statCard('Invoices Paid', '$' + customers.reduce((s, c) => s + (c.invoices_paid || 0), 0).toFixed(0), 'fa-file-invoice-dollar', 'green')}
+    </div>
+
+    <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+        <h3 class="font-semibold text-gray-700"><i class="fas fa-users mr-2 text-brand-500"></i>Registered Customers (${customers.length})</h3>
+        <span class="text-xs text-gray-400">Customers sign up via <a href="/customer/login" target="_blank" class="text-brand-600 hover:underline">/customer/login</a></span>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-gray-50">
+            <tr>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Customer</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Company</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Email</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Phone</th>
+              <th class="px-4 py-3 text-center text-xs font-medium text-gray-500">Orders</th>
+              <th class="px-4 py-3 text-right text-xs font-medium text-gray-500">Spent</th>
+              <th class="px-4 py-3 text-center text-xs font-medium text-gray-500">Invoices</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Joined</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Actions</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100">
+            ${customers.map(c => `
+              <tr class="hover:bg-gray-50">
+                <td class="px-4 py-3">
+                  <div class="flex items-center gap-2">
+                    ${c.google_avatar ? `<img src="${c.google_avatar}" class="w-7 h-7 rounded-full">` : `<div class="w-7 h-7 bg-brand-100 rounded-full flex items-center justify-center"><i class="fas fa-user text-brand-500 text-xs"></i></div>`}
+                    <span class="font-medium text-gray-800">${c.name}</span>
+                    ${c.google_id ? '<i class="fab fa-google text-xs text-gray-400" title="Google account"></i>' : ''}
+                  </div>
+                </td>
+                <td class="px-4 py-3 text-gray-600">${c.company_name || '-'}</td>
+                <td class="px-4 py-3 text-gray-600 text-xs">${c.email}</td>
+                <td class="px-4 py-3 text-gray-600">${c.phone || '-'}</td>
+                <td class="px-4 py-3 text-center"><span class="px-2 py-0.5 bg-brand-100 text-brand-700 rounded-full text-xs font-bold">${c.order_count || 0}</span></td>
+                <td class="px-4 py-3 text-right font-medium">$${(c.total_spent || 0).toFixed(2)}</td>
+                <td class="px-4 py-3 text-center"><span class="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-bold">${c.invoice_count || 0}</span></td>
+                <td class="px-4 py-3 text-gray-500 text-xs">${new Date(c.created_at).toLocaleDateString()}</td>
+                <td class="px-4 py-3">
+                  <button onclick="showCreateInvoiceModal(${c.id}, '${c.name}')" class="p-1.5 text-gray-400 hover:text-green-600" title="Create Invoice">
+                    <i class="fas fa-file-invoice-dollar"></i>
+                  </button>
+                </td>
+              </tr>
+            `).join('')}
+            ${customers.length === 0 ? '<tr><td colspan="9" class="px-4 py-8 text-center text-gray-400">No customers registered yet. Share <a href="/customer/login" target="_blank" class="text-brand-600 hover:underline">/customer/login</a> with clients.</td></tr>' : ''}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+// ============================================================
+// INVOICES TAB — Create, send, track invoices
+// ============================================================
+function renderInvoicesTab() {
+  const invoices = adminState.invoices;
+  const stats = adminState.invoiceStats || {};
+
+  return `
+    <!-- Invoice Stats -->
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      ${statCard('Total Invoices', stats.total_invoices || 0, 'fa-file-invoice-dollar', 'brand')}
+      ${statCard('Collected', '$' + (stats.total_collected || 0).toFixed(0), 'fa-check-circle', 'green')}
+      ${statCard('Outstanding', '$' + (stats.total_outstanding || 0).toFixed(0), 'fa-clock', 'amber')}
+      ${statCard('Overdue', '$' + (stats.total_overdue || 0).toFixed(0), 'fa-exclamation-circle', 'red')}
+    </div>
+
+    <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+        <h3 class="font-semibold text-gray-700"><i class="fas fa-file-invoice-dollar mr-2 text-brand-500"></i>All Invoices (${invoices.length})</h3>
+        <button onclick="showCreateInvoiceModal()" class="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm hover:bg-brand-700">
+          <i class="fas fa-plus mr-1"></i>New Invoice
+        </button>
+      </div>
+
+      <!-- Create Invoice Modal -->
+      <div id="createInvoiceModal" class="hidden px-6 py-6 bg-gray-50 border-b border-gray-200">
+        <h4 class="font-semibold text-gray-700 mb-4"><i class="fas fa-file-plus mr-1"></i>Create New Invoice</h4>
+        <div class="grid md:grid-cols-2 gap-4 mb-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Customer *</label>
+            <select id="invCustomer" class="w-full px-3 py-2 border rounded-lg text-sm">
+              <option value="">Select customer...</option>
+              ${adminState.customers.map(c => `<option value="${c.id}">${c.name} (${c.email})</option>`).join('')}
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Related Order (optional)</label>
+            <select id="invOrder" class="w-full px-3 py-2 border rounded-lg text-sm">
+              <option value="">None</option>
+              ${adminState.orders.map(o => `<option value="${o.id}">${o.order_number} - ${o.property_address}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        
+        <!-- Line Items -->
+        <div class="mb-4">
+          <label class="block text-sm font-medium text-gray-700 mb-2">Line Items</label>
+          <div id="invoiceLineItems">
+            <div class="flex gap-2 mb-2 items-end line-item-row">
+              <input type="text" placeholder="Description" class="flex-1 px-3 py-2 border rounded-lg text-sm inv-desc">
+              <input type="number" placeholder="Qty" value="1" min="1" class="w-20 px-3 py-2 border rounded-lg text-sm inv-qty">
+              <input type="number" placeholder="Price" step="0.01" class="w-28 px-3 py-2 border rounded-lg text-sm inv-price">
+              <button onclick="addInvoiceLineItem()" class="px-3 py-2 bg-green-100 text-green-700 rounded-lg text-sm hover:bg-green-200"><i class="fas fa-plus"></i></button>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid md:grid-cols-3 gap-4 mb-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">GST Rate (%)</label>
+            <input type="number" id="invTaxRate" value="5" step="0.1" class="w-full px-3 py-2 border rounded-lg text-sm">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Discount ($)</label>
+            <input type="number" id="invDiscount" value="0" step="0.01" class="w-full px-3 py-2 border rounded-lg text-sm">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Due in (days)</label>
+            <input type="number" id="invDueDays" value="30" class="w-full px-3 py-2 border rounded-lg text-sm">
+          </div>
+        </div>
+        <div class="mb-4">
+          <label class="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+          <textarea id="invNotes" rows="2" placeholder="Optional notes..." class="w-full px-3 py-2 border rounded-lg text-sm"></textarea>
+        </div>
+
+        <div id="invError" class="hidden mb-3 p-3 bg-red-50 text-red-700 rounded-lg text-sm"></div>
+        <div class="flex gap-2">
+          <button onclick="createInvoice()" class="px-6 py-2 bg-brand-600 text-white rounded-lg text-sm hover:bg-brand-700"><i class="fas fa-save mr-1"></i>Create Invoice</button>
+          <button onclick="hideCreateInvoiceModal()" class="px-4 py-2 bg-gray-200 text-gray-600 rounded-lg text-sm">Cancel</button>
+        </div>
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-gray-50">
+            <tr>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Invoice #</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Customer</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Order</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Date</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Due</th>
+              <th class="px-4 py-3 text-right text-xs font-medium text-gray-500">Total</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Status</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Actions</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100">
+            ${invoices.map(inv => `
+              <tr class="hover:bg-gray-50">
+                <td class="px-4 py-3 font-mono text-xs font-bold text-brand-600">${inv.invoice_number}</td>
+                <td class="px-4 py-3 text-gray-700">${inv.customer_name || ''} ${inv.customer_company ? '<span class="text-xs text-gray-400">(' + inv.customer_company + ')</span>' : ''}</td>
+                <td class="px-4 py-3 text-gray-500 text-xs font-mono">${inv.order_number || '-'}</td>
+                <td class="px-4 py-3 text-gray-500 text-xs">${inv.issue_date ? new Date(inv.issue_date).toLocaleDateString() : '-'}</td>
+                <td class="px-4 py-3 text-gray-500 text-xs">${inv.due_date ? new Date(inv.due_date).toLocaleDateString() : '-'}</td>
+                <td class="px-4 py-3 text-right font-bold">$${(inv.total || 0).toFixed(2)}</td>
+                <td class="px-4 py-3">${getInvStatusBadge(inv.status)}</td>
+                <td class="px-4 py-3">
+                  <div class="flex space-x-1">
+                    ${inv.status === 'draft' ? `<button onclick="sendInvoice(${inv.id})" class="p-1.5 text-gray-400 hover:text-blue-600" title="Send Invoice"><i class="fas fa-paper-plane"></i></button>` : ''}
+                    ${['sent','viewed','overdue'].includes(inv.status) ? `<button onclick="markInvoicePaid(${inv.id})" class="p-1.5 text-gray-400 hover:text-green-600" title="Mark Paid"><i class="fas fa-check-circle"></i></button>` : ''}
+                    ${inv.status === 'draft' ? `<button onclick="deleteInvoice(${inv.id})" class="p-1.5 text-gray-400 hover:text-red-600" title="Delete"><i class="fas fa-trash"></i></button>` : ''}
+                  </div>
+                </td>
+              </tr>
+            `).join('')}
+            ${invoices.length === 0 ? '<tr><td colspan="8" class="px-4 py-8 text-center text-gray-400">No invoices created yet</td></tr>' : ''}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function getInvStatusBadge(status) {
+  const map = {
+    draft: 'bg-gray-100 text-gray-600',
+    sent: 'bg-blue-100 text-blue-700',
+    viewed: 'bg-indigo-100 text-indigo-700',
+    paid: 'bg-green-100 text-green-700',
+    overdue: 'bg-red-100 text-red-700',
+    cancelled: 'bg-gray-100 text-gray-500',
+    refunded: 'bg-purple-100 text-purple-700'
+  };
+  return `<span class="px-2 py-0.5 ${map[status] || 'bg-gray-100 text-gray-600'} rounded-full text-xs font-medium capitalize">${status}</span>`;
+}
+
+function showCreateInvoiceModal(customerId, customerName) {
+  document.getElementById('createInvoiceModal').classList.remove('hidden');
+  if (customerId) {
+    document.getElementById('invCustomer').value = customerId;
+  }
+}
+
+function hideCreateInvoiceModal() {
+  document.getElementById('createInvoiceModal').classList.add('hidden');
+}
+
+function addInvoiceLineItem() {
+  const container = document.getElementById('invoiceLineItems');
+  const row = document.createElement('div');
+  row.className = 'flex gap-2 mb-2 items-end line-item-row';
+  row.innerHTML = `
+    <input type="text" placeholder="Description" class="flex-1 px-3 py-2 border rounded-lg text-sm inv-desc">
+    <input type="number" placeholder="Qty" value="1" min="1" class="w-20 px-3 py-2 border rounded-lg text-sm inv-qty">
+    <input type="number" placeholder="Price" step="0.01" class="w-28 px-3 py-2 border rounded-lg text-sm inv-price">
+    <button onclick="this.parentElement.remove()" class="px-3 py-2 bg-red-100 text-red-700 rounded-lg text-sm hover:bg-red-200"><i class="fas fa-minus"></i></button>
+  `;
+  container.appendChild(row);
+}
+
+async function createInvoice() {
+  const customerId = document.getElementById('invCustomer').value;
+  const orderId = document.getElementById('invOrder').value;
+  const taxRate = parseFloat(document.getElementById('invTaxRate').value) || 5;
+  const discount = parseFloat(document.getElementById('invDiscount').value) || 0;
+  const dueDays = parseInt(document.getElementById('invDueDays').value) || 30;
+  const notes = document.getElementById('invNotes').value.trim();
+  const errDiv = document.getElementById('invError');
+  errDiv.classList.add('hidden');
+
+  if (!customerId) { errDiv.textContent = 'Please select a customer.'; errDiv.classList.remove('hidden'); return; }
+
+  // Collect line items
+  const rows = document.querySelectorAll('.line-item-row');
+  const items = [];
+  rows.forEach(row => {
+    const desc = row.querySelector('.inv-desc').value.trim();
+    const qty = parseFloat(row.querySelector('.inv-qty').value) || 1;
+    const price = parseFloat(row.querySelector('.inv-price').value) || 0;
+    if (desc && price > 0) items.push({ description: desc, quantity: qty, unit_price: price });
+  });
+
+  if (items.length === 0) { errDiv.textContent = 'Add at least one line item with description and price.'; errDiv.classList.remove('hidden'); return; }
+
+  try {
+    const res = await fetch('/api/invoices', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ customer_id: parseInt(customerId), order_id: orderId ? parseInt(orderId) : null, items, tax_rate: taxRate, discount_amount: discount, due_days: dueDays, notes })
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      hideCreateInvoiceModal();
+      await loadDashboard();
+      renderAdmin();
+    } else {
+      errDiv.textContent = data.error || 'Failed to create invoice';
+      errDiv.classList.remove('hidden');
+    }
+  } catch(e) { errDiv.textContent = 'Error: ' + e.message; errDiv.classList.remove('hidden'); }
+}
+
+async function sendInvoice(id) {
+  if (!confirm('Send this invoice to the customer?')) return;
+  try {
+    const res = await fetch(`/api/invoices/${id}/send`, { method: 'POST' });
+    const data = await res.json();
+    if (res.ok) {
+      alert('Invoice sent to ' + (data.customer_email || 'customer'));
+      await loadDashboard();
+      renderAdmin();
+    } else { alert('Failed: ' + (data.error || 'Unknown error')); }
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function markInvoicePaid(id) {
+  if (!confirm('Mark this invoice as paid?')) return;
+  try {
+    const res = await fetch(`/api/invoices/${id}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'paid' })
+    });
+    if (res.ok) { await loadDashboard(); renderAdmin(); }
+    else { alert('Failed to update invoice'); }
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function deleteInvoice(id) {
+  if (!confirm('Delete this draft invoice?')) return;
+  try {
+    const res = await fetch(`/api/invoices/${id}`, { method: 'DELETE' });
+    if (res.ok) { await loadDashboard(); renderAdmin(); }
+    else { alert('Failed to delete invoice'); }
+  } catch(e) { alert('Error: ' + e.message); }
 }
 
 // ============================================================
