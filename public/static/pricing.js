@@ -114,7 +114,7 @@ function renderPricing(root, packages) {
     <div class="grid md:grid-cols-5 gap-4 mb-16">
       ${packages.map((pkg, i) => {
         const priceEach = (pkg.price_cents / 100 / pkg.credits).toFixed(2);
-        const savings = pkg.credits > 1 ? Math.round((1 - (pkg.price_cents / 100) / (pkg.credits * 15)) * 100) : 0;
+        const savings = pkg.credits > 1 ? Math.round((1 - (pkg.price_cents / 100) / (pkg.credits * 8)) * 100) : 0;
         const isBest = i === packages.length - 1;
         return `
           <div class="bg-white rounded-xl border ${isBest ? 'border-brand-500 ring-2 ring-brand-200' : 'border-gray-200'} p-5 text-center hover:shadow-md transition-shadow relative">

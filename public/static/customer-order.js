@@ -108,7 +108,7 @@ function renderOrderPage() {
             <div class="w-10 h-10 bg-amber-100 rounded-lg flex items-center justify-center"><i class="fas fa-credit-card text-amber-600"></i></div>
             <div>
               <p class="font-semibold text-amber-800">No credits remaining — pay per report or buy a credit pack</p>
-              <p class="text-sm text-amber-600">Starting at $5.50 CAD per report with credit packs</p>
+              <p class="text-sm text-amber-600">Starting at $4.75 CAD per report with credit packs</p>
             </div>
           </div>
           <a href="/pricing" class="bg-brand-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-brand-700">Buy Credits</a>

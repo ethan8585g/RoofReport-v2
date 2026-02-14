@@ -391,17 +391,17 @@ adminRoutes.post('/init-db', async (c) => {
       )
     `).run()
 
-    // Seed default credit packages (minimum $5.50/report)
-    // Update existing packages to new pricing
+    // Seed default credit packages
+    // 5=$37.50 ($7.50/ea), 10=$67.50 ($6.75/ea), 25=$150 ($6/ea), 50=$275 ($5.50/ea), 100=$475 ($4.75/ea)
     await c.env.DB.prepare(`DELETE FROM credit_packages`).run()
     await c.env.DB.prepare(`
       INSERT INTO credit_packages (id, name, description, credits, price_cents, sort_order)
       VALUES
-        (1, '5 Pack', '5 reports — $5.50/ea', 5, 2750, 1),
-        (2, '10 Pack', '10 reports — most popular — $5.00/ea', 10, 5000, 2),
-        (3, '25 Pack', '25 reports — pro value — $4.50/ea', 25, 11250, 3),
-        (4, '50 Pack', '50 reports — team deal — $4.00/ea', 50, 20000, 4),
-        (5, '100 Pack', '100 reports — enterprise — $3.50/ea', 100, 35000, 5)
+        (1, '5 Pack', '5 reports — $7.50/ea', 5, 3750, 1),
+        (2, '10 Pack', '10 reports — $6.75/ea', 10, 6750, 2),
+        (3, '25 Pack', '25 reports — $6.00/ea', 25, 15000, 3),
+        (4, '50 Pack', '50 reports — $5.50/ea', 50, 27500, 4),
+        (5, '100 Pack', '100 reports — best value — $4.75/ea', 100, 47500, 5)
     `).run()
 
     // Customer portal indexes
