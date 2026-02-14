@@ -416,6 +416,9 @@ export interface RoofReport {
     notes: string[]
   }
 
+  // ---- AI GEOMETRY OVERLAY — Gemini Vision facet polygons for satellite image overlay ----
+  ai_geometry?: AIMeasurementAnalysis | null
+
   // ---- RAS YIELD ANALYSIS (Reuse Canada value-add) ----
   ras_yield?: RASYieldAnalysis
 

@@ -6,7 +6,8 @@ import {
   classifyComplexity
 } from '../types'
 import type {
-  RoofReport, RoofSegment, EdgeMeasurement, EdgeType, MaterialEstimate
+  RoofReport, RoofSegment, EdgeMeasurement, EdgeType, MaterialEstimate,
+  AIMeasurementAnalysis
 } from '../types'
 import { getAccessToken } from '../services/gcp-auth'
 import {
@@ -19,6 +20,7 @@ import {
   calculateRoofArea,
   type DataLayersAnalysis
 } from '../services/solar-datalayers'
+import { analyzeRoofGeometry } from '../services/gemini'
 
 export const reportsRoutes = new Hono<{ Bindings: Bindings }>()
 
@@ -260,6 +262,32 @@ reportsRoutes.post('/:orderId/generate', async (c) => {
       }
     } else {
       reportData = generateMockRoofReport(order, mapsApiKey)
+    }
+
+    // ---- Run Gemini Vision AI to get roof facet polygons for overlay ----
+    // This provides the visual proof of measurement accuracy on the satellite image
+    try {
+      const overheadImageUrl = reportData.imagery?.satellite_overhead_url || reportData.imagery?.satellite_url
+      if (overheadImageUrl) {
+        console.log(`[Generate] Running Gemini Vision AI for roof polygon overlay...`)
+        const geminiEnv = {
+          apiKey: c.env.GOOGLE_VERTEX_API_KEY,
+          accessToken: undefined as string | undefined,
+          project: c.env.GOOGLE_CLOUD_PROJECT,
+          location: c.env.GOOGLE_CLOUD_LOCATION || 'us-central1',
+          serviceAccountKey: c.env.GCP_SERVICE_ACCOUNT_KEY,
+        }
+        const aiGeometry = await analyzeRoofGeometry(overheadImageUrl, geminiEnv)
+        if (aiGeometry && aiGeometry.facets && aiGeometry.facets.length > 0) {
+          reportData.ai_geometry = aiGeometry
+          console.log(`[Generate] AI Geometry: ${aiGeometry.facets.length} facets, ${aiGeometry.lines.length} lines, ${aiGeometry.obstructions.length} obstructions`)
+        } else {
+          console.warn('[Generate] Gemini Vision returned no facets — overlay will use schematic diagram')
+        }
+      }
+    } catch (geminiErr: any) {
+      console.warn(`[Generate] Gemini Vision overlay failed (non-critical): ${geminiErr.message}`)
+      // Non-critical — report still generates without overlay
     }
 
     // Generate professional HTML report
@@ -522,6 +550,28 @@ reportsRoutes.post('/:orderId/generate-enhanced', async (c) => {
           material_squares: dlAnalysis.area.materialSquares
         }
       }
+    }
+
+    // ---- Run Gemini Vision AI to get roof facet polygons for overlay ----
+    try {
+      const overheadImageUrl = reportData.imagery?.satellite_overhead_url || reportData.imagery?.satellite_url
+      if (overheadImageUrl) {
+        console.log(`[Generate DL] Running Gemini Vision AI for roof polygon overlay...`)
+        const geminiEnv = {
+          apiKey: c.env.GOOGLE_VERTEX_API_KEY,
+          accessToken: undefined as string | undefined,
+          project: c.env.GOOGLE_CLOUD_PROJECT,
+          location: c.env.GOOGLE_CLOUD_LOCATION || 'us-central1',
+          serviceAccountKey: c.env.GCP_SERVICE_ACCOUNT_KEY,
+        }
+        const aiGeometry = await analyzeRoofGeometry(overheadImageUrl, geminiEnv)
+        if (aiGeometry && aiGeometry.facets && aiGeometry.facets.length > 0) {
+          reportData.ai_geometry = aiGeometry
+          console.log(`[Generate DL] AI Geometry: ${aiGeometry.facets.length} facets, ${aiGeometry.lines.length} lines, ${aiGeometry.obstructions.length} obstructions`)
+        }
+      }
+    } catch (geminiErr: any) {
+      console.warn(`[Generate DL] Gemini Vision overlay failed (non-critical): ${geminiErr.message}`)
     }
 
     // Generate professional HTML report
@@ -1790,6 +1840,11 @@ function generateProfessionalReportHTML(report: RoofReport): string {
   // Facet colors for the roof diagram
   const facetColors = ['#FF6B8A','#5B9BD5','#70C070','#FFB347','#C084FC','#F472B6','#34D399','#FBBF24','#60A5FA','#A78BFA','#FB923C','#4ADE80']
 
+  // Generate satellite overlay SVG from AI geometry
+  const overlaySVG = generateSatelliteOverlaySVG(report.ai_geometry, report.segments, report.edges, es, facetColors)
+  const hasOverlay = overlaySVG.length > 0
+  const overlayLegend = hasOverlay ? generateOverlayLegend(es, (report.ai_geometry?.obstructions?.length || 0) > 0) : ''
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1941,12 +1996,16 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
   <div class="p1-addr">${fullAddress}</div>
 
   <!-- Aerial & Directional Roof Views -->
-  <div class="p1-section-label">ROOF IMAGERY</div>
+  <div class="p1-section-label">ROOF IMAGERY${hasOverlay ? ' <span style="font-size:8px;color:#00E5FF;font-weight:400;margin-left:8px">AI-DETECTED ROOF GEOMETRY</span>' : ''}</div>
   <div style="display:grid;grid-template-columns:1.6fr 1fr;grid-template-rows:auto auto;gap:8px;margin-bottom:14px">
-    <!-- PRIMARY: Overhead satellite image (large, spans 2 rows) — the key measurement image -->
+    <!-- PRIMARY: Overhead satellite image with measurement overlay (large, spans 2 rows) -->
     <div class="p1-aerial-card" style="grid-row:1/3">
-      ${overheadUrl ? `<img src="${overheadUrl}" alt="Overhead Satellite View" style="width:100%;height:100%;min-height:200px;object-fit:cover" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-aerial-placeholder" style="display:none;height:200px">OVERHEAD</div>` : '<div class="p1-aerial-placeholder" style="height:200px">OVERHEAD</div>'}
-      <div class="p1-aerial-label">Overhead Satellite (Roof View)</div>
+      <div style="position:relative;width:100%;min-height:200px">
+        ${overheadUrl ? `<img src="${overheadUrl}" alt="Overhead Satellite View" style="width:100%;height:100%;min-height:200px;object-fit:cover;display:block" onerror="this.style.display='none'">` : '<div class="p1-aerial-placeholder" style="height:200px">OVERHEAD</div>'}
+        ${hasOverlay ? `<svg viewBox="0 0 640 640" xmlns="http://www.w3.org/2000/svg" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none">${overlaySVG}</svg>` : ''}
+      </div>
+      ${overlayLegend}
+      <div class="p1-aerial-label">${hasOverlay ? 'AI Roof Measurement Overlay' : 'Overhead Satellite (Roof View)'}</div>
     </div>
     <!-- Right column: 2x2 directional Street View thumbnails -->
     <div style="display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:6px">
@@ -2198,6 +2257,123 @@ document.querySelectorAll('.p1-sv-img').forEach(function(img) {
 </script>
 </body>
 </html>`
+}
+
+// ============================================================
+// Generate SVG overlay for satellite image — facet polygons + measurement lines
+// Renders on top of the 640x640 satellite image to show roof analysis proof
+// Coordinates from Gemini Vision AI are normalized 0-1000, mapped to 640x640 viewBox
+// ============================================================
+function generateSatelliteOverlaySVG(
+  aiGeometry: AIMeasurementAnalysis | null | undefined,
+  segments: RoofSegment[],
+  edges: EdgeMeasurement[],
+  edgeSummary: { total_ridge_ft: number; total_hip_ft: number; total_valley_ft: number; total_eave_ft: number; total_rake_ft: number },
+  colors: string[]
+): string {
+  if (!aiGeometry || !aiGeometry.facets || aiGeometry.facets.length === 0) {
+    return '' // No overlay — plain satellite image
+  }
+
+  const scale = 640 / 1000 // Convert 0-1000 normalized coords to 640px
+
+  let svg = ''
+
+  // ---- 1. Draw facet polygons with semi-transparent fill ----
+  aiGeometry.facets.forEach((facet, i) => {
+    if (!facet.points || facet.points.length < 3) return
+    const color = colors[i % colors.length]
+    const points = facet.points.map(p => `${(p.x * scale).toFixed(1)},${(p.y * scale).toFixed(1)}`).join(' ')
+
+    svg += `<polygon points="${points}" fill="${color}" fill-opacity="0.30" stroke="${color}" stroke-width="2.5" stroke-opacity="0.9"/>`
+
+    // ---- Facet label: area + pitch ----
+    const cx = facet.points.reduce((s, p) => s + p.x, 0) / facet.points.length * scale
+    const cy = facet.points.reduce((s, p) => s + p.y, 0) / facet.points.length * scale
+
+    // Match AI facet to closest segment by index
+    const seg = segments[i] || segments[0]
+    if (seg) {
+      // Background pill for readability
+      svg += `<rect x="${cx - 42}" y="${cy - 14}" width="84" height="28" rx="4" fill="rgba(0,0,0,0.7)"/>`
+      svg += `<text x="${cx}" y="${cy - 1}" text-anchor="middle" font-size="11" font-weight="800" fill="#fff" font-family="Inter,system-ui,sans-serif">${seg.true_area_sqft.toLocaleString()} ft²</text>`
+      svg += `<text x="${cx}" y="${cy + 11}" text-anchor="middle" font-size="9" font-weight="600" fill="${color}" font-family="Inter,system-ui,sans-serif">${seg.pitch_ratio}</text>`
+    }
+  })
+
+  // ---- 2. Draw measurement lines (ridge, hip, valley, eave, rake) ----
+  const lineColors: Record<string, string> = {
+    'RIDGE': '#FF1744',  // Bold red
+    'HIP': '#2979FF',    // Blue
+    'VALLEY': '#00E676', // Green
+    'EAVE': '#FF9100',   // Orange
+    'RAKE': '#D500F9',   // Purple
+  }
+  const lineWidths: Record<string, number> = {
+    'RIDGE': 3.5,
+    'HIP': 2.5,
+    'VALLEY': 2.5,
+    'EAVE': 2,
+    'RAKE': 2,
+  }
+
+  aiGeometry.lines.forEach((line) => {
+    const color = lineColors[line.type] || '#FFFFFF'
+    const width = lineWidths[line.type] || 2
+    const x1 = (line.start.x * scale).toFixed(1)
+    const y1 = (line.start.y * scale).toFixed(1)
+    const x2 = (line.end.x * scale).toFixed(1)
+    const y2 = (line.end.y * scale).toFixed(1)
+
+    // Dashed for valley, solid for others
+    const dashAttr = line.type === 'VALLEY' ? ' stroke-dasharray="6,3"' : ''
+    svg += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${color}" stroke-width="${width}"${dashAttr} stroke-linecap="round" opacity="0.95"/>`
+  })
+
+  // ---- 3. Draw obstruction markers ----
+  aiGeometry.obstructions.forEach((obs) => {
+    const cx = ((obs.boundingBox.min.x + obs.boundingBox.max.x) / 2 * scale).toFixed(1)
+    const cy = ((obs.boundingBox.min.y + obs.boundingBox.max.y) / 2 * scale).toFixed(1)
+    const w = ((obs.boundingBox.max.x - obs.boundingBox.min.x) * scale)
+    const h = ((obs.boundingBox.max.y - obs.boundingBox.min.y) * scale)
+
+    svg += `<rect x="${(parseFloat(cx) - w/2).toFixed(1)}" y="${(parseFloat(cy) - h/2).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="none" stroke="#FFD600" stroke-width="2" stroke-dasharray="4,2" rx="2"/>`
+    svg += `<text x="${cx}" y="${(parseFloat(cy) + 3).toFixed(1)}" text-anchor="middle" font-size="8" font-weight="700" fill="#FFD600" font-family="Inter,system-ui,sans-serif">${obs.type}</text>`
+  })
+
+  return svg
+}
+
+// Generate the legend for the satellite overlay
+function generateOverlayLegend(
+  edgeSummary: { total_ridge_ft: number; total_hip_ft: number; total_valley_ft: number; total_eave_ft: number; total_rake_ft: number },
+  hasObstructions: boolean
+): string {
+  const items = [
+    { color: '#FF1744', label: 'Ridge', value: `${edgeSummary.total_ridge_ft} ft`, style: '' },
+    { color: '#2979FF', label: 'Hip', value: `${edgeSummary.total_hip_ft} ft`, style: '' },
+    { color: '#00E676', label: 'Valley', value: `${edgeSummary.total_valley_ft} ft`, style: 'stroke-dasharray="4,2"' },
+    { color: '#FF9100', label: 'Eave', value: `${edgeSummary.total_eave_ft} ft`, style: '' },
+    { color: '#D500F9', label: 'Rake', value: `${edgeSummary.total_rake_ft} ft`, style: '' },
+  ]
+
+  let html = '<div style="display:flex;flex-wrap:wrap;gap:6px 12px;padding:6px 10px;background:rgba(0,0,0,0.75);border-radius:6px;margin-top:6px">'
+  items.forEach(item => {
+    if (parseInt(item.value) > 0) {
+      html += `<div style="display:flex;align-items:center;gap:4px">`
+      html += `<svg width="16" height="4"><line x1="0" y1="2" x2="16" y2="2" stroke="${item.color}" stroke-width="2.5" ${item.style}/></svg>`
+      html += `<span style="color:#fff;font-size:8px;font-weight:600">${item.label}: ${item.value}</span>`
+      html += `</div>`
+    }
+  })
+  if (hasObstructions) {
+    html += `<div style="display:flex;align-items:center;gap:4px">`
+    html += `<svg width="12" height="12"><rect x="1" y="1" width="10" height="10" fill="none" stroke="#FFD600" stroke-width="1.5" stroke-dasharray="3,1" rx="1"/></svg>`
+    html += `<span style="color:#FFD600;font-size:8px;font-weight:600">Obstruction</span>`
+    html += `</div>`
+  }
+  html += '</div>'
+  return html
 }
 
 // Generate SVG roof diagram from segments
