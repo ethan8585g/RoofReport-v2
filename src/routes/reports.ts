@@ -161,6 +161,8 @@ reportsRoutes.post('/:orderId/generate', async (c) => {
           yearly_energy_kwh: 0,
           imagery: {
             satellite_url: dlResult.satelliteUrl,
+            satellite_overhead_url: dlResult.satelliteOverheadUrl,
+            satellite_context_url: dlResult.satelliteContextUrl,
             dsm_url: dlResult.dsmUrl,
             mask_url: dlResult.maskUrl,
             flux_url: null,
@@ -480,6 +482,8 @@ reportsRoutes.post('/:orderId/generate-enhanced', async (c) => {
       yearly_energy_kwh: 0,
       imagery: {
         satellite_url: dlAnalysis.satelliteUrl,
+        satellite_overhead_url: dlAnalysis.satelliteOverheadUrl,
+        satellite_context_url: dlAnalysis.satelliteContextUrl,
         dsm_url: dlAnalysis.dsmUrl,
         mask_url: dlAnalysis.maskUrl,
         flux_url: null,
@@ -1434,17 +1438,13 @@ async function callGoogleSolarAPI(
     num_panels_possible: maxPanels,
     yearly_energy_kwh: Math.round(yearlyEnergy),
     imagery: {
-      satellite_url: `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=20&size=600x400&maptype=satellite&key=${imageKey}`,
+      // Smart zoom: 20 for residential, 19 for large commercial (>500m²)
+      satellite_url: `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=${totalFootprintSqm > 500 ? 19 : 20}&size=640x640&maptype=satellite&key=${imageKey}`,
+      satellite_overhead_url: `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=${totalFootprintSqm > 500 ? 19 : 20}&size=640x640&maptype=satellite&key=${imageKey}`,
+      satellite_context_url: `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=${totalFootprintSqm > 500 ? 18 : 19}&size=640x640&maptype=satellite&key=${imageKey}`,
       dsm_url: null,
       mask_url: null,
       flux_url: null,
-      // Street View images from 4 cardinal directions, pitched up to show the roof
-      // heading: 0=North, 90=East, 180=South, 270=West (direction camera is FACING)
-      // We point the camera TOWARD the house from each side:
-      //   North view = camera south of house facing north (heading=0)
-      //   South view = camera north of house facing south (heading=180)
-      //   East view = camera west of house facing east (heading=90)
-      //   West view = camera east of house facing west (heading=270)
       north_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&location=${lat},${lng}&heading=0&pitch=25&fov=90&key=${imageKey}`,
       south_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&location=${lat},${lng}&heading=180&pitch=25&fov=90&key=${imageKey}`,
       east_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&location=${lat},${lng}&heading=90&pitch=25&fov=90&key=${imageKey}`,
@@ -1559,7 +1559,13 @@ function generateMockRoofReport(order: any, apiKey?: string): RoofReport {
     yearly_energy_kwh: Math.round(panelCount * 400),
     imagery: {
       satellite_url: lat && lng
-        ? `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=20&size=600x400&maptype=satellite${apiKey ? `&key=${apiKey}` : ''}`
+        ? `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=20&size=640x640&maptype=satellite${apiKey ? `&key=${apiKey}` : ''}`
+        : null,
+      satellite_overhead_url: lat && lng
+        ? `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=20&size=640x640&maptype=satellite${apiKey ? `&key=${apiKey}` : ''}`
+        : null,
+      satellite_context_url: lat && lng
+        ? `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=19&size=640x640&maptype=satellite${apiKey ? `&key=${apiKey}` : ''}`
         : null,
       dsm_url: null,
       mask_url: null,
@@ -1771,6 +1777,12 @@ function generateProfessionalReportHTML(report: RoofReport): string {
   const nailLbs = Math.ceil(grossSquares * 1.5)
   const cementTubes = Math.max(2, Math.ceil(grossSquares / 15))
   const satelliteUrl = report.imagery?.satellite_url || ''
+  // Primary overhead satellite image — 640x640 square, optimized zoom for roof measurement
+  const overheadUrl = report.imagery?.satellite_overhead_url || satelliteUrl
+  // Wider context view
+  const contextUrl = report.imagery?.satellite_context_url || (satelliteUrl ? satelliteUrl.replace(/zoom=\d+/, 'zoom=19') : '')
+  // Max zoom close-up (zoom+1 from overhead)
+  const closeupUrl = overheadUrl ? overheadUrl.replace(/zoom=(\d+)/, (m: string, z: string) => `zoom=${Math.min(parseInt(z) + 1, 21)}`) : ''
   const northUrl = report.imagery?.north_url || ''
   const southUrl = report.imagery?.south_url || ''
   const eastUrl = report.imagery?.east_url || ''
@@ -1930,31 +1942,34 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
 
   <!-- Aerial & Directional Roof Views -->
   <div class="p1-section-label">ROOF IMAGERY</div>
-  <div style="display:grid;grid-template-columns:1.6fr 1fr 1fr;grid-template-rows:auto auto;gap:8px;margin-bottom:14px">
-    <!-- Top satellite (large, spans 2 rows) -->
+  <div style="display:grid;grid-template-columns:1.6fr 1fr;grid-template-rows:auto auto;gap:8px;margin-bottom:14px">
+    <!-- PRIMARY: Overhead satellite image (large, spans 2 rows) — the key measurement image -->
     <div class="p1-aerial-card" style="grid-row:1/3">
-      ${satelliteUrl ? `<img src="${satelliteUrl}" alt="Top View" style="height:100%;min-height:160px" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-aerial-placeholder" style="display:none;height:100%">TOP</div>` : '<div class="p1-aerial-placeholder" style="height:100%">TOP</div>'}
-      <div class="p1-aerial-label">Satellite (Top-Down)</div>
+      ${overheadUrl ? `<img src="${overheadUrl}" alt="Overhead Satellite View" style="width:100%;height:100%;min-height:200px;object-fit:cover" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-aerial-placeholder" style="display:none;height:200px">OVERHEAD</div>` : '<div class="p1-aerial-placeholder" style="height:200px">OVERHEAD</div>'}
+      <div class="p1-aerial-label">Overhead Satellite (Roof View)</div>
     </div>
-    <!-- North -->
-    <div class="p1-aerial-card">
-      ${northUrl ? `<img class="p1-sv-img" src="${northUrl}" alt="North View" style="height:80px" data-dir="N" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-sv-nodata">No Street View<br>coverage (N)</div>` : '<div class="p1-sv-nodata" style="display:flex">N/A</div>'}
-      <div class="p1-aerial-label">North</div>
-    </div>
-    <!-- East -->
-    <div class="p1-aerial-card">
-      ${eastUrl ? `<img class="p1-sv-img" src="${eastUrl}" alt="East View" style="height:80px" data-dir="E" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-sv-nodata">No Street View<br>coverage (E)</div>` : '<div class="p1-sv-nodata" style="display:flex">N/A</div>'}
-      <div class="p1-aerial-label">East</div>
-    </div>
-    <!-- South -->
-    <div class="p1-aerial-card">
-      ${southUrl ? `<img class="p1-sv-img" src="${southUrl}" alt="South View" style="height:80px" data-dir="S" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-sv-nodata">No Street View<br>coverage (S)</div>` : '<div class="p1-sv-nodata" style="display:flex">N/A</div>'}
-      <div class="p1-aerial-label">South</div>
-    </div>
-    <!-- West -->
-    <div class="p1-aerial-card">
-      ${westUrl ? `<img class="p1-sv-img" src="${westUrl}" alt="West View" style="height:80px" data-dir="W" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-sv-nodata">No Street View<br>coverage (W)</div>` : '<div class="p1-sv-nodata" style="display:flex">N/A</div>'}
-      <div class="p1-aerial-label">West</div>
+    <!-- Right column: 2x2 directional Street View thumbnails -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:6px">
+      <!-- North -->
+      <div class="p1-aerial-card" style="padding:4px">
+        ${northUrl ? `<img class="p1-sv-img" src="${northUrl}" alt="North View" style="height:68px;width:100%;object-fit:cover" data-dir="N" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-sv-nodata" style="height:68px;font-size:9px">No Street View<br>(N)</div>` : '<div class="p1-sv-nodata" style="display:flex;height:68px;font-size:9px">N/A</div>'}
+        <div class="p1-aerial-label" style="font-size:8px;margin-top:3px">NORTH</div>
+      </div>
+      <!-- East -->
+      <div class="p1-aerial-card" style="padding:4px">
+        ${eastUrl ? `<img class="p1-sv-img" src="${eastUrl}" alt="East View" style="height:68px;width:100%;object-fit:cover" data-dir="E" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-sv-nodata" style="height:68px;font-size:9px">No Street View<br>(E)</div>` : '<div class="p1-sv-nodata" style="display:flex;height:68px;font-size:9px">N/A</div>'}
+        <div class="p1-aerial-label" style="font-size:8px;margin-top:3px">EAST</div>
+      </div>
+      <!-- South -->
+      <div class="p1-aerial-card" style="padding:4px">
+        ${southUrl ? `<img class="p1-sv-img" src="${southUrl}" alt="South View" style="height:68px;width:100%;object-fit:cover" data-dir="S" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-sv-nodata" style="height:68px;font-size:9px">No Street View<br>(S)</div>` : '<div class="p1-sv-nodata" style="display:flex;height:68px;font-size:9px">N/A</div>'}
+        <div class="p1-aerial-label" style="font-size:8px;margin-top:3px">SOUTH</div>
+      </div>
+      <!-- West -->
+      <div class="p1-aerial-card" style="padding:4px">
+        ${westUrl ? `<img class="p1-sv-img" src="${westUrl}" alt="West View" style="height:68px;width:100%;object-fit:cover" data-dir="W" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-sv-nodata" style="height:68px;font-size:9px">No Street View<br>(W)</div>` : '<div class="p1-sv-nodata" style="display:flex;height:68px;font-size:9px">N/A</div>'}
+        <div class="p1-aerial-label" style="font-size:8px;margin-top:3px">WEST</div>
+      </div>
     </div>
   </div>
 
@@ -1998,11 +2013,11 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
   <div class="p1-section-label">PROPERTY OVERVIEW</div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
     <div class="p1-aerial-card">
-      ${satelliteUrl ? `<img src="${satelliteUrl.replace('zoom=20','zoom=19')}" alt="Property Overview" style="height:120px" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-aerial-placeholder" style="display:none;height:120px">OVERVIEW</div>` : '<div class="p1-aerial-placeholder" style="height:120px">OVERVIEW</div>'}
+      ${contextUrl ? `<img src="${contextUrl}" alt="Property Overview" style="height:120px;width:100%;object-fit:cover" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-aerial-placeholder" style="display:none;height:120px">OVERVIEW</div>` : '<div class="p1-aerial-placeholder" style="height:120px">OVERVIEW</div>'}
       <div class="p1-aerial-label">Property Context (Wider View)</div>
     </div>
     <div class="p1-aerial-card">
-      ${satelliteUrl ? `<img src="${satelliteUrl.replace('600x400','400x400')}" alt="Close-up" style="height:120px" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-aerial-placeholder" style="display:none;height:120px">CLOSE-UP</div>` : '<div class="p1-aerial-placeholder" style="height:120px">CLOSE-UP</div>'}
+      ${closeupUrl ? `<img src="${closeupUrl}" alt="Close-up" style="height:120px;width:100%;object-fit:cover" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-aerial-placeholder" style="display:none;height:120px">CLOSE-UP</div>` : '<div class="p1-aerial-placeholder" style="height:120px">CLOSE-UP</div>'}
       <div class="p1-aerial-label">Roof Close-Up (Max Zoom)</div>
     </div>
   </div>

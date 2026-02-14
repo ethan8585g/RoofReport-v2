@@ -1,0 +1,282 @@
+[
+  {
+    "id": 1,
+    "is_user": true,
+    "is_assistant": false,
+    "need_keep_score": 10,
+    "is_process_state": false,
+    "compact_text": "Initial requirements: Add landing/marketing funnel (LandingPage, PricingPage, Features/Testimonials/FAQ); integrate with existing frontend (AddressSearch, RoofVisualization, MeasurementPanel, ReportPreview); backend: Flask API app.py, roof_analyzer.py (Google Solar API), report_generator.py (PDF), config.py. UI pricing: 3 tiers — Immediate $25, Urgent $15 (15-30 min), Regular $10 (45 min-1.5 hr). Required form fields: physical address with Google Map pin drop, homeowner name, requester name/company, delivery option. Milestone: WEEK1_COMPLETE.md created at /home/user/roofing-app/. Next: create LandingPage, PricingPage, FAQ, Testimonials; wire CTA to OrderForm; test end-to-end (form -> payment -> report generation)."
+  },
+  {
+    "id": 2,
+    "is_user": false,
+    "is_assistant": true,
+    "need_keep_score": 8,
+    "is_process_state": true,
+    "compact_text": "Built JS-driven landing page titled 'Reuse Canada - Professional Landing Page' with: Hero ($10 CAD starting), Trust Bar (Google Solar API, Satellite, Gemini AI, Canadian pricing), How It Works (4 steps), Features (6 cards: 3D Area, Edges, BOM, Segments, Solar, AI Vision), Pricing (Regular $10, Urgent $15, Immediate $25), Sample Report Preview (address 11004 97 Ave NW Edmonton, RM-20260209-2814, Area 3826 ft², 12 segments, 21.6° pitch, $8,427 CAD materials), Testimonials, FAQ, CTA. Built Hono-based backend with routes: /api/orders, /api/companies, /api/settings, /api/reports, /api/admin, /api/ai. Health endpoint at /api/health. Pages: /, /admin, /order/:id, /settings, /measure."
+  },
+  {
+    "id": 3,
+    "is_user": false,
+    "is_assistant": true,
+    "need_keep_score": 7,
+    "is_process_state": true,
+    "compact_text": "Wired routing: '/' serves landing page, order form moved to '/order/new'. Created landing page HTML template with sticky navbar, scroll animation CSS. Built, tested, verified. Order form v2.1: Two-Phase Address Selection + Satellite Roof Pinning, 5-step form. State tracks service_tier, price, property details (province='Alberta', country='Canada'), homeowner/requester fields. On load: POSTs /api/admin/init-db, fetches /api/companies/customers."
+  },
+  {
+    "id": 4,
+    "is_user": false,
+    "is_assistant": true,
+    "need_keep_score": 9,
+    "is_process_state": true,
+    "compact_text": "v3.0 committed: Marketing Landing Page + Conversion Funnel. '/' = marketing landing (10 sections), '/order/new' for 5-step form, '/order/new?tier=regular|urgent|immediate' auto-selects tier and jumps to Step 2, '/measure' AI Measure Tool, '/order/:id' confirmation, '/admin' dashboard. Landing: Hero, Trust Bar, How It Works, Features, Pricing ($10/$15/$25 with 'Most Popular' on Urgent), Sample Report, Testimonials, FAQ, CTA, Footer. UX: sticky transparent navbar, opaque-on-scroll with backdrop blur, mobile hamburger, scroll animations, smooth scrolling. Live: https://3000-ing8ae0z5fkhj91kq4pyi-dfc00ec5.sandbox.novita.ai"
+  },
+  {
+    "id": 5,
+    "is_user": true,
+    "is_assistant": false,
+    "need_keep_score": 3,
+    "is_process_state": false,
+    "compact_text": "User requests re-send of GCP activation link for Generative Language API."
+  },
+  {
+    "id": 6,
+    "is_user": false,
+    "is_assistant": true,
+    "need_keep_score": 7,
+    "is_process_state": false,
+    "compact_text": "GCP activation link: https://console.developers.google.com/apis/api/generativelanguage.googleapis.com/overview?project=191664638800. Steps: Click, Enable, wait 1-2 min, test at /api/health/gemini. Once OK: Gemini Vision roof geometry, AI assessment, SVG overlays, Measure Tool at /measure."
+  },
+  {
+    "id": 7,
+    "is_user": false,
+    "is_assistant": true,
+    "need_keep_score": 8,
+    "is_process_state": true,
+    "compact_text": "Gemini API verified: status ok, model gemini-2.0-flash, auth via service account roof-measure-ai@helpful-passage-486204-h9.iam.gserviceaccount.com. AI Measurement Engine: Vertex AI + Gemini for roof geometry extraction from satellite images, supports dual modes (REST API key + Vertex AI Platform access token). Functions: analyzeRoofGeometry (facets, lines, obstructions with pitch X/12 and azimuth), generateAIRoofingReport (summary, material suggestion, difficulty score 1-10, cost range CAD), quickMeasure (640x640 satellite at zoom=20)."
+  },
+  {
+    "id": 8,
+    "is_user": false,
+    "is_assistant": true,
+    "need_keep_score": 9,
+    "is_process_state": true,
+    "compact_text": "Full end-to-end pipeline verified at Terwillegar Edmonton (53.4620, -113.5780): Step 1 Satellite 640x640 PNG HTTP 200; Step 2 Google Solar API: 3,714 sqft, 6 segments, HIGH quality, 130 panels, 1406 sun hrs/yr; Step 3 Gemini Vision: 8 facets, 4 ridge lines, pitch 6/12, 9s; Step 4 Full Order: ID 15, Payment $25 CAD, Solar Report 5346 sqft true area, AI Analysis difficulty 7/10, cost CAD 28K-45K. Materials: CertainTeed Landmark / Owens Corning Duration for lower pitch, Vicwest Prestige metal for steep. Order URL: https://3000-ing8ae0z5fkhj91kq4pyi-dfc00ec5.sandbox.novita.ai/order/15"
+  },
+  {
+    "id": 9,
+    "is_user": true,
+    "is_assistant": false,
+    "need_keep_score": 4,
+    "is_process_state": false,
+    "compact_text": "User confirms: software can now order satellite imagery of any requested house."
+  },
+  {
+    "id": 10,
+    "is_user": false,
+    "is_assistant": true,
+    "need_keep_score": 8,
+    "is_process_state": false,
+    "compact_text": "Confirmed end-to-end flow: enter address/pin → Google Static Maps satellite (zoom 20, 640x640) → Google Solar API (segments, pitch, azimuth, area, edges, solar potential) → Gemini Vision AI (facets, ridge/hip/valley/eave lines, obstructions) → professional report (true 3D area, material BOM, cost estimate, complexity rating). Coverage: most urban/suburban Canada; Alberta, BC, Ontario, Quebec best. Rural fallback: Gemini Vision AI works from satellite image alone."
+  },
+  {
+    "id": 11,
+    "is_user": true,
+    "is_assistant": false,
+    "need_keep_score": 5,
+    "is_process_state": false,
+    "compact_text": "User requests satellite image of 51046 Range Road 224, Sherwood Park, Alberta."
+  },
+  {
+    "id": 12,
+    "is_user": false,
+    "is_assistant": true,
+    "need_keep_score": 7,
+    "is_process_state": true,
+    "compact_text": "Geocoded 51046 Range Road 224 → Strathcona County AB T8C 1H1, lat 53.3748748, lng -113.1980237. Multiple satellite images fetched at zoom 19-21. Iterative re-centering to find buildings (geocode landed on road). Final images locked on building cluster at ~53.3752, -113.1985. Property: large shop/barn (40x80ft+ white/grey metal roof), main house (darker roof, split-level/bungalow with attached garage), 3-4 outbuildings, circular driveway, working rural property. AI analysis: 3 facets all 3/12 pitch, 180° south. Google Solar API: NOT AVAILABLE (rural). Gemini Vision fallback succeeded."
+  },
+  {
+    "id": 13,
+    "is_user": true,
+    "is_assistant": false,
+    "need_keep_score": 9,
+    "is_process_state": false,
+    "compact_text": "Deep Research findings: Optimal Solar API config: requiredQuality=HIGH, pixelSizeMeters=0.1, radiusMeters=100. Delivers 0.1m/pixel, 98.77% accuracy, DSM at 0.1m/pixel. Cost: $0.075/roof (vs EagleView $50-200, Drone $300-500). For 1000 roofs/yr: $75 vs $50K-200K. RAS applications: target 4:12 pitch (18.4°) for binder oil, >6:12 (26.6°) for granule recovery. Validation: ±0.2 ft linear, ±5.61 sqft area, ±1° slope. Implementation roadmap: Phase 1 API Integration (months 1-2), Phase 2 Quality Validation (months 2-3), Phase 3 Process Optimization (months 3-6), Phase 4 Advanced Analytics (months 6-12)."
+  },
+  {
+    "id": 14,
+    "is_user": false,
+    "is_assistant": true,
+    "need_keep_score": 7,
+    "is_process_state": true,
+    "compact_text": "Planned integration of research findings: Update Solar API to HIGH quality + 0.1m/pixel; add RAS slope analysis (4:12 binder oil, >6:12 granule recovery); implement batch processing (600 queries/min); add material yield prediction; update README. Current codebase: src/routes/ (admin, ai-analysis, auth, companies, customer-auth, invoices, orders, reports, settings, stripe), src/services/ (gcp-auth, gemini, solar-datalayers), public/static/ JS files (app, landing, measure, confirmation, vertex-ai-proxy, admin, settings)."
+  },
+  {
+    "id": 15,
+    "is_user": false,
+    "is_assistant": true,
+    "need_keep_score": 9,
+    "is_process_state": true,
+    "compact_text": "Reports.ts contains full pipeline: GET /:orderId (fetch report), GET /:orderId/html (professional HTML), POST /:orderId/generate (full pipeline). Pipeline: 1) Call Google Solar API buildingInsights:findClosest with requiredQuality=HIGH; 2) Parse roofSegmentStats → RoofSegment[] with footprint, true area (trueAreaFromFootprint), pitch, azimuth; 3) Compute weighted pitch, dominant azimuth; 4) Solar: maxPanels, maxSunshine, yearlyEnergy; 5) Generate edges from segments; 6) Compute material estimate (BOM); 7) Generate professional HTML; 8) Save to DB (reports table + update orders status). Mock fallback for no API key or rural areas. Imagery: satellite URL via Google Static Maps. Quality scoring: HIGH=90, MEDIUM=75, BASE=60 confidence."
+  },
+  {
+    "id": 16,
+    "is_user": true,
+    "is_assistant": false,
+    "need_keep_score": 7,
+    "is_process_state": false,
+    "compact_text": "User provides 3 template images for roof report format: Template 1 dark/teal (ROOF MEASUREMENT REPORT with aerial views, data dashboard: TOTAL AREA 2847 sqft, PITCH 6/12, 12 FACETS, 12% waste, measurements Ridge 87ft Hip 124ft Valley 68ft Eaves 156ft Rake 94ft, 32 SQUARES, WEATHERED WOOD preview); Template 2 blue/white (MATERIAL ORDER CALCULATION with primary materials, accessories, ventilation, fasteners); Template 3 blue/white (DETAILED MEASUREMENTS with facet breakdown, linear measurements, penetrations, SVG roof diagram)."
+  },
+  {
+    "id": 17,
+    "is_user": false,
+    "is_assistant": true,
+    "need_keep_score": 8,
+    "is_process_state": true,
+    "compact_text": "Created report template files in /home/user/output/: report-templates.ts (29KB, 1104 lines — complete TypeScript implementation), INTEGRATION_GUIDE.md (8.3KB — step-by-step deploy/customize), README.md (7.6KB — quick reference), deploy-templates.sh (3.4KB — automated deploy script), sample-report.html (25KB — 3-page preview), templates-preview.html (8.6KB — visual showcase), generate-sample.sh (25KB — regeneration script). Page 1: Dark #1a1d24 + teal #00e5cc, dashboard metrics, linear measurements. Page 2: Navy #003366 headers + light blue #f5f9fc, material BOM. Page 3: Professional blue/white, facet table, SVG diagram. Data mapping: RM-{year}-{order_id}, report.property.address, total_true_area_sqft, roof_pitch_ratio, segments.length, edge_summary, materials. Print-ready 8.5x11in."
+  },
+  {
+    "id": 18,
+    "is_user": true,
+    "is_assistant": false,
+    "need_keep_score": 10,
+    "is_process_state": false,
+    "compact_text": "User requests: Deploy templates, test with 3-page report, add Reuse Canada logo/colors, add RAS material analysis, set up PDF email delivery. ORDER EXAMPLE ROOF REPORT FOR 51046 RANGE ROAD 224 SHERWOOD PARK ALBERTA FOR HOUSE AND GARAGE, EMAIL TO ethangourley17@gmail.com."
+  },
+  {
+    "id": 19,
+    "is_user": false,
+    "is_assistant": true,
+    "need_keep_score": 6,
+    "is_process_state": true,
+    "compact_text": "Templates were created in /home/user/output/ in a different sandbox session. Project found running in sandbox ing8ae0z5fkhj91kq4pyi-dfc00ec5. Templates needed manual integration into /home/user/webapp/."
+  },
+  {
+    "id": 20,
+    "is_user": false,
+    "is_assistant": true,
+    "need_keep_score": 9,
+    "is_process_state": true,
+    "compact_text": "Current session (v5.0): Reviewed full codebase. Installed geotiff.js + geotiff-geokeys-to-proj4 + proj4 for GeoTIFF parsing in Workers. Created src/services/solar-datalayers.ts (480+ lines) implementing execute_roof_order() pipeline: geocodeAddress (Google Maps) → getDataLayerUrls (Solar DataLayers, radius 50m, pixelSizeMeters=0.1, view=FULL_LAYERS, requiredQuality=HIGH) → downloadGeoTIFF (geotiff.js) → analyzeDSM (mask+height filtering) → computeSlope (gradient→pitch) → calculateRoofArea. Formulas: flat_area = buildingInsights.wholeRoofStats.areaMeters2 × 10.7639; pitch_deg = weighted avg from buildingInsights segments; true_area = flat_area / cos(radians(pitch_deg)); waste_factor = 1.15 if area>2000 sqft else 1.05; pitch_multiplier = sqrt(1+(pitch_deg/45)²); material_squares = (true_area×waste_factor×pitch_multiplier)/100."
+  },
+  {
+    "id": 21,
+    "is_user": false,
+    "is_assistant": true,
+    "need_keep_score": 8,
+    "is_process_state": true,
+    "compact_text": "Added endpoints: POST /api/reports/:id/generate-enhanced (force DataLayers, optional email), POST /api/reports/datalayers/analyze (body {address} or {lat,lng}), GET /api/reports/:id/pdf (PDF HTML). Updated main pipeline /api/reports/:id/generate to prioritize DataLayers+buildingInsights → buildingInsights fallback → mock data. Report version bumped to v3.0 with provider 'google_solar_datalayers'."
+  },
+  {
+    "id": 22,
+    "is_user": false,
+    "is_assistant": true,
+    "need_keep_score": 9,
+    "is_process_state": true,
+    "compact_text": "Test results: 10123 99 St NW Edmonton — geocoded 53.5421578, -113.4878997; DataLayers HIGH quality; DSM 1001x1001 px, 330,631 valid pixels; buildingInsights 1548.3m² footprint, 40 segments; flat area 16,666 sqft, true area 17,163 sqft, pitch 13.8° (3:12), material squares 206.5, duration 2.8s. 7 Charlton Rd Sherwood Park — geocoded 53.5455216, -113.2867861; buildingInsights 233.9m² footprint, 5 segments; DSM 201x202 px; flat area 2,517 sqft, true area 2,795 sqft, pitch 25.7° (5.8:12), material squares 37, duration 3.1s. PDF endpoint: HTTP 200, 28KB. HTML report endpoint: HTTP 200, 26.7KB."
+  },
+  {
+    "id": 23,
+    "is_user": false,
+    "is_assistant": true,
+    "need_keep_score": 9,
+    "is_process_state": true,
+    "compact_text": "v5.0 committed: Solar DataLayers + GeoTIFF DSM Engine. Hybrid Measurement Pipeline operational. Key fixes: mask/DSM size mismatch handling with nearest-neighbor resampling; hybrid pitch calculation using buildingInsights segment data (weighted) with DSM slope as reference; memory optimization for large GeoTIFFs. Report version 2.0 → 3.0 with provider google_solar_datalayers. Live URL: https://3000-ing8ae0z5fkhj91kq4pyi-dfc00ec5.sandbox.novita.ai"
+  },
+  {
+    "id": 24,
+    "is_user": true,
+    "is_assistant": false,
+    "need_keep_score": 10,
+    "is_process_state": false,
+    "compact_text": "User asks: What needs improvement for roof reporting ordering, producing the report, and emailing to user who requested and paid?"
+  },
+  {
+    "id": 25,
+    "is_user": false,
+    "is_assistant": false,
+    "need_keep_score": 10,
+    "is_process_state": true,
+    "compact_text": "PROJECT STATUS SNAPSHOT — Completed: reviewed codebase; installed geotiff.js deps; created solar-datalayers.ts for GeoTIFF/DataLayers/DSM processing; implemented DSM area calcs (flat, pitch-adjusted, waste factor, pitch multiplier); added enhanced report generation endpoint; built HTML-to-PDF endpoint. In progress: email delivery of PDF/HTML (partially built); building/testing enhanced DataLayers pipeline end-to-end. Outstanding: handle mismatched mask/DSM sizes (resample mask in analyzeDSM); mitigate wrangler 503 errors under memory pressure; finalize email delivery + fallback; ensure main generate endpoint uses DataLayers with fallback; testing/verification; update README."
+  },
+  {
+    "id": 26,
+    "is_user": false,
+    "is_assistant": false,
+    "need_keep_score": 10,
+    "is_process_state": true,
+    "compact_text": "SYSTEM ARCHITECTURE SUMMARY — Stack: Cloudflare Workers + Hono + D1 SQLite. Source files: src/index.tsx (46.5KB), src/types.ts (31.6KB), src/routes/reports.ts (109KB — largest file, full pipeline + HTML report generation), src/routes/stripe.ts (34KB), src/routes/auth.ts (24KB), src/routes/ai-analysis.ts (22KB), src/routes/admin.ts (20KB), src/routes/customer-auth.ts (16.6KB), src/routes/invoices.ts (12.4KB), src/routes/orders.ts (9.3KB), src/services/solar-datalayers.ts (26KB), src/services/gemini.ts (14.4KB), src/services/gcp-auth.ts (6.5KB). Frontend: public/static/ (app.js, landing.js, measure.js, confirmation.js, vertex-ai-proxy.js, admin.js, settings.js). Config: ecosystem.config.cjs, wrangler.jsonc, .dev.vars (API keys). DB: migrations/, seed.sql. Git: 20+ commits from v3.0 to v5.0."
+  },
+  {
+    "id": 27,
+    "is_user": false,
+    "is_assistant": false,
+    "need_keep_score": 10,
+    "is_process_state": true,
+    "compact_text": "ENV VARS CONFIGURED: GOOGLE_SOLAR_API_KEY (Solar API $0.075/query), GOOGLE_MAPS_API_KEY (AIzaSyAYUFfeoBCv4RrA5DMziXoHWUcuJqeHAOo), GOOGLE_VERTEX_API_KEY, GOOGLE_CLOUD_PROJECT=helpful-passage-486204-h9, GOOGLE_CLOUD_LOCATION=global. Stripe test keys present but not fully wired. Gmail OAuth2: GMAIL_CLIENT_ID/SECRET, GMAIL_SENDER_EMAIL, refresh token stored in DB. GCP service account: roof-measure-ai@helpful-passage-486204-h9.iam.gserviceaccount.com."
+  },
+  {
+    "id": 28,
+    "is_user": false,
+    "is_assistant": false,
+    "need_keep_score": 10,
+    "is_process_state": true,
+    "compact_text": "EMAIL DELIVERY SYSTEM: Priority order: 1) Gmail OAuth2 (personal Gmail with refresh token → access token exchange at https://oauth2.googleapis.com/token → send via https://gmail.googleapis.com/gmail/v1/users/me/messages/send with base64 RFC-2822 message); 2) Resend API (https://api.resend.com/emails, 100/day free tier); 3) Fallback to HTML report URL. POST /:orderId/email endpoint retrieves order+report, determines recipient, builds HTML wrapper with report details. buildEmailWrapper generates styled email with address, report number, page breakdown. Logs successful sends in api_requests_log."
+  },
+  {
+    "id": 29,
+    "is_user": false,
+    "is_assistant": false,
+    "need_keep_score": 10,
+    "is_process_state": true,
+    "compact_text": "DATA MODELS — Bindings: D1 database + secrets (GOOGLE_SOLAR_API_KEY, GOOGLE_MAPS_API_KEY, GOOGLE_VERTEX_API_KEY, STRIPE_SECRET_KEY, STRIPE_PUBLISHABLE_KEY, GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN, GMAIL_SENDER_EMAIL, RESEND_API_KEY, GOOGLE_OAUTH_CLIENT_ID, STRIPE_WEBHOOK_SECRET). Types: RoofReport (property, areas, pitch, azimuth, segments[], edges[], edge_summary, materials, solar, imagery URLs, quality, metadata), RoofSegment (name, footprint sqft, true area sqft/sqm, pitch deg/ratio, azimuth deg/direction), EdgeMeasurement (type RIDGE/HIP/VALLEY/EAVE/RAKE, label, plan/true length ft), MaterialEstimate (roof area net/gross, waste%, squares, bundles, line_items[], cost CAD, complexity), AIMeasurementAnalysis (facets[], lines[], obstructions[])."
+  },
+  {
+    "id": 30,
+    "is_user": false,
+    "is_assistant": false,
+    "need_keep_score": 9,
+    "is_process_state": true,
+    "compact_text": "REPORT HTML TEMPLATE (3 pages): Page 1 — dark theme, logo, report number/date, address, satellite+cardinal street-view images, dashboard (total area, pitch, facets, waste, squares), linear measurements (ridge/hip/valley/eaves/rake), quality/confidence badges. Page 2 — light blue, materials (shingles+waste factor, underlayment, starter strip), accessories (ridge cap, hip & ridge, drip edge, valley metal, step flashing), ventilation (ridge vent, pipe boots), fasteners (nails, cement), waste-factor + complexity badges, total cost. Page 3 — light grey-blue, facet breakdown table, linear measurements, penetrations (pipe boots, chimneys, exhaust vents), SVG roof diagram from segment data, summary (total area, squares, cost). Script hides Street View placeholders when no imagery."
+  },
+  {
+    "id": 31,
+    "is_user": false,
+    "is_assistant": false,
+    "need_keep_score": 8,
+    "is_process_state": true,
+    "compact_text": "SOLAR DATALAYERS SERVICE (solar-datalayers.ts): getDataLayers() queries Solar DataLayers API with lat/lng, radius 50m, view=FULL_LAYERS, requiredQuality=HIGH, pixelSizeMeters=0.1. downloadGeoTIFF() fetches GeoTIFF URL, reads as ArrayBuffer, parses with geotiff.js. analyzeDSM() processes DSM pixels with mask filtering, computes height stats. computeSlope() calculates gradient→pitch from DSM. calculateRoofArea() uses buildingInsights footprint + weighted pitch from segments + DSM slope reference. Hybrid approach: buildingInsights footprint for area, segment pitch for pitch, DSM for verification."
+  },
+  {
+    "id": 32,
+    "is_user": false,
+    "is_assistant": false,
+    "need_keep_score": 9,
+    "is_process_state": true,
+    "compact_text": "VERSION HISTORY: v3.0 Marketing landing + conversion funnel; v3.1 Email delivery + RAS yield; v4.0 Major UI/UX overhaul; v4.1 Remove RAS from pipeline, fix Gmail, add Resend, improve rural messaging; v4.2 Gmail OAuth2 integration; v5.0 Customer portal + Google Sign-In + invoices + sales tracking; v6.0 Self-Service Stripe Payments & Credit System; then: Admin access locked to ethangourley17@gmail.com, pricing updated to Standard $8 / Express $12, 3 free reports on signup, Street View directional imagery, free trial system, production DB migration, standalone Python engine v3.0, auto-geocode+report on order creation. Latest v5.0 (git): Solar DataLayers + GeoTIFF DSM Engine."
+  },
+  {
+    "id": 33,
+    "is_user": false,
+    "is_assistant": false,
+    "need_keep_score": 10,
+    "is_process_state": true,
+    "compact_text": "GAPS & IMPROVEMENTS NEEDED (per user's question): 1) EMAIL DELIVERY: partially built, Gmail OAuth2 flow exists but not fully tested end-to-end for sending generated reports automatically after payment; need to ensure POST /:orderId/email works reliably with Gmail refresh token. 2) PAYMENT→REPORT→EMAIL AUTOMATION: ordering flow doesn't automatically trigger report generation and email delivery after Stripe payment confirmation; webhook handler needs to chain generate→email. 3) STRIPE WEBHOOKS: stripe.ts exists (34KB) but webhook→report→email chain not fully wired. 4) DSM/MASK MISMATCH: mask and DSM GeoTIFFs may have different resolutions, needs resample fix in analyzeDSM. 5) MEMORY PRESSURE: 503 errors from wrangler under heavy GeoTIFF processing, needs retry/resource tuning. 6) REPORT VERSION CONSISTENCY: mix of v2.0 and v3.0 references in reports.ts. 7) CUSTOMER NOTIFICATION: no automated email notification when report is ready. 8) PDF GENERATION: current /pdf endpoint returns HTML styled for print, not actual PDF binary. 9) RURAL PROPERTY HANDLING: no Solar API data, Gemini Vision fallback doesn't feed into full BOM/edge analysis. 10) README needs update to reflect v5.0 DataLayers engine."
+  },
+  {
+    "id": 34,
+    "is_user": false,
+    "is_assistant": false,
+    "need_keep_score": 10,
+    "is_process_state": true,
+    "compact_text": "KEY URLS & CREDENTIALS: Sandbox: https://3000-ing8ae0z5fkhj91kq4pyi-dfc00ec5.sandbox.novita.ai. Admin email: ethangourley17@gmail.com. GCP Project: helpful-passage-486204-h9 (project number 191664638800). Service account: roof-measure-ai@helpful-passage-486204-h9.iam.gserviceaccount.com. Gemini model: gemini-2.0-flash. Solar API endpoint: https://solar.googleapis.com/v1/buildingInsights:findClosest. DataLayers endpoint: https://solar.googleapis.com/v1/dataLayers:get. Gmail OAuth token endpoint: https://oauth2.googleapis.com/token. Gmail send endpoint: https://gmail.googleapis.com/gmail/v1/users/me/messages/send. Resend API: https://api.resend.com/emails. GCP Generative Language API activation: https://console.developers.google.com/apis/api/generativelanguage.googleapis.com/overview?project=191664638800."
+  },
+  {
+    "id": 35,
+    "is_user": false,
+    "is_assistant": false,
+    "need_keep_score": 8,
+    "is_process_state": true,
+    "compact_text": "FORMULAS & CONSTANTS: trueAreaFromFootprint(footprintSqft, pitchDeg) = footprintSqft / cos(radians(pitchDeg)); pitchToRatio(deg) = X/12 format; degreesToCardinal(deg) = N/NE/E/SE/S/SW/W/NW; hipValleyFactor, rakeFactor for edge 3D lengths; classifyComplexity based on segment/hip/valley counts + pitch variation; computeMaterialEstimate produces BOM with Alberta CAD pricing (architectural bundle $42, 3-tab $32, underlayment $85, etc.); waste percentages based on complexity; Solar API cost ~$0.075 CAD/query; accuracy 98.77%; confidence scores 90/75/60 for HIGH/MEDIUM/BASE imagery."
+  }
+]

@@ -124,6 +124,10 @@ export interface DataLayersAnalysis {
   maskUrl: string
   rgbUrl: string
   satelliteUrl: string
+  /** High-res overhead satellite URL (640x640 square, optimal zoom for roof measurement) */
+  satelliteOverheadUrl: string
+  /** Wider context satellite URL (zoom-1, 640x640) */
+  satelliteContextUrl: string
   // Performance
   durationMs: number
   provider: string
@@ -700,7 +704,17 @@ export async function executeRoofOrder(
     ? `${imgDate.year}-${String(imgDate.month).padStart(2, '0')}-${String(imgDate.day).padStart(2, '0')}`
     : 'unknown'
 
-  const satelliteUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=20&size=600x400&maptype=satellite&key=${geocodeKey}`
+  // Smart zoom: zoom 20 for residential (<500m²), zoom 19 for large commercial (>500m²)
+  const footprintM2 = areaCalc.flatAreaSqft / 10.7639
+  const roofZoom = footprintM2 > 500 ? 19 : 20
+  const contextZoom = roofZoom - 1
+
+  // Primary overhead satellite image (640x640 square for roof measurement overlay)
+  const satelliteOverheadUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=${roofZoom}&size=640x640&maptype=satellite&key=${geocodeKey}`
+  // Wider context view
+  const satelliteContextUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=${contextZoom}&size=640x640&maptype=satellite&key=${geocodeKey}`
+  // Legacy compatible URL (rectangular, used as fallback)
+  const satelliteUrl = satelliteOverheadUrl
 
   console.log(`[Pipeline] Complete in ${durationMs}ms: flat=${areaCalc.flatAreaSqft} sqft → true=${areaCalc.trueAreaSqft} sqft, pitch=${areaCalc.avgPitchDeg}° (${pitchRatio}), material=${areaCalc.materialSquares} sq`)
 
@@ -723,6 +737,8 @@ export async function executeRoofOrder(
     maskUrl: dataLayers.maskUrl || '',
     rgbUrl: dataLayers.rgbUrl || '',
     satelliteUrl,
+    satelliteOverheadUrl,
+    satelliteContextUrl,
     durationMs,
     provider: 'google_solar_datalayers'
   }

@@ -388,6 +388,10 @@ export interface RoofReport {
   // ---- IMAGERY ----
   imagery: {
     satellite_url: string | null
+    /** 640x640 square overhead satellite image for roof measurement (smart zoom based on building size) */
+    satellite_overhead_url: string | null
+    /** 640x640 wider context satellite image (zoom-1) */
+    satellite_context_url: string | null
     dsm_url: string | null
     mask_url: string | null
     flux_url: string | null
