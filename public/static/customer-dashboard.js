@@ -482,11 +482,11 @@ function getStatusBadge(status) {
 
 function getTierLabel(tier) {
   var map = {
-    express: '<i class="fas fa-bolt text-red-400 mr-1"></i>Express',
-    standard: '<i class="fas fa-clock text-green-400 mr-1"></i>Standard',
-    immediate: '<i class="fas fa-rocket text-red-400 mr-1"></i>Immediate',
-    urgent: '<i class="fas fa-bolt text-amber-400 mr-1"></i>Urgent',
-    regular: '<i class="fas fa-clock text-green-400 mr-1"></i>Regular'
+    express: '<i class="fas fa-bolt text-brand-400 mr-1"></i>Roof Report',
+    standard: '<i class="fas fa-bolt text-brand-400 mr-1"></i>Roof Report',
+    immediate: '<i class="fas fa-bolt text-brand-400 mr-1"></i>Roof Report',
+    urgent: '<i class="fas fa-bolt text-brand-400 mr-1"></i>Roof Report',
+    regular: '<i class="fas fa-bolt text-brand-400 mr-1"></i>Roof Report'
   };
   return '<span>' + (map[tier] || tier) + '</span>';
 }

@@ -19,8 +19,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 function renderPricing(root, packages) {
   // Per-report pricing
   const perReport = [
-    { tier: 'standard', label: 'Standard', desc: 'Delivered in ~1 hour', price: 8, icon: 'fa-clock', color: 'green' },
-    { tier: 'express', label: 'Express', desc: 'Delivered in ~10 minutes', price: 12, icon: 'fa-bolt', color: 'red', popular: true },
+    { tier: 'standard', label: 'Roof Report', desc: 'Delivered instantly', price: 8, icon: 'fa-bolt', color: 'brand', popular: true },
   ];
 
   root.innerHTML = `

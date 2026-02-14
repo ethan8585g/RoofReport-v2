@@ -283,7 +283,7 @@ stripeRoutes.post('/checkout/report', async (c) => {
     const tier = service_tier || 'standard'
     const prices: Record<string, number> = { express: 1200, standard: 800 }
     const priceCents = prices[tier] || 800
-    const tierLabels: Record<string, string> = { express: 'Express (10 min)', standard: 'Standard (1 hour)' }
+    const tierLabels: Record<string, string> = { express: 'Express', standard: 'Standard' }
 
     // Ensure Stripe customer
     let stripeCustomerId = customer.stripe_customer_id
@@ -399,10 +399,8 @@ stripeRoutes.post('/use-credit', async (c) => {
     const rand = Math.floor(Math.random() * 9999).toString().padStart(4, '0')
     const orderNumber = `RM-${d}-${rand}`
 
-    // Delivery estimate
-    const now = Date.now()
-    const deliveryMs: Record<string, number> = { express: 10 * 60000, standard: 60 * 60000 }
-    const estimatedDelivery = new Date(now + (deliveryMs[tier] || 60 * 60000)).toISOString()
+    // Instant delivery — report generates immediately
+    const estimatedDelivery = new Date(Date.now() + 30000).toISOString()
 
     // Create order
     const result = await c.env.DB.prepare(`
@@ -576,8 +574,8 @@ stripeRoutes.post('/webhook', async (c) => {
           const d = new Date().toISOString().slice(0, 10).replace(/-/g, '')
           const rand = Math.floor(Math.random() * 9999).toString().padStart(4, '0')
           const orderNumber = `RM-${d}-${rand}`
-          const deliveryMs: Record<string, number> = { express: 10 * 60000, standard: 60 * 60000 }
-          const estimatedDelivery = new Date(Date.now() + (deliveryMs[tier] || 60 * 60000)).toISOString()
+          // Instant delivery — report generates immediately
+          const estimatedDelivery = new Date(Date.now() + 30000).toISOString()
 
           // Ensure master company exists
           await c.env.DB.prepare(

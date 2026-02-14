@@ -105,9 +105,9 @@ function statusBadge(s) {
 }
 
 function tierBadge(t) {
-  const m = { express:'bg-red-100 text-red-700', standard:'bg-green-100 text-green-700', immediate:'bg-red-100 text-red-700', urgent:'bg-amber-100 text-amber-700', regular:'bg-green-100 text-green-700' };
-  const i = { express:'fa-bolt', standard:'fa-clock', immediate:'fa-rocket', urgent:'fa-bolt', regular:'fa-clock' };
-  return `<span class="px-2 py-0.5 ${m[t]||'bg-gray-100'} rounded-full text-xs font-medium capitalize"><i class="fas ${i[t]||''} mr-0.5"></i>${t}</span>`;
+  const m = { express:'bg-brand-100 text-brand-700', standard:'bg-brand-100 text-brand-700', immediate:'bg-brand-100 text-brand-700', urgent:'bg-brand-100 text-brand-700', regular:'bg-brand-100 text-brand-700' };
+  const i = { express:'fa-bolt', standard:'fa-bolt', immediate:'fa-bolt', urgent:'fa-bolt', regular:'fa-bolt' };
+  return `<span class="px-2 py-0.5 ${m[t]||'bg-gray-100'} rounded-full text-xs font-medium"><i class="fas ${i[t]||''} mr-0.5"></i>Instant</span>`;
 }
 
 function payBadge(s) {
@@ -778,8 +778,7 @@ function renderNewOrder() {
         <div><label class="block text-xs font-semibold text-gray-500 mb-1">Your Name *</label><input type="text" id="noReq" value="Ethan Gourley" class="w-full px-3 py-2.5 border rounded-xl text-sm"></div>
         <div><label class="block text-xs font-semibold text-gray-500 mb-1">Service Tier</label>
           <select id="noTier" class="w-full px-3 py-2.5 border rounded-xl text-sm">
-            <option value="express">Express ($12) - 10 minutes</option>
-            <option value="standard">Standard ($8) - 1 hour</option>
+            <option value="standard" selected>Roof Report ($8) - Instant</option>
           </select>
         </div>
       </div>

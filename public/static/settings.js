@@ -340,25 +340,15 @@ function renderPricingSection() {
 
       <div class="space-y-4">
         <div class="grid md:grid-cols-2 gap-4 max-w-2xl">
-          <div class="border border-red-200 rounded-lg p-4 bg-red-50">
+          <div class="border border-brand-200 rounded-lg p-4 bg-brand-50">
             <div class="flex items-center space-x-2 mb-3">
-              <i class="fas fa-bolt text-red-500"></i>
-              <h4 class="font-semibold text-gray-800">Express</h4>
-            </div>
-            <label class="block text-xs text-gray-500 mb-1">Price (CAD)</label>
-            <input type="number" id="price_express" value="${getVal('price_express') || '12'}" step="0.01"
-              class="w-full px-3 py-2 border border-gray-300 rounded-lg text-lg font-bold text-center" />
-            <p class="text-xs text-gray-500 mt-2">Delivery: 10 minutes</p>
-          </div>
-          <div class="border border-green-200 rounded-lg p-4 bg-green-50">
-            <div class="flex items-center space-x-2 mb-3">
-              <i class="fas fa-clock text-green-500"></i>
-              <h4 class="font-semibold text-gray-800">Standard</h4>
+              <i class="fas fa-bolt text-brand-500"></i>
+              <h4 class="font-semibold text-gray-800">Roof Measurement Report</h4>
             </div>
             <label class="block text-xs text-gray-500 mb-1">Price (CAD)</label>
             <input type="number" id="price_standard" value="${getVal('price_standard') || '8'}" step="0.01"
               class="w-full px-3 py-2 border border-gray-300 rounded-lg text-lg font-bold text-center" />
-            <p class="text-xs text-gray-500 mt-2">Delivery: 1 hour</p>
+            <p class="text-xs text-gray-500 mt-2">Delivery: Instant (generated in ~15 seconds)</p>
           </div>
         </div>
       </div>
@@ -374,7 +364,6 @@ function renderPricingSection() {
 
 async function savePricing() {
   const settings = [
-    { key: 'price_express', value: document.getElementById('price_express')?.value || '12', encrypted: false },
     { key: 'price_standard', value: document.getElementById('price_standard')?.value || '8', encrypted: false }
   ];
 

@@ -76,7 +76,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const urlParams = new URLSearchParams(window.location.search);
   const preselectedTier = urlParams.get('tier');
   if (preselectedTier) {
-    const tierPrices = { express: 12, standard: 8 };
+    const tierPrices = { express: 8, standard: 8 };
     if (tierPrices[preselectedTier]) {
       state.formData.service_tier = preselectedTier;
       state.formData.price = tierPrices[preselectedTier];
@@ -194,33 +194,22 @@ function renderStepIndicators() {
 function renderStep1() {
   const tiers = [
     {
-      id: 'express',
-      name: 'Express',
-      price: 12,
-      time: '10 minutes',
-      icon: 'fas fa-bolt',
-      color: 'red',
-      bgGrad: 'from-red-500 to-red-600',
-      desc: 'Fast-tracked report. Delivered in just 10 minutes.',
-      features: ['10 min delivery', 'Priority queue', 'Email notification']
-    },
-    {
       id: 'standard',
-      name: 'Standard',
+      name: 'Roof Measurement Report',
       price: 8,
-      time: '1 hour',
-      icon: 'fas fa-clock',
+      time: 'Instant',
+      icon: 'fas fa-bolt',
       color: 'brand',
       bgGrad: 'from-brand-500 to-brand-600',
-      desc: 'Standard processing. Great value for planning purposes.',
-      features: ['1 hour delivery', 'Standard queue', 'Email notification']
+      desc: 'Professional 3-page report with satellite imagery, AI measurement overlay, and full material BOM. Delivered instantly.',
+      features: ['Instant delivery', 'AI roof measurement overlay', 'Full material BOM', 'Email notification']
     }
   ];
 
   return `
     <div class="text-center mb-8">
-      <h2 class="text-2xl font-bold text-gray-800">Choose Your Report Speed</h2>
-      <p class="text-gray-500 mt-2">Select how quickly you need the roof measurement report</p>
+      <h2 class="text-2xl font-bold text-gray-800">Roof Measurement Report</h2>
+      <p class="text-gray-500 mt-2">Professional 3-page report with AI measurement overlay — delivered instantly</p>
     </div>
     <div class="grid md:grid-cols-2 gap-6 max-w-3xl mx-auto">
       ${tiers.map(t => `
@@ -956,8 +945,8 @@ function selectCustomerCompany(id) {
 // ============================================================
 function renderStep5() {
   const tierInfo = {
-    express: { name: 'Express', time: '10 minutes', color: 'red', icon: 'fa-bolt' },
-    standard: { name: 'Standard', time: '1 hour', color: 'brand', icon: 'fa-clock' },
+    express: { name: 'Roof Measurement', time: 'Instant delivery', color: 'brand', icon: 'fa-bolt' },
+    standard: { name: 'Roof Measurement', time: 'Instant delivery', color: 'brand', icon: 'fa-bolt' },
   };
   const tier = tierInfo[state.formData.service_tier] || tierInfo.standard;
 

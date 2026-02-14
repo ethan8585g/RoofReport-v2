@@ -317,25 +317,14 @@ function renderPricing() {
   const plans = [
     {
       id: 'standard',
-      name: 'Standard',
+      name: 'Roof Measurement Report',
       price: 8,
-      time: '1 hour',
-      icon: 'fas fa-clock',
+      time: 'Instant',
+      icon: 'fas fa-bolt',
       color: 'brand',
       gradient: 'from-brand-500 to-brand-600',
-      popular: false,
-      features: ['Full measurement report', 'Edge breakdown', 'Material BOM', 'Solar potential analysis', 'PDF download', 'Email delivery']
-    },
-    {
-      id: 'express',
-      name: 'Express',
-      price: 12,
-      time: '10 minutes',
-      icon: 'fas fa-bolt',
-      color: 'accent',
-      gradient: 'from-accent-500 to-accent-600',
       popular: true,
-      features: ['Everything in Standard', 'Priority processing', 'Faster satellite fetch', 'Rush queue placement', 'Email notification', 'Instant PDF + Email']
+      features: ['Full measurement report', 'AI roof measurement overlay', 'Edge breakdown', 'Material BOM', 'Solar potential analysis', 'PDF download', 'Email delivery']
     }
   ];
 

@@ -11,17 +11,10 @@ function generateOrderNumber(): string {
   return `RM-${d}-${rand}`
 }
 
-// Get delivery estimate based on tier
+// Delivery is instant — report generates immediately after payment
 function getDeliveryEstimate(tier: string): string {
-  const now = new Date()
-  switch (tier) {
-    case 'express':
-      return new Date(now.getTime() + 10 * 60000).toISOString() // 10 min
-    case 'standard':
-      return new Date(now.getTime() + 60 * 60000).toISOString() // 1 hour
-    default:
-      return new Date(now.getTime() + 60 * 60000).toISOString()
-  }
+  // All tiers deliver instantly (report generates in ~12-15 seconds)
+  return new Date(Date.now() + 30000).toISOString() // 30s buffer for generation
 }
 
 // Get price by tier

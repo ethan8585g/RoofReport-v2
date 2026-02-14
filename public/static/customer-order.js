@@ -68,8 +68,7 @@ function renderOrderPage() {
   const paidCredits = b.paid_credits_remaining || 0;
   const isTrialAvailable = freeTrialRemaining > 0;
   const tiers = [
-    { id: 'standard', label: 'Standard', desc: '~1 hour', price: 8, icon: 'fa-clock', color: 'green' },
-    { id: 'express', label: 'Express', desc: '~10 min', price: 12, icon: 'fa-bolt', color: 'red' },
+    { id: 'standard', label: 'Roof Report', desc: 'Instant', price: 8, icon: 'fa-bolt', color: 'brand' },
   ];
 
   const selectedTierInfo = tiers.find(t => t.id === orderState.selectedTier) || tiers[0];

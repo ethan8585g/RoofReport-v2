@@ -42,11 +42,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const order = orderData.order;
     const tierInfo = {
-      express: { name: 'Express', time: '10 minutes', color: 'red', icon: 'fa-bolt', bg: 'from-red-500 to-red-600' },
-      standard: { name: 'Standard', time: '1 hour', color: 'green', icon: 'fa-clock', bg: 'from-green-500 to-green-600' },
-      immediate: { name: 'Immediate', time: 'Under 5 minutes', color: 'red', icon: 'fa-rocket', bg: 'from-red-500 to-red-600' },
-      urgent: { name: 'Urgent', time: '15-30 minutes', color: 'amber', icon: 'fa-bolt', bg: 'from-amber-500 to-amber-600' },
-      regular: { name: 'Regular', time: '45 min - 1.5 hours', color: 'green', icon: 'fa-clock', bg: 'from-green-500 to-green-600' },
+      express: { name: 'Roof Report', time: 'Instant', color: 'brand', icon: 'fa-bolt', bg: 'from-brand-500 to-brand-600' },
+      standard: { name: 'Roof Report', time: 'Instant', color: 'brand', icon: 'fa-bolt', bg: 'from-brand-500 to-brand-600' },
+      immediate: { name: 'Roof Report', time: 'Instant', color: 'brand', icon: 'fa-bolt', bg: 'from-brand-500 to-brand-600' },
+      urgent: { name: 'Roof Report', time: 'Instant', color: 'brand', icon: 'fa-bolt', bg: 'from-brand-500 to-brand-600' },
+      regular: { name: 'Roof Report', time: 'Instant', color: 'brand', icon: 'fa-bolt', bg: 'from-brand-500 to-brand-600' },
     };
     const tier = tierInfo[order.service_tier] || tierInfo.standard;
 
