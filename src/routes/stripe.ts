@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import type { Bindings } from '../types'
+import { generateReportForOrder } from './reports'
 
 export const stripeRoutes = new Hono<{ Bindings: Bindings }>()
 
@@ -24,22 +25,14 @@ async function geocodeAddress(address: string, apiKey: string): Promise<{ lat: n
 }
 
 // ============================================================
-// AUTO-GENERATE REPORT — Trigger report generation after order creation
-// Calls the internal /api/reports/:orderId/generate endpoint
+// AUTO-GENERATE REPORT — Direct function call (no HTTP self-fetch)
+// Uses the exported generateReportForOrder from reports.ts
 // ============================================================
-async function triggerReportGeneration(orderId: number, requestUrl: string, headers?: Record<string, string>): Promise<boolean> {
+async function triggerReportGeneration(orderId: number, env: Bindings): Promise<boolean> {
   try {
-    // Use the same host as the incoming request to call the internal endpoint
-    const url = new URL(requestUrl)
-    const generateUrl = `${url.protocol}//${url.host}/api/reports/${orderId}/generate`
-    console.log(`[Auto-Generate] Triggering report for order ${orderId}: ${generateUrl}`)
-    
-    const resp = await fetch(generateUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
-    })
-    const result: any = await resp.json()
-    console.log(`[Auto-Generate] Order ${orderId}: ${resp.status} — ${result.success ? 'SUCCESS' : result.error || 'FAILED'}`)
+    console.log(`[Auto-Generate] Triggering direct report generation for order ${orderId}`)
+    const result = await generateReportForOrder(orderId, env)
+    console.log(`[Auto-Generate] Order ${orderId}: ${result.success ? 'SUCCESS' : result.error || 'FAILED'} — provider: ${result.provider || 'n/a'}`)
     return result.success === true
   } catch (err: any) {
     console.error(`[Auto-Generate] Order ${orderId} failed:`, err.message)
@@ -469,20 +462,20 @@ stripeRoutes.post('/use-credit', async (c) => {
     // AUTO-GENERATE REPORT — Trigger immediately after order creation
     // This runs the full Solar API + report generation pipeline
     // ============================================================
-    const requestUrl = c.req.url
-    // Fire-and-forget: use waitUntil if available, otherwise try inline
+    // GENERATE REPORT INLINE — direct function call, no HTTP self-fetch
+    // This ensures the report generates reliably on Cloudflare Workers
+    // ============================================================
     try {
-      // In Cloudflare Workers, c.executionCtx.waitUntil keeps the worker alive
-      // In local dev (wrangler pages dev), we just await it inline
-      const generatePromise = triggerReportGeneration(newOrderId, requestUrl)
+      const generatePromise = triggerReportGeneration(newOrderId, c.env)
       if ((c as any).executionCtx?.waitUntil) {
+        // Cloudflare Workers: use waitUntil to keep worker alive for background generation
         ;(c as any).executionCtx.waitUntil(generatePromise)
       } else {
-        // Local dev: await inline (adds latency but ensures report generates)
+        // Local dev: await inline
         await generatePromise
       }
     } catch (e: any) {
-      console.warn(`[Use-Credit] Auto-generate fire-and-forget error (non-fatal): ${e.message}`)
+      console.warn(`[Use-Credit] Auto-generate error (non-fatal): ${e.message}`)
     }
 
     // Log activity
@@ -630,10 +623,9 @@ stripeRoutes.post('/webhook', async (c) => {
             "INSERT OR IGNORE INTO reports (order_id, status) VALUES (?, 'pending')"
           ).bind(webhookOrderId).run()
 
-          // Auto-trigger report generation
+          // Auto-trigger report generation — direct function call
           try {
-            const requestUrl = c.req.url
-            const generatePromise = triggerReportGeneration(webhookOrderId, requestUrl)
+            const generatePromise = triggerReportGeneration(webhookOrderId, c.env)
             if ((c as any).executionCtx?.waitUntil) {
               ;(c as any).executionCtx.waitUntil(generatePromise)
             } else {

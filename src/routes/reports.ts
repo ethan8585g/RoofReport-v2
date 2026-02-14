@@ -89,17 +89,21 @@ reportsRoutes.get('/:orderId/html', async (c) => {
 // 5. Generate professional HTML report
 // 6. Save everything to DB
 // ============================================================
-reportsRoutes.post('/:orderId/generate', async (c) => {
+// ============================================================
+// EXPORTED: Direct report generation function (no HTTP self-fetch)
+// Called by stripe.ts use-credit and webhook flows directly
+// ============================================================
+export async function generateReportForOrder(
+  orderId: number | string,
+  env: Bindings
+): Promise<{ success: boolean; report?: RoofReport; error?: string; version?: string; provider?: string }> {
   try {
-    const orderId = c.req.param('orderId')
-
-    const order = await c.env.DB.prepare(`
+    const order = await env.DB.prepare(`
       SELECT * FROM orders WHERE id = ?
     `).bind(orderId).first<any>()
-    if (!order) return c.json({ error: 'Order not found' }, 404)
+    if (!order) return { success: false, error: 'Order not found' }
 
-    // Check existing
-    const existing = await c.env.DB.prepare(
+    const existing = await env.DB.prepare(
       'SELECT id, status FROM reports WHERE order_id = ?'
     ).bind(orderId).first<any>()
 
@@ -107,198 +111,90 @@ reportsRoutes.post('/:orderId/generate', async (c) => {
     let apiDuration = 0
     const startTime = Date.now()
 
-    // Try Solar APIs in priority order:
-    //   1. DataLayers API (GeoTIFF DSM processing — highest accuracy)
-    //   2. buildingInsights API (segment-based — good accuracy)
-    //   3. Mock data (fallback when no API coverage)
-    const solarApiKey = c.env.GOOGLE_SOLAR_API_KEY
-    const mapsApiKey = c.env.GOOGLE_MAPS_API_KEY || solarApiKey  // MAPS key preferred for Street View
+    const solarApiKey = env.GOOGLE_SOLAR_API_KEY
+    const mapsApiKey = env.GOOGLE_MAPS_API_KEY || solarApiKey
     let usedDataLayers = false
 
     if (solarApiKey && order.latitude && order.longitude) {
-      // ---- Priority 1: Try DataLayers API for GeoTIFF-based measurement ----
       try {
-        console.log(`[Generate] Trying DataLayers pipeline for order ${orderId}`)
+        console.log(`[GenerateDirect] Trying DataLayers pipeline for order ${orderId}`)
         const address = [order.property_address, order.property_city, order.property_province].filter(Boolean).join(', ')
         const dlResult = await executeRoofOrder(address, solarApiKey, mapsApiKey, {
-          lat: order.latitude,
-          lng: order.longitude,
-          radiusMeters: 50
+          lat: order.latitude, lng: order.longitude, radiusMeters: 50
         })
-
-        // Convert DataLayers analysis to RoofReport format
         const dlSegments = generateSegmentsFromDLAnalysis(dlResult)
         const dlEdges = generateEdgesFromSegments(dlSegments, dlResult.area.flatAreaSqft)
         const dlEdgeSummary = computeEdgeSummary(dlEdges)
         const dlMaterials = computeMaterialEstimate(dlResult.area.trueAreaSqft, dlEdges, dlSegments)
 
-        reportData = {
-          order_id: parseInt(orderId),
-          generated_at: new Date().toISOString(),
-          report_version: '3.0',
-          property: {
-            address: order.property_address,
-            city: order.property_city,
-            province: order.property_province,
-            postal_code: order.property_postal_code,
-            homeowner_name: order.homeowner_name,
-            requester_name: order.requester_name,
-            requester_company: order.requester_company,
-            latitude: dlResult.latitude, longitude: dlResult.longitude
-          },
-          total_footprint_sqft: dlResult.area.flatAreaSqft,
-          total_footprint_sqm: dlResult.area.flatAreaM2,
-          total_true_area_sqft: dlResult.area.trueAreaSqft,
-          total_true_area_sqm: dlResult.area.trueAreaM2,
-          area_multiplier: dlResult.area.areaMultiplier,
-          roof_pitch_degrees: dlResult.area.avgPitchDeg,
-          roof_pitch_ratio: dlResult.area.pitchRatio,
-          roof_azimuth_degrees: dlSegments[0]?.azimuth_degrees || 180,
-          segments: dlSegments,
-          edges: dlEdges,
-          edge_summary: dlEdgeSummary,
-          materials: dlMaterials,
-          max_sunshine_hours: 0,
-          num_panels_possible: 0,
-          yearly_energy_kwh: 0,
-          imagery: {
-            satellite_url: dlResult.satelliteUrl,
-            satellite_overhead_url: dlResult.satelliteOverheadUrl,
-            satellite_context_url: dlResult.satelliteContextUrl,
-            dsm_url: dlResult.dsmUrl,
-            mask_url: dlResult.maskUrl,
-            flux_url: null,
-            north_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&location=${dlResult.latitude},${dlResult.longitude}&heading=0&pitch=25&fov=90&key=${mapsApiKey}`,
-            south_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&location=${dlResult.latitude},${dlResult.longitude}&heading=180&pitch=25&fov=90&key=${mapsApiKey}`,
-            east_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&location=${dlResult.latitude},${dlResult.longitude}&heading=90&pitch=25&fov=90&key=${mapsApiKey}`,
-            west_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&location=${dlResult.latitude},${dlResult.longitude}&heading=270&pitch=25&fov=90&key=${mapsApiKey}`,
-          },
-          quality: {
-            imagery_quality: dlResult.imageryQuality as any,
-            imagery_date: dlResult.imageryDate,
-            field_verification_recommended: dlResult.imageryQuality !== 'HIGH',
-            confidence_score: dlResult.imageryQuality === 'HIGH' ? 95 : 80,
-            notes: [
-              'Enhanced measurement via Solar DataLayers API with GeoTIFF DSM processing.',
-              `DSM: ${dlResult.dsm.validPixels.toLocaleString()} pixels at ${dlResult.dsm.pixelSizeMeters.toFixed(2)}m/px resolution.`,
-              `Waste factor: ${dlResult.area.wasteFactor}x, Pitch multiplier: ${dlResult.area.pitchMultiplier}x.`
-            ]
-          },
-          metadata: {
-            provider: 'google_solar_datalayers',
-            api_duration_ms: dlResult.durationMs,
-            coordinates: { lat: dlResult.latitude, lng: dlResult.longitude },
-            solar_api_imagery_date: dlResult.imageryDate,
-            building_insights_quality: dlResult.imageryQuality,
-            accuracy_benchmark: '98.77% (DSM GeoTIFF analysis with sub-meter resolution)',
-            cost_per_query: '$0.15 CAD (dataLayers + GeoTIFF downloads)',
-            datalayers_analysis: {
-              dsm_pixels: dlResult.dsm.validPixels,
-              dsm_resolution_m: dlResult.dsm.pixelSizeMeters,
-              waste_factor: dlResult.area.wasteFactor,
-              pitch_multiplier: dlResult.area.pitchMultiplier,
-              material_squares: dlResult.area.materialSquares
-            }
-          }
-        }
+        reportData = buildDataLayersReport(orderId, order, dlResult, dlSegments, dlEdges, dlEdgeSummary, dlMaterials, mapsApiKey)
         apiDuration = Date.now() - startTime
         reportData.metadata.api_duration_ms = apiDuration
         usedDataLayers = true
 
-        await c.env.DB.prepare(`
+        await env.DB.prepare(`
           INSERT INTO api_requests_log (order_id, request_type, endpoint, response_status, duration_ms)
           VALUES (?, 'solar_datalayers', 'dataLayers:get + GeoTIFF', 200, ?)
         `).bind(orderId, apiDuration).run()
-
-        console.log(`[Generate] DataLayers success: ${dlResult.area.trueAreaSqft} sqft, ${dlResult.area.avgPitchDeg}° pitch in ${apiDuration}ms`)
-
+        console.log(`[GenerateDirect] DataLayers success: ${dlResult.area.trueAreaSqft} sqft in ${apiDuration}ms`)
       } catch (dlErr: any) {
-        console.warn(`[Generate] DataLayers failed (${dlErr.message}), falling back to buildingInsights`)
-
-        // ---- Priority 2: Fall back to buildingInsights API ----
+        console.warn(`[GenerateDirect] DataLayers failed (${dlErr.message}), falling back`)
         try {
-          reportData = await callGoogleSolarAPI(
-            order.latitude,
-            order.longitude,
-            solarApiKey,
-            parseInt(orderId),
-            order,
-            mapsApiKey
-          )
+          reportData = await callGoogleSolarAPI(order.latitude, order.longitude, solarApiKey, typeof orderId === 'string' ? parseInt(orderId) : orderId, order, mapsApiKey)
           apiDuration = Date.now() - startTime
           reportData.metadata.api_duration_ms = apiDuration
-
-          await c.env.DB.prepare(`
+          await env.DB.prepare(`
             INSERT INTO api_requests_log (order_id, request_type, endpoint, response_status, duration_ms)
             VALUES (?, 'google_solar_api', 'buildingInsights:findClosest', 200, ?)
           `).bind(orderId, apiDuration).run()
-
         } catch (apiErr: any) {
           apiDuration = Date.now() - startTime
           const isNotFound = apiErr.message.includes('404') || apiErr.message.includes('NOT_FOUND')
-
-          await c.env.DB.prepare(`
+          await env.DB.prepare(`
             INSERT INTO api_requests_log (order_id, request_type, endpoint, response_status, response_payload, duration_ms)
             VALUES (?, 'google_solar_api', 'buildingInsights:findClosest', ?, ?, ?)
           `).bind(orderId, isNotFound ? 404 : 500, apiErr.message.substring(0, 500), apiDuration).run()
-
-          // ---- Priority 3: Mock data fallback ----
           reportData = generateMockRoofReport(order, mapsApiKey)
           reportData.metadata.provider = isNotFound
             ? 'estimated (location not in Google Solar coverage — rural/acreage property)'
             : `estimated (Solar API error: ${apiErr.message.substring(0, 100)})`
           reportData.quality.notes = isNotFound
-            ? [
-                'Google Solar API has no building model for this location (rural/acreage property).',
-                'Measurements are estimated based on typical Alberta residential profiles.',
-                'For precise measurements: field verification or aerial drone survey recommended.',
-                'Google Solar coverage is best in urban/suburban areas with recent aerial imagery.'
-              ]
-            : [
-                `Solar API returned an error: ${apiErr.message.substring(0, 100)}`,
-                'Measurements are estimated. Field verification recommended.'
-              ]
+            ? ['Google Solar API has no building model for this location.', 'Measurements are estimated. Field verification recommended.']
+            : [`Solar API error: ${apiErr.message.substring(0, 100)}`, 'Measurements are estimated. Field verification recommended.']
         }
       }
     } else {
       reportData = generateMockRoofReport(order, mapsApiKey)
     }
 
-    // ---- Run Gemini Vision AI to get roof facet polygons for overlay ----
-    // This provides the visual proof of measurement accuracy on the satellite image
+    // Gemini Vision AI overlay
     try {
       const overheadImageUrl = reportData.imagery?.satellite_overhead_url || reportData.imagery?.satellite_url
       if (overheadImageUrl) {
-        console.log(`[Generate] Running Gemini Vision AI for roof polygon overlay...`)
+        console.log(`[GenerateDirect] Running Gemini Vision AI for overlay...`)
         const geminiEnv = {
-          apiKey: c.env.GOOGLE_VERTEX_API_KEY,
+          apiKey: env.GOOGLE_VERTEX_API_KEY,
           accessToken: undefined as string | undefined,
-          project: c.env.GOOGLE_CLOUD_PROJECT,
-          location: c.env.GOOGLE_CLOUD_LOCATION || 'us-central1',
-          serviceAccountKey: c.env.GCP_SERVICE_ACCOUNT_KEY,
+          project: env.GOOGLE_CLOUD_PROJECT,
+          location: env.GOOGLE_CLOUD_LOCATION || 'us-central1',
+          serviceAccountKey: env.GCP_SERVICE_ACCOUNT_KEY,
         }
         const aiGeometry = await analyzeRoofGeometry(overheadImageUrl, geminiEnv)
         if (aiGeometry && aiGeometry.facets && aiGeometry.facets.length > 0) {
           reportData.ai_geometry = aiGeometry
-          console.log(`[Generate] AI Geometry: ${aiGeometry.facets.length} facets, ${aiGeometry.lines.length} lines, ${aiGeometry.obstructions.length} obstructions`)
-        } else {
-          console.warn('[Generate] Gemini Vision returned no facets — overlay will use schematic diagram')
+          console.log(`[GenerateDirect] AI Geometry: ${aiGeometry.facets.length} facets, ${aiGeometry.lines.length} lines`)
         }
       }
     } catch (geminiErr: any) {
-      console.warn(`[Generate] Gemini Vision overlay failed (non-critical): ${geminiErr.message}`)
-      // Non-critical — report still generates without overlay
+      console.warn(`[GenerateDirect] Gemini overlay failed (non-critical): ${geminiErr.message}`)
     }
 
-    // Generate professional HTML report
     const professionalHtml = generateProfessionalReportHTML(reportData)
-
-    // Save to database
     const edgeSummary = reportData.edge_summary
     const materials = reportData.materials
 
     if (existing) {
-      await c.env.DB.prepare(`
+      await env.DB.prepare(`
         UPDATE reports SET
           roof_area_sqft = ?, roof_area_sqm = ?,
           roof_footprint_sqft = ?, roof_footprint_sqm = ?,
@@ -342,7 +238,7 @@ reportsRoutes.post('/:orderId/generate', async (c) => {
         orderId
       ).run()
     } else {
-      await c.env.DB.prepare(`
+      await env.DB.prepare(`
         INSERT INTO reports (
           order_id, roof_area_sqft, roof_area_sqm,
           roof_footprint_sqft, roof_footprint_sqm, area_multiplier,
@@ -381,19 +277,110 @@ reportsRoutes.post('/:orderId/generate', async (c) => {
       ).run()
     }
 
-    // Update order status
-    await c.env.DB.prepare(`
+    await env.DB.prepare(`
       UPDATE orders SET status = 'completed', delivered_at = datetime('now'), updated_at = datetime('now')
       WHERE id = ?
     `).bind(orderId).run()
 
     const version = usedDataLayers ? '3.0' : '2.0'
+    return {
+      success: true,
+      report: reportData,
+      version,
+      provider: reportData.metadata?.provider || 'unknown'
+    }
+  } catch (err: any) {
+    console.error(`[GenerateDirect] Order ${orderId} failed:`, err.message)
+    return { success: false, error: err.message }
+  }
+}
+
+// Helper to build DataLayers report object (used by both direct and HTTP flows)
+function buildDataLayersReport(orderId: any, order: any, dlResult: any, dlSegments: any, dlEdges: any, dlEdgeSummary: any, dlMaterials: any, mapsApiKey: string): RoofReport {
+  return {
+    order_id: typeof orderId === 'string' ? parseInt(orderId) : orderId,
+    generated_at: new Date().toISOString(),
+    report_version: '3.0',
+    property: {
+      address: order.property_address,
+      city: order.property_city,
+      province: order.property_province,
+      postal_code: order.property_postal_code,
+      homeowner_name: order.homeowner_name,
+      requester_name: order.requester_name,
+      requester_company: order.requester_company,
+      latitude: dlResult.latitude, longitude: dlResult.longitude
+    },
+    total_footprint_sqft: dlResult.area.flatAreaSqft,
+    total_footprint_sqm: dlResult.area.flatAreaM2,
+    total_true_area_sqft: dlResult.area.trueAreaSqft,
+    total_true_area_sqm: dlResult.area.trueAreaM2,
+    area_multiplier: dlResult.area.areaMultiplier,
+    roof_pitch_degrees: dlResult.area.avgPitchDeg,
+    roof_pitch_ratio: dlResult.area.pitchRatio,
+    roof_azimuth_degrees: dlSegments[0]?.azimuth_degrees || 180,
+    segments: dlSegments,
+    edges: dlEdges,
+    edge_summary: dlEdgeSummary,
+    materials: dlMaterials,
+    max_sunshine_hours: 0,
+    num_panels_possible: 0,
+    yearly_energy_kwh: 0,
+    imagery: {
+      satellite_url: dlResult.satelliteUrl,
+      satellite_overhead_url: dlResult.satelliteOverheadUrl,
+      satellite_context_url: dlResult.satelliteContextUrl,
+      dsm_url: dlResult.dsmUrl,
+      mask_url: dlResult.maskUrl,
+      flux_url: null,
+      north_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&location=${dlResult.latitude},${dlResult.longitude}&heading=0&pitch=25&fov=90&key=${mapsApiKey}`,
+      south_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&location=${dlResult.latitude},${dlResult.longitude}&heading=180&pitch=25&fov=90&key=${mapsApiKey}`,
+      east_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&location=${dlResult.latitude},${dlResult.longitude}&heading=90&pitch=25&fov=90&key=${mapsApiKey}`,
+      west_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&location=${dlResult.latitude},${dlResult.longitude}&heading=270&pitch=25&fov=90&key=${mapsApiKey}`,
+    },
+    quality: {
+      imagery_quality: dlResult.imageryQuality as any,
+      imagery_date: dlResult.imageryDate,
+      field_verification_recommended: dlResult.imageryQuality !== 'HIGH',
+      confidence_score: dlResult.imageryQuality === 'HIGH' ? 95 : 80,
+      notes: [
+        'Enhanced measurement via Solar DataLayers API with GeoTIFF DSM processing.',
+        `DSM: ${dlResult.dsm.validPixels.toLocaleString()} pixels at ${dlResult.dsm.pixelSizeMeters.toFixed(2)}m/px resolution.`,
+        `Waste factor: ${dlResult.area.wasteFactor}x, Pitch multiplier: ${dlResult.area.pitchMultiplier}x.`
+      ]
+    },
+    metadata: {
+      provider: 'google_solar_datalayers',
+      api_duration_ms: 0,
+      coordinates: { lat: dlResult.latitude, lng: dlResult.longitude },
+      solar_api_imagery_date: dlResult.imageryDate,
+      building_insights_quality: dlResult.imageryQuality,
+      accuracy_benchmark: '98.77% (DSM GeoTIFF analysis with sub-meter resolution)',
+      cost_per_query: '$0.15 CAD (dataLayers + GeoTIFF downloads)',
+      datalayers_analysis: {
+        dsm_pixels: dlResult.dsm.validPixels,
+        dsm_resolution_m: dlResult.dsm.pixelSizeMeters,
+        waste_factor: dlResult.area.wasteFactor,
+        pitch_multiplier: dlResult.area.pitchMultiplier,
+        material_squares: dlResult.area.materialSquares
+      }
+    }
+  } as RoofReport
+}
+
+reportsRoutes.post('/:orderId/generate', async (c) => {
+  try {
+    const orderId = c.req.param('orderId')
+    const result = await generateReportForOrder(orderId, c.env)
+    if (!result.success) {
+      return c.json({ error: result.error || 'Failed to generate report' }, result.error === 'Order not found' ? 404 : 500)
+    }
     return c.json({
       success: true,
-      message: `Report generated successfully (v${version}) via ${reportData.metadata?.provider || 'unknown'}`,
-      report: reportData,
-      provider: reportData.metadata?.provider || 'unknown',
-      version
+      message: `Report generated successfully (v${result.version}) via ${result.provider}`,
+      report: result.report,
+      provider: result.provider,
+      version: result.version
     })
   } catch (err: any) {
     return c.json({ error: 'Failed to generate report', details: err.message }, 500)
