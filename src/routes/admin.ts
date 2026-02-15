@@ -418,6 +418,119 @@ adminRoutes.post('/init-db', async (c) => {
       try { await c.env.DB.prepare(idx).run() } catch(e) {}
     }
 
+    // ============================================================
+    // Migration 0011: CRM Module — Business Customers, Invoices, Proposals, Jobs
+    // These are the USER'S business customers (homeowners/leads), NOT platform customers
+    // ============================================================
+    await c.env.DB.prepare(`
+      CREATE TABLE IF NOT EXISTS crm_customers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_id INTEGER NOT NULL,
+        name TEXT NOT NULL, email TEXT, phone TEXT, company TEXT,
+        address TEXT, city TEXT, province TEXT, postal_code TEXT,
+        status TEXT DEFAULT 'active', source TEXT,
+        notes TEXT, tags TEXT,
+        created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (owner_id) REFERENCES customers(id)
+      )
+    `).run()
+
+    await c.env.DB.prepare(`
+      CREATE TABLE IF NOT EXISTS crm_invoices (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_id INTEGER NOT NULL,
+        crm_customer_id INTEGER NOT NULL,
+        invoice_number TEXT UNIQUE NOT NULL,
+        subtotal REAL DEFAULT 0, tax_rate REAL DEFAULT 5.0,
+        tax_amount REAL DEFAULT 0, total REAL DEFAULT 0,
+        currency TEXT DEFAULT 'CAD',
+        status TEXT DEFAULT 'draft',
+        issue_date TEXT DEFAULT (date('now')), due_date TEXT, paid_date TEXT, sent_date TEXT,
+        payment_method TEXT, notes TEXT,
+        terms TEXT DEFAULT 'Payment due within 30 days.',
+        created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (owner_id) REFERENCES customers(id),
+        FOREIGN KEY (crm_customer_id) REFERENCES crm_customers(id)
+      )
+    `).run()
+
+    await c.env.DB.prepare(`
+      CREATE TABLE IF NOT EXISTS crm_invoice_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        invoice_id INTEGER NOT NULL,
+        description TEXT NOT NULL, quantity REAL DEFAULT 1, unit_price REAL DEFAULT 0,
+        amount REAL DEFAULT 0, sort_order INTEGER DEFAULT 0,
+        FOREIGN KEY (invoice_id) REFERENCES crm_invoices(id) ON DELETE CASCADE
+      )
+    `).run()
+
+    await c.env.DB.prepare(`
+      CREATE TABLE IF NOT EXISTS crm_proposals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_id INTEGER NOT NULL,
+        crm_customer_id INTEGER NOT NULL,
+        proposal_number TEXT UNIQUE NOT NULL,
+        title TEXT NOT NULL, property_address TEXT,
+        scope_of_work TEXT, materials_detail TEXT,
+        labor_cost REAL DEFAULT 0, material_cost REAL DEFAULT 0, other_cost REAL DEFAULT 0,
+        total_amount REAL DEFAULT 0,
+        status TEXT DEFAULT 'draft',
+        valid_until TEXT, notes TEXT,
+        created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (owner_id) REFERENCES customers(id),
+        FOREIGN KEY (crm_customer_id) REFERENCES crm_customers(id)
+      )
+    `).run()
+
+    await c.env.DB.prepare(`
+      CREATE TABLE IF NOT EXISTS crm_jobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_id INTEGER NOT NULL,
+        crm_customer_id INTEGER,
+        proposal_id INTEGER,
+        job_number TEXT UNIQUE NOT NULL,
+        title TEXT NOT NULL, property_address TEXT,
+        job_type TEXT DEFAULT 'install',
+        scheduled_date TEXT NOT NULL, scheduled_time TEXT,
+        estimated_duration TEXT, crew_size INTEGER,
+        status TEXT DEFAULT 'scheduled',
+        completed_date TEXT, notes TEXT,
+        created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (owner_id) REFERENCES customers(id),
+        FOREIGN KEY (crm_customer_id) REFERENCES crm_customers(id),
+        FOREIGN KEY (proposal_id) REFERENCES crm_proposals(id)
+      )
+    `).run()
+
+    await c.env.DB.prepare(`
+      CREATE TABLE IF NOT EXISTS crm_job_checklist (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        job_id INTEGER NOT NULL,
+        item_type TEXT NOT NULL,
+        label TEXT NOT NULL,
+        is_completed INTEGER DEFAULT 0,
+        completed_at TEXT, notes TEXT,
+        sort_order INTEGER DEFAULT 0,
+        FOREIGN KEY (job_id) REFERENCES crm_jobs(id) ON DELETE CASCADE
+      )
+    `).run()
+
+    const crmIndexes = [
+      'CREATE INDEX IF NOT EXISTS idx_crm_customers_owner ON crm_customers(owner_id)',
+      'CREATE INDEX IF NOT EXISTS idx_crm_invoices_owner ON crm_invoices(owner_id)',
+      'CREATE INDEX IF NOT EXISTS idx_crm_invoices_customer ON crm_invoices(crm_customer_id)',
+      'CREATE INDEX IF NOT EXISTS idx_crm_invoices_status ON crm_invoices(status)',
+      'CREATE INDEX IF NOT EXISTS idx_crm_proposals_owner ON crm_proposals(owner_id)',
+      'CREATE INDEX IF NOT EXISTS idx_crm_proposals_status ON crm_proposals(status)',
+      'CREATE INDEX IF NOT EXISTS idx_crm_jobs_owner ON crm_jobs(owner_id)',
+      'CREATE INDEX IF NOT EXISTS idx_crm_jobs_date ON crm_jobs(scheduled_date)',
+      'CREATE INDEX IF NOT EXISTS idx_crm_jobs_status ON crm_jobs(status)',
+      'CREATE INDEX IF NOT EXISTS idx_crm_job_checklist_job ON crm_job_checklist(job_id)'
+    ]
+    for (const idx of crmIndexes) {
+      try { await c.env.DB.prepare(idx).run() } catch(e) {}
+    }
+
     return c.json({ success: true, message: 'Database initialized successfully' })
   } catch (err: any) {
     return c.json({ error: 'Failed to initialize database', details: err.message }, 500)

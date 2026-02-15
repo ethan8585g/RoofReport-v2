@@ -11,6 +11,7 @@ import { authRoutes } from './routes/auth'
 import { customerAuthRoutes } from './routes/customer-auth'
 import { invoiceRoutes } from './routes/invoices'
 import { stripeRoutes } from './routes/stripe'
+import { crmRoutes } from './routes/crm'
 import type { Bindings } from './types'
 
 const app = new Hono<{ Bindings: Bindings }>()
@@ -29,6 +30,7 @@ app.route('/api/auth', authRoutes)
 app.route('/api/customer', customerAuthRoutes)
 app.route('/api/invoices', invoiceRoutes)
 app.route('/api/stripe', stripeRoutes)
+app.route('/api/crm', crmRoutes)
 
 // Health check
 app.get('/api/health', (c) => {
@@ -208,6 +210,15 @@ app.get('/customer/order', (c) => {
   const mapsKey = c.env.GOOGLE_MAPS_API_KEY || ''
   return c.html(getCustomerOrderPageHTML(mapsKey))
 })
+
+// Customer CRM sub-pages
+app.get('/customer/reports', (c) => c.html(getCrmSubPageHTML('reports', 'Roof Report History', 'fa-file-alt')))
+app.get('/customer/customers', (c) => c.html(getCrmSubPageHTML('customers', 'My Customers', 'fa-users')))
+app.get('/customer/invoices', (c) => c.html(getCrmSubPageHTML('invoices', 'Invoices', 'fa-file-invoice-dollar')))
+app.get('/customer/proposals', (c) => c.html(getCrmSubPageHTML('proposals', 'Proposals & Estimates', 'fa-file-signature')))
+app.get('/customer/jobs', (c) => c.html(getCrmSubPageHTML('jobs', 'Job Management', 'fa-hard-hat')))
+app.get('/customer/pipeline', (c) => c.html(getCrmSubPageHTML('pipeline', 'Sales Pipeline', 'fa-funnel-dollar')))
+app.get('/customer/d2d', (c) => c.html(getCrmSubPageHTML('d2d', 'D2D Manager', 'fa-door-open')))
 
 export default app
 
@@ -1066,6 +1077,64 @@ function getCustomerOrderPageHTML(mapsApiKey: string) {
     })();
   </script>
   <script src="/static/customer-order.js"></script>
+</body>
+</html>`
+}
+
+// ============================================================
+// CRM SUB-PAGES — Customers, Invoices, Proposals, Jobs, Pipeline, D2D
+// ============================================================
+function getCrmSubPageHTML(module: string, title: string, icon: string) {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  ${getHeadTags()}
+  <title>${title} - Reuse Canada</title>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <header class="bg-brand-800 text-white shadow-lg">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <a href="/customer/dashboard" class="flex items-center space-x-3 hover:opacity-90">
+          <div class="w-10 h-10 bg-accent-500 rounded-lg flex items-center justify-center">
+            <i class="fas ${icon} text-white text-lg"></i>
+          </div>
+          <div>
+            <h1 class="text-lg font-bold">${title}</h1>
+            <p class="text-brand-200 text-xs">Reuse Canada</p>
+          </div>
+        </a>
+      </div>
+      <nav class="flex items-center space-x-3">
+        <span id="custGreeting" class="text-brand-200 text-sm hidden"><i class="fas fa-user-circle mr-1"></i><span id="custName"></span></span>
+        <a href="/customer/dashboard" class="text-brand-200 hover:text-white text-sm"><i class="fas fa-th-large mr-1"></i>Dashboard</a>
+        <button onclick="custLogout()" class="text-brand-200 hover:text-white text-sm"><i class="fas fa-sign-out-alt mr-1"></i>Logout</button>
+      </nav>
+    </div>
+  </header>
+  <main class="max-w-7xl mx-auto px-4 py-6">
+    <div id="crm-root" data-module="${module}"></div>
+  </main>
+  <script>
+    (function() {
+      var c = localStorage.getItem('rc_customer');
+      if (!c) { window.location.href = '/customer/login'; return; }
+      try {
+        var u = JSON.parse(c);
+        var g = document.getElementById('custGreeting');
+        var n = document.getElementById('custName');
+        if (g && n) { n.textContent = u.name || u.email; g.classList.remove('hidden'); }
+      } catch(e) {}
+    })();
+    function custLogout() {
+      var token = localStorage.getItem('rc_customer_token');
+      if (token) fetch('/api/customer/logout', { method: 'POST', headers: { 'Authorization': 'Bearer ' + token } })['catch'](function(){});
+      localStorage.removeItem('rc_customer');
+      localStorage.removeItem('rc_customer_token');
+      window.location.href = '/customer/login';
+    }
+  </script>
+  <script src="/static/crm-module.js"></script>
 </body>
 </html>`
 }
