@@ -536,3 +536,327 @@ adminRoutes.post('/init-db', async (c) => {
     return c.json({ error: 'Failed to initialize database', details: err.message }, 500)
   }
 })
+
+// ============================================================
+// SUPER ADMIN DASHBOARD ENDPOINTS
+// ============================================================
+
+// 1. All Active Users — full user list with account info
+adminRoutes.get('/superadmin/users', async (c) => {
+  try {
+    const users = await c.env.DB.prepare(`
+      SELECT c.*,
+        (SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id) as order_count,
+        (SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id AND o.is_trial = 1) as trial_orders,
+        (SELECT COALESCE(SUM(o.price), 0) FROM orders o WHERE o.customer_id = c.id AND o.payment_status = 'paid' AND (o.is_trial IS NULL OR o.is_trial = 0)) as total_spent,
+        (SELECT MAX(o.created_at) FROM orders o WHERE o.customer_id = c.id) as last_order_date,
+        (SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id AND o.status = 'completed') as completed_reports
+      FROM customers c
+      ORDER BY c.created_at DESC
+    `).all()
+
+    const summary = await c.env.DB.prepare(`
+      SELECT
+        COUNT(*) as total_users,
+        SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as active_users,
+        SUM(CASE WHEN google_id IS NOT NULL THEN 1 ELSE 0 END) as google_users,
+        SUM(CASE WHEN report_credits > 0 OR credits_used > 0 THEN 1 ELSE 0 END) as paying_users,
+        SUM(report_credits) as total_credits_available,
+        SUM(credits_used) as total_credits_used,
+        SUM(free_trial_used) as total_trial_used,
+        SUM(free_trial_total) as total_trial_available
+      FROM customers
+    `).first()
+
+    return c.json({ users: users.results, summary })
+  } catch (err: any) {
+    return c.json({ error: 'Failed to load users', details: err.message }, 500)
+  }
+})
+
+// 2. Credit Pack Sales — with period filter (daily/weekly/monthly)
+adminRoutes.get('/superadmin/sales', async (c) => {
+  try {
+    const period = c.req.query('period') || 'monthly' // daily, weekly, monthly
+
+    let dateFilter = ''
+    let groupBy = ''
+    let orderBy = ''
+    if (period === 'daily') {
+      dateFilter = "WHERE sp.created_at >= date('now', '-30 days')"
+      groupBy = "strftime('%Y-%m-%d', sp.created_at)"
+      orderBy = "period DESC"
+    } else if (period === 'weekly') {
+      dateFilter = "WHERE sp.created_at >= date('now', '-12 weeks')"
+      groupBy = "strftime('%Y-W%W', sp.created_at)"
+      orderBy = "period DESC"
+    } else {
+      dateFilter = "WHERE sp.created_at >= date('now', '-12 months')"
+      groupBy = "strftime('%Y-%m', sp.created_at)"
+      orderBy = "period DESC"
+    }
+
+    // Individual credit pack purchases (from stripe_payments)
+    const salesByPeriod = await c.env.DB.prepare(`
+      SELECT ${groupBy} as period,
+        COUNT(*) as transactions,
+        SUM(sp.amount) as total_cents,
+        SUM(CASE WHEN sp.status = 'completed' THEN sp.amount ELSE 0 END) as paid_cents
+      FROM stripe_payments sp
+      ${dateFilter}
+      GROUP BY ${groupBy}
+      ORDER BY ${orderBy}
+    `).all()
+
+    // Per-report order sales (non-trial)
+    const orderSalesByPeriod = await c.env.DB.prepare(`
+      SELECT ${groupBy.replace(/sp\./g, 'o.')} as period,
+        COUNT(*) as orders,
+        SUM(o.price) as total_value,
+        SUM(CASE WHEN o.payment_status = 'paid' THEN o.price ELSE 0 END) as paid_value,
+        SUM(CASE WHEN o.is_trial = 1 THEN 1 ELSE 0 END) as trial_count
+      FROM orders o
+      ${dateFilter.replace(/sp\./g, 'o.')}
+      GROUP BY ${groupBy.replace(/sp\./g, 'o.')}
+      ORDER BY ${orderBy}
+    `).all()
+
+    // Credit packages info
+    const packages = await c.env.DB.prepare(`
+      SELECT * FROM credit_packages WHERE is_active = 1 ORDER BY sort_order
+    `).all()
+
+    // Recent individual transactions
+    const recentSales = await c.env.DB.prepare(`
+      SELECT sp.*, c.name as customer_name, c.email as customer_email, c.company_name
+      FROM stripe_payments sp
+      LEFT JOIN customers c ON sp.customer_id = c.id
+      ORDER BY sp.created_at DESC
+      LIMIT 50
+    `).all()
+
+    // Summary totals
+    const totals = await c.env.DB.prepare(`
+      SELECT
+        COUNT(*) as total_transactions,
+        SUM(amount) as total_cents,
+        SUM(CASE WHEN status = 'completed' THEN amount ELSE 0 END) as paid_cents
+      FROM stripe_payments
+    `).first()
+
+    const orderTotals = await c.env.DB.prepare(`
+      SELECT
+        COUNT(*) as total_orders,
+        SUM(price) as total_value,
+        SUM(CASE WHEN payment_status = 'paid' AND (is_trial IS NULL OR is_trial = 0) THEN price ELSE 0 END) as paid_value,
+        SUM(CASE WHEN is_trial = 1 THEN 1 ELSE 0 END) as trial_orders
+      FROM orders
+    `).first()
+
+    return c.json({
+      period,
+      credit_sales_by_period: salesByPeriod.results,
+      order_sales_by_period: orderSalesByPeriod.results,
+      packages: packages.results,
+      recent_sales: recentSales.results,
+      credit_totals: totals,
+      order_totals: orderTotals
+    })
+  } catch (err: any) {
+    return c.json({ error: 'Failed to load sales', details: err.message }, 500)
+  }
+})
+
+// 3. Order History & Logistics — with report completion time
+adminRoutes.get('/superadmin/orders', async (c) => {
+  try {
+    const limit = parseInt(c.req.query('limit') || '100')
+    const offset = parseInt(c.req.query('offset') || '0')
+    const status = c.req.query('status') || ''
+
+    let whereClause = ''
+    if (status) whereClause = `WHERE o.status = '${status}'`
+
+    const orders = await c.env.DB.prepare(`
+      SELECT o.*,
+        c.name as customer_name, c.email as customer_email, c.company_name as customer_company,
+        r.status as report_status, r.created_at as report_started_at, r.updated_at as report_completed_at,
+        r.gross_squares, r.confidence_score, r.complexity_class,
+        CASE 
+          WHEN r.updated_at IS NOT NULL AND r.created_at IS NOT NULL 
+          THEN CAST((julianday(r.updated_at) - julianday(r.created_at)) * 86400 AS INTEGER)
+          ELSE NULL 
+        END as processing_seconds
+      FROM orders o
+      LEFT JOIN customers c ON o.customer_id = c.id
+      LEFT JOIN reports r ON r.order_id = o.id
+      ${whereClause}
+      ORDER BY o.created_at DESC
+      LIMIT ? OFFSET ?
+    `).bind(limit, offset).all()
+
+    const counts = await c.env.DB.prepare(`
+      SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
+        SUM(CASE WHEN status = 'processing' THEN 1 ELSE 0 END) as processing,
+        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+        SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
+        SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled,
+        AVG(price) as avg_price,
+        SUM(CASE WHEN is_trial = 1 THEN 1 ELSE 0 END) as trial_orders
+      FROM orders
+    `).first()
+
+    // Average processing time (for completed reports)
+    const avgTime = await c.env.DB.prepare(`
+      SELECT AVG(
+        CAST((julianday(r.updated_at) - julianday(r.created_at)) * 86400 AS INTEGER)
+      ) as avg_seconds
+      FROM reports r
+      WHERE r.status = 'completed' AND r.updated_at IS NOT NULL AND r.created_at IS NOT NULL
+    `).first()
+
+    return c.json({
+      orders: orders.results,
+      counts,
+      avg_processing_seconds: avgTime?.avg_seconds || 0,
+      limit, offset
+    })
+  } catch (err: any) {
+    return c.json({ error: 'Failed to load orders', details: err.message }, 500)
+  }
+})
+
+// 4. New User Sign-ups — with period filter
+adminRoutes.get('/superadmin/signups', async (c) => {
+  try {
+    const period = c.req.query('period') || 'monthly'
+
+    let groupBy = ''
+    let dateFilter = ''
+    if (period === 'daily') {
+      groupBy = "strftime('%Y-%m-%d', created_at)"
+      dateFilter = "WHERE created_at >= date('now', '-30 days')"
+    } else if (period === 'weekly') {
+      groupBy = "strftime('%Y-W%W', created_at)"
+      dateFilter = "WHERE created_at >= date('now', '-12 weeks')"
+    } else {
+      groupBy = "strftime('%Y-%m', created_at)"
+      dateFilter = "WHERE created_at >= date('now', '-12 months')"
+    }
+
+    const signupsByPeriod = await c.env.DB.prepare(`
+      SELECT ${groupBy} as period,
+        COUNT(*) as signups,
+        SUM(CASE WHEN google_id IS NOT NULL THEN 1 ELSE 0 END) as google_signups,
+        SUM(CASE WHEN google_id IS NULL THEN 1 ELSE 0 END) as email_signups
+      FROM customers
+      ${dateFilter}
+      GROUP BY ${groupBy}
+      ORDER BY period DESC
+    `).all()
+
+    const recentSignups = await c.env.DB.prepare(`
+      SELECT c.*,
+        (SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id) as order_count,
+        (SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id AND o.is_trial = 1) as trial_orders
+      FROM customers c
+      ORDER BY c.created_at DESC
+      LIMIT 30
+    `).all()
+
+    const summary = await c.env.DB.prepare(`
+      SELECT
+        COUNT(*) as total_all_time,
+        SUM(CASE WHEN created_at >= date('now') THEN 1 ELSE 0 END) as today,
+        SUM(CASE WHEN created_at >= date('now', '-7 days') THEN 1 ELSE 0 END) as this_week,
+        SUM(CASE WHEN strftime('%Y-%m', created_at) = strftime('%Y-%m', 'now') THEN 1 ELSE 0 END) as this_month,
+        SUM(CASE WHEN google_id IS NOT NULL THEN 1 ELSE 0 END) as google_total,
+        SUM(CASE WHEN google_id IS NULL THEN 1 ELSE 0 END) as email_total
+      FROM customers
+    `).first()
+
+    return c.json({
+      period,
+      signups_by_period: signupsByPeriod.results,
+      recent_signups: recentSignups.results,
+      summary
+    })
+  } catch (err: any) {
+    return c.json({ error: 'Failed to load signups', details: err.message }, 500)
+  }
+})
+
+// 5. Internal Sales & Marketing — proposals, invoices, leads, campaigns
+adminRoutes.get('/superadmin/marketing', async (c) => {
+  try {
+    // CRM aggregate across all users
+    const crmStats = await c.env.DB.prepare(`
+      SELECT
+        (SELECT COUNT(*) FROM crm_customers) as total_leads,
+        (SELECT COUNT(*) FROM crm_customers WHERE status = 'active') as active_leads,
+        (SELECT COUNT(*) FROM crm_proposals) as total_proposals,
+        (SELECT COUNT(*) FROM crm_proposals WHERE status = 'draft') as draft_proposals,
+        (SELECT COUNT(*) FROM crm_proposals WHERE status = 'sent') as sent_proposals,
+        (SELECT COUNT(*) FROM crm_proposals WHERE status = 'sold') as sold_proposals,
+        (SELECT COALESCE(SUM(total_amount), 0) FROM crm_proposals WHERE status = 'sold') as sold_value,
+        (SELECT COALESCE(SUM(total_amount), 0) FROM crm_proposals) as total_proposal_value,
+        (SELECT COUNT(*) FROM crm_invoices) as total_invoices,
+        (SELECT COUNT(*) FROM crm_invoices WHERE status = 'paid') as paid_invoices,
+        (SELECT COALESCE(SUM(total), 0) FROM crm_invoices WHERE status = 'paid') as paid_invoice_value,
+        (SELECT COALESCE(SUM(total), 0) FROM crm_invoices WHERE status IN ('sent','viewed','overdue')) as outstanding_invoice_value,
+        (SELECT COUNT(*) FROM crm_jobs) as total_jobs,
+        (SELECT COUNT(*) FROM crm_jobs WHERE status = 'scheduled') as scheduled_jobs,
+        (SELECT COUNT(*) FROM crm_jobs WHERE status = 'completed') as completed_jobs
+    `).first()
+
+    // Platform-level invoice stats (admin invoices, not CRM)
+    const platformInvoices = await c.env.DB.prepare(`
+      SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN status = 'paid' THEN total ELSE 0 END) as paid_value,
+        SUM(CASE WHEN status IN ('sent','viewed') THEN total ELSE 0 END) as outstanding_value,
+        SUM(CASE WHEN status = 'overdue' THEN total ELSE 0 END) as overdue_value
+      FROM invoices
+    `).first()
+
+    // Recent proposals
+    const recentProposals = await c.env.DB.prepare(`
+      SELECT p.*, cc.name as customer_name, c.name as owner_name, c.email as owner_email
+      FROM crm_proposals p
+      LEFT JOIN crm_customers cc ON p.crm_customer_id = cc.id
+      LEFT JOIN customers c ON p.owner_id = c.id
+      ORDER BY p.created_at DESC LIMIT 20
+    `).all()
+
+    // Recent CRM invoices
+    const recentInvoices = await c.env.DB.prepare(`
+      SELECT i.*, cc.name as customer_name, c.name as owner_name
+      FROM crm_invoices i
+      LEFT JOIN crm_customers cc ON i.crm_customer_id = cc.id
+      LEFT JOIN customers c ON i.owner_id = c.id
+      ORDER BY i.created_at DESC LIMIT 20
+    `).all()
+
+    // Conversion funnel: signups → trial → paid
+    const funnel = await c.env.DB.prepare(`
+      SELECT
+        (SELECT COUNT(*) FROM customers) as total_signups,
+        (SELECT COUNT(*) FROM customers WHERE free_trial_used > 0) as used_trial,
+        (SELECT COUNT(*) FROM customers WHERE report_credits > 0 OR credits_used > 0) as became_paid,
+        (SELECT COUNT(*) FROM orders WHERE is_trial = 1) as trial_reports,
+        (SELECT COUNT(*) FROM orders WHERE is_trial = 0 OR is_trial IS NULL) as paid_reports
+    `).first()
+
+    return c.json({
+      crm_stats: crmStats,
+      platform_invoices: platformInvoices,
+      recent_proposals: recentProposals.results,
+      recent_invoices: recentInvoices.results,
+      funnel
+    })
+  } catch (err: any) {
+    return c.json({ error: 'Failed to load marketing data', details: err.message }, 500)
+  }
+})

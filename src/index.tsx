@@ -165,7 +165,12 @@ app.get('/order/new', (c) => {
   return c.html(getMainPageHTML(mapsKey))
 })
 
-// Admin Dashboard
+// Super Admin Dashboard (post-login landing)
+app.get('/super-admin', (c) => {
+  return c.html(getSuperAdminDashboardHTML())
+})
+
+// Admin Dashboard (legacy + operational)
 app.get('/admin', (c) => {
   return c.html(getAdminPageHTML())
 })
@@ -319,6 +324,132 @@ function getMainPageHTML(mapsApiKey: string) {
 </html>`
 }
 
+function getSuperAdminDashboardHTML() {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  ${getHeadTags()}
+  <title>Super Admin Dashboard - Reuse Canada</title>
+  <style>
+    .sa-sidebar { transition: width 0.3s ease; }
+    .sa-sidebar .label { transition: opacity 0.2s ease; }
+    .sa-nav-item { transition: all 0.2s ease; cursor: pointer; }
+    .sa-nav-item:hover { background: rgba(255,255,255,0.08); }
+    .sa-nav-item.active { background: linear-gradient(135deg, #dc2626, #ef4444); color: white; box-shadow: 0 4px 12px rgba(220,38,38,0.3); }
+    .metric-card { transition: all 0.3s ease; }
+    .metric-card:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(0,0,0,0.1); }
+    @keyframes slideIn { from { opacity:0; transform:translateY(10px) } to { opacity:1; transform:translateY(0) } }
+    .slide-in { animation: slideIn 0.4s ease-out; }
+    .sa-kpi { background: linear-gradient(135deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02)); border: 1px solid rgba(255,255,255,0.1); }
+  </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+  <!-- Super Admin Top Bar -->
+  <header class="bg-gray-900 text-white shadow-xl sticky top-0 z-50">
+    <div class="max-w-full mx-auto px-6 h-14 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-8 h-8 bg-red-600 rounded-lg flex items-center justify-center">
+          <i class="fas fa-crown text-white text-sm"></i>
+        </div>
+        <div class="leading-tight">
+          <span class="text-white font-bold text-sm">REUSE CANADA</span>
+          <span class="text-gray-400 text-[10px] block -mt-0.5">Super Admin Command Center</span>
+        </div>
+      </div>
+      <div class="flex items-center gap-4">
+        <span id="saUserGreeting" class="text-gray-300 text-xs hidden">
+          <i class="fas fa-crown mr-1 text-yellow-400"></i><span id="saUserName"></span>
+          <span class="ml-1 px-1.5 py-0.5 bg-red-600/30 text-red-300 rounded text-[10px] font-bold">SUPER ADMIN</span>
+        </span>
+        <a href="/admin" class="text-gray-400 hover:text-white text-xs transition-colors"><i class="fas fa-tachometer-alt mr-1"></i>Ops Panel</a>
+        <a href="/" target="_blank" class="text-gray-400 hover:text-white text-xs transition-colors"><i class="fas fa-external-link-alt mr-1"></i>View Site</a>
+        <a href="/settings" class="text-gray-400 hover:text-white text-xs transition-colors"><i class="fas fa-cog mr-1"></i>Settings</a>
+        <button onclick="saLogout()" class="text-gray-400 hover:text-red-400 text-xs transition-colors"><i class="fas fa-sign-out-alt mr-1"></i>Logout</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="flex min-h-[calc(100vh-56px)]">
+    <!-- Sidebar Navigation -->
+    <aside class="sa-sidebar w-64 bg-gray-900 border-r border-gray-800 flex-shrink-0">
+      <div class="p-4 space-y-1" id="sa-nav">
+        <div class="sa-nav-item active rounded-xl px-4 py-3 flex items-center gap-3" onclick="saSetView('users')">
+          <i class="fas fa-users w-5 text-center"></i>
+          <span class="label text-sm font-medium">All Active Users</span>
+        </div>
+        <div class="sa-nav-item rounded-xl px-4 py-3 flex items-center gap-3 text-gray-400" onclick="saSetView('sales')">
+          <i class="fas fa-credit-card w-5 text-center"></i>
+          <span class="label text-sm font-medium">Credit Pack Sales</span>
+        </div>
+        <div class="sa-nav-item rounded-xl px-4 py-3 flex items-center gap-3 text-gray-400" onclick="saSetView('orders')">
+          <i class="fas fa-clipboard-list w-5 text-center"></i>
+          <span class="label text-sm font-medium">Order History</span>
+        </div>
+        <div class="sa-nav-item rounded-xl px-4 py-3 flex items-center gap-3 text-gray-400" onclick="saSetView('signups')">
+          <i class="fas fa-user-plus w-5 text-center"></i>
+          <span class="label text-sm font-medium">New Sign-ups</span>
+        </div>
+        <div class="sa-nav-item rounded-xl px-4 py-3 flex items-center gap-3 text-gray-400" onclick="saSetView('marketing')">
+          <i class="fas fa-bullhorn w-5 text-center"></i>
+          <span class="label text-sm font-medium">Sales & Marketing</span>
+        </div>
+        <div class="border-t border-gray-800 my-3"></div>
+        <a href="/admin" class="sa-nav-item rounded-xl px-4 py-3 flex items-center gap-3 text-gray-400 no-underline">
+          <i class="fas fa-tachometer-alt w-5 text-center"></i>
+          <span class="label text-sm font-medium">Operations Panel</span>
+        </a>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1 p-6 overflow-y-auto">
+      <div id="sa-root"></div>
+    </main>
+  </div>
+
+  <script>
+    // Auth guard — ONLY superadmin allowed
+    (function() {
+      const user = localStorage.getItem('rc_user');
+      if (!user) { window.location.href = '/login'; return; }
+      try {
+        const u = JSON.parse(user);
+        if (u.role !== 'superadmin') {
+          localStorage.removeItem('rc_user');
+          localStorage.removeItem('rc_token');
+          window.location.href = '/login';
+          return;
+        }
+        const greeting = document.getElementById('saUserGreeting');
+        const nameEl = document.getElementById('saUserName');
+        if (greeting && nameEl) {
+          nameEl.textContent = u.name || u.email;
+          greeting.classList.remove('hidden');
+        }
+      } catch(e) { window.location.href = '/login'; }
+    })();
+    function saLogout() {
+      localStorage.removeItem('rc_user');
+      localStorage.removeItem('rc_token');
+      window.location.href = '/login';
+    }
+    function saSetView(v) {
+      // Update sidebar active state
+      document.querySelectorAll('.sa-nav-item').forEach(el => {
+        el.classList.remove('active');
+        el.classList.add('text-gray-400');
+      });
+      event.currentTarget.classList.add('active');
+      event.currentTarget.classList.remove('text-gray-400');
+      // Delegate to JS module
+      if (typeof window.saDashboardSetView === 'function') window.saDashboardSetView(v);
+    }
+  </script>
+  <script src="/static/super-admin-dashboard.js"></script>
+</body>
+</html>`
+}
+
 function getAdminPageHTML() {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -353,6 +484,7 @@ function getAdminPageHTML() {
           <i class="fas fa-user-shield mr-1 text-red-400"></i><span id="userName"></span>
           <span class="ml-1 px-1.5 py-0.5 bg-red-600/20 text-red-300 rounded text-[10px] font-bold">ADMIN</span>
         </span>
+        <a href="/super-admin" class="text-yellow-400 hover:text-yellow-300 text-xs transition-colors font-semibold"><i class="fas fa-crown mr-1"></i>Super Admin</a>
         <a href="/" class="text-gray-400 hover:text-white text-xs transition-colors"><i class="fas fa-external-link-alt mr-1"></i>View Site</a>
         <a href="/settings" class="text-gray-400 hover:text-white text-xs transition-colors"><i class="fas fa-cog mr-1"></i>Settings</a>
         <button onclick="doLogout()" class="text-gray-400 hover:text-red-400 text-xs transition-colors"><i class="fas fa-sign-out-alt mr-1"></i>Logout</button>
@@ -499,7 +631,7 @@ function getLoginPageHTML() {
       if (user) {
         try {
           const u = JSON.parse(user);
-          if (u.role === 'superadmin') { window.location.href = '/admin'; return; }
+          if (u.role === 'superadmin') { window.location.href = '/super-admin'; return; }
         } catch(e) {}
       }
     })();
@@ -526,7 +658,7 @@ function getLoginPageHTML() {
         if (res.ok && data.success) {
           localStorage.setItem('rc_user', JSON.stringify(data.user));
           localStorage.setItem('rc_token', data.token);
-          window.location.href = '/admin';
+          window.location.href = '/super-admin';
         } else {
           errDiv.textContent = data.error || 'Login failed.';
           if (data.redirect) {

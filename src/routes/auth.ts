@@ -7,9 +7,22 @@ export const authRoutes = new Hono<{ Bindings: Bindings }>()
 // HARDCODED SUPERADMIN CREDENTIALS
 // Only this account gets admin access — no public registration
 // ============================================================
-const SUPERADMIN_EMAIL = 'ethangourley17@gmail.com'
+// Supported superadmin accounts (both have full access)
+const SUPERADMIN_ACCOUNTS: { email: string, password: string, name: string }[] = [
+  { email: 'ethangourley17@gmail.com', password: 'Bean1234!', name: 'Ethan Gourley' },
+  { email: 'ethangourley76@gmail.com', password: 'Bean1234!', name: 'Ethan Gourley' }
+]
+
+const SUPERADMIN_EMAIL = 'ethangourley17@gmail.com' // Primary (legacy compat)
 const SUPERADMIN_PASSWORD = 'Bean1234!'
 const SUPERADMIN_NAME = 'Ethan Gourley'
+
+function isSuperadminEmail(email: string): boolean {
+  return SUPERADMIN_ACCOUNTS.some(a => a.email === email.toLowerCase().trim())
+}
+function getSuperadminAccount(email: string) {
+  return SUPERADMIN_ACCOUNTS.find(a => a.email === email.toLowerCase().trim())
+}
 
 // Simple password hashing using Web Crypto API (SHA-256 + salt)
 async function hashPassword(password: string, salt?: string): Promise<{ hash: string, salt: string }> {
@@ -42,30 +55,31 @@ authRoutes.post('/login', async (c) => {
 
     const cleanEmail = email.toLowerCase().trim()
 
-    // ONLY allow the superadmin account
-    if (cleanEmail !== SUPERADMIN_EMAIL) {
+    // ONLY allow superadmin accounts
+    const account = getSuperadminAccount(cleanEmail)
+    if (!account) {
       return c.json({ error: 'Admin access is restricted. Use the customer portal at /customer/login' }, 403)
     }
 
     // Check plain-text password match first (for initial/reset)
-    if (password === SUPERADMIN_PASSWORD) {
+    if (password === account.password) {
       // Ensure superadmin exists in DB (auto-create on first login)
       let user = await c.env.DB.prepare(
         'SELECT * FROM admin_users WHERE email = ?'
-      ).bind(SUPERADMIN_EMAIL).first<any>()
+      ).bind(cleanEmail).first<any>()
 
       if (!user) {
         // Auto-create superadmin account
-        const { hash, salt } = await hashPassword(SUPERADMIN_PASSWORD)
+        const { hash, salt } = await hashPassword(account.password)
         const storedHash = `${salt}:${hash}`
         await c.env.DB.prepare(`
           INSERT INTO admin_users (email, password_hash, name, role, company_name, is_active)
           VALUES (?, ?, ?, 'superadmin', 'Reuse Canada', 1)
-        `).bind(SUPERADMIN_EMAIL, storedHash, SUPERADMIN_NAME).run()
+        `).bind(cleanEmail, storedHash, account.name).run()
 
         user = await c.env.DB.prepare(
           'SELECT * FROM admin_users WHERE email = ?'
-        ).bind(SUPERADMIN_EMAIL).first<any>()
+        ).bind(cleanEmail).first<any>()
       }
 
       // Update last login
@@ -101,7 +115,7 @@ authRoutes.post('/login', async (c) => {
     // Also check hashed password in DB (if password was changed via hash)
     const user = await c.env.DB.prepare(
       'SELECT * FROM admin_users WHERE email = ? AND is_active = 1'
-    ).bind(SUPERADMIN_EMAIL).first<any>()
+    ).bind(cleanEmail).first<any>()
 
     if (user && user.password_hash) {
       const valid = await verifyPassword(password, user.password_hash)
@@ -158,14 +172,14 @@ authRoutes.get('/me', async (c) => {
     return c.json({ error: 'No user context' }, 401)
   }
 
-  // Only superadmin can use admin endpoints
-  if (userEmail.toLowerCase().trim() !== SUPERADMIN_EMAIL) {
+  // Only superadmin accounts can use admin endpoints
+  if (!isSuperadminEmail(userEmail)) {
     return c.json({ error: 'Admin access denied' }, 403)
   }
 
   const user = await c.env.DB.prepare(
     'SELECT id, email, name, role, company_name, phone, last_login, created_at FROM admin_users WHERE email = ? AND is_active = 1'
-  ).bind(SUPERADMIN_EMAIL).first()
+  ).bind(userEmail.toLowerCase().trim()).first()
 
   if (!user) {
     return c.json({ error: 'User not found' }, 404)
