@@ -91,6 +91,11 @@ function renderDashboard() {
     { id: 'd2d', href: '/customer/d2d', icon: 'fa-door-open', label: 'D2D Manager', desc: 'Door-to-door teams', color: 'from-orange-500 to-orange-600', badge: 'Coming Soon', badgeColor: 'bg-gray-400' }
   ];
 
+  // DEV-ONLY: Add Property Imagery tile for dev account
+  if (c.is_dev) {
+    modules.push({ id: 'property-imagery', href: '/customer/property-imagery', icon: 'fa-satellite', label: 'Property Imagery', desc: 'Satellite PDF — 4 zoom views', color: 'from-emerald-500 to-teal-600', badge: 'Dev Tool', badgeColor: 'bg-amber-500' });
+  }
+
   root.innerHTML =
     // ── Welcome + Quick Stats ──
     '<div class="mb-6">' +

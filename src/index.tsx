@@ -12,6 +12,7 @@ import { customerAuthRoutes } from './routes/customer-auth'
 import { invoiceRoutes } from './routes/invoices'
 import { stripeRoutes } from './routes/stripe'
 import { crmRoutes } from './routes/crm'
+import { propertyImageryRoutes } from './routes/property-imagery'
 import type { Bindings } from './types'
 
 const app = new Hono<{ Bindings: Bindings }>()
@@ -31,6 +32,7 @@ app.route('/api/customer', customerAuthRoutes)
 app.route('/api/invoices', invoiceRoutes)
 app.route('/api/stripe', stripeRoutes)
 app.route('/api/crm', crmRoutes)
+app.route('/api/property-imagery', propertyImageryRoutes)
 
 // Health check
 app.get('/api/health', (c) => {
@@ -218,6 +220,12 @@ app.get('/customer/order', (c) => {
 
 // Customer Branding Setup
 app.get('/customer/branding', (c) => c.html(getBrandingSetupHTML()))
+
+// Property Imagery — Dev account only
+app.get('/customer/property-imagery', (c) => {
+  const mapsKey = c.env.GOOGLE_MAPS_API_KEY || ''
+  return c.html(getPropertyImageryPageHTML(mapsKey))
+})
 
 // Customer CRM sub-pages
 app.get('/customer/reports', (c) => c.html(getCrmSubPageHTML('reports', 'Roof Report History', 'fa-file-alt')))
@@ -1277,6 +1285,67 @@ function getBrandingSetupHTML() {
 // ============================================================
 // CRM SUB-PAGES — Customers, Invoices, Proposals, Jobs, Pipeline, D2D
 // ============================================================
+// ============================================================
+// PROPERTY IMAGERY PAGE — Dev-only satellite imagery PDF tool
+// ============================================================
+function getPropertyImageryPageHTML(mapsApiKey: string) {
+  const mapsScript = mapsApiKey
+    ? '<script src="https://maps.googleapis.com/maps/api/js?key=' + mapsApiKey + '&libraries=places" async defer></script>'
+    : ''
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  ${getHeadTags()}
+  <title>Property Imagery - Reuse Canada (Dev Tool)</title>
+  ${mapsScript}
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <header class="bg-gradient-to-r from-emerald-700 to-teal-800 text-white shadow-lg">
+    <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <a href="/customer/dashboard" class="flex items-center space-x-3 hover:opacity-90 transition-opacity">
+          <div class="w-10 h-10 bg-emerald-500 rounded-lg flex items-center justify-center shadow-lg">
+            <i class="fas fa-satellite text-white text-lg"></i>
+          </div>
+          <div>
+            <h1 class="text-xl font-bold">Property Imagery</h1>
+            <p class="text-emerald-200 text-xs">Dev Tool — Reuse Canada</p>
+          </div>
+        </a>
+      </div>
+      <nav class="flex items-center space-x-4">
+        <span class="px-2 py-1 bg-amber-500/20 text-amber-200 rounded text-xs font-bold"><i class="fas fa-flask mr-1"></i>DEV ONLY</span>
+        <a href="/customer/dashboard" class="text-emerald-200 hover:text-white text-sm"><i class="fas fa-th-large mr-1"></i>Dashboard</a>
+        <button onclick="custLogout()" class="text-emerald-200 hover:text-white text-sm"><i class="fas fa-sign-out-alt mr-1"></i>Logout</button>
+      </nav>
+    </div>
+  </header>
+  <main class="max-w-5xl mx-auto px-4 py-8">
+    <div id="pi-root"></div>
+  </main>
+  <script>
+    (function() {
+      var c = localStorage.getItem('rc_customer');
+      if (!c) { window.location.href = '/customer/login'; return; }
+      try {
+        var u = JSON.parse(c);
+        if (!u.is_dev) { window.location.href = '/customer/dashboard'; return; }
+      } catch(e) { window.location.href = '/customer/login'; }
+    })();
+    function custLogout() {
+      var token = localStorage.getItem('rc_customer_token');
+      if (token) fetch('/api/customer/logout', { method: 'POST', headers: { 'Authorization': 'Bearer ' + token } })['catch'](function(){});
+      localStorage.removeItem('rc_customer');
+      localStorage.removeItem('rc_customer_token');
+      window.location.href = '/customer/login';
+    }
+  </script>
+  <script src="/static/property-imagery.js"></script>
+</body>
+</html>`
+}
+
 function getCrmSubPageHTML(module: string, title: string, icon: string) {
   return `<!DOCTYPE html>
 <html lang="en">
