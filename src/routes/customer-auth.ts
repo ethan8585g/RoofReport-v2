@@ -4,6 +4,22 @@ import type { Bindings } from '../types'
 export const customerAuthRoutes = new Hono<{ Bindings: Bindings }>()
 
 // ============================================================
+// DEV / TEST ACCOUNT — Unlimited free reports, no payment required
+// Login via /customer/login with these credentials
+// ============================================================
+const DEV_ACCOUNT = {
+  email: 'dev@reusecanada.ca',
+  password: 'DevTest2026!',
+  name: 'Reuse Canada Dev',
+  company_name: 'Reuse Canada (Dev Testing)',
+  phone: '780-000-0000'
+}
+
+export function isDevAccount(email: string): boolean {
+  return email.toLowerCase().trim() === DEV_ACCOUNT.email
+}
+
+// ============================================================
 // PASSWORD HELPERS (same as admin auth)
 // ============================================================
 async function hashPassword(password: string, salt?: string): Promise<{ hash: string, salt: string }> {
@@ -218,9 +234,74 @@ customerAuthRoutes.post('/login', async (c) => {
       return c.json({ error: 'Email and password are required' }, 400)
     }
 
+    const cleanEmail = email.toLowerCase().trim()
+
+    // ============================================================
+    // DEV ACCOUNT — auto-create on first login, unlimited free reports
+    // ============================================================
+    if (cleanEmail === DEV_ACCOUNT.email && password === DEV_ACCOUNT.password) {
+      let devCustomer = await c.env.DB.prepare(
+        'SELECT * FROM customers WHERE email = ?'
+      ).bind(DEV_ACCOUNT.email).first<any>()
+
+      if (!devCustomer) {
+        // Auto-create dev account with massive trial allocation
+        const { hash, salt } = await hashPassword(DEV_ACCOUNT.password)
+        const storedHash = `${salt}:${hash}`
+        const result = await c.env.DB.prepare(`
+          INSERT INTO customers (email, name, phone, company_name, password_hash, report_credits, credits_used, free_trial_total, free_trial_used, is_active)
+          VALUES (?, ?, ?, ?, ?, 999999, 0, 999999, 0, 1)
+        `).bind(DEV_ACCOUNT.email, DEV_ACCOUNT.name, DEV_ACCOUNT.phone, DEV_ACCOUNT.company_name, storedHash).run()
+
+        devCustomer = await c.env.DB.prepare(
+          'SELECT * FROM customers WHERE email = ?'
+        ).bind(DEV_ACCOUNT.email).first<any>()
+      } else {
+        // Ensure dev account always has unlimited credits (reset every login)
+        await c.env.DB.prepare(`
+          UPDATE customers SET 
+            free_trial_total = 999999, report_credits = 999999,
+            is_active = 1, last_login = datetime('now'), updated_at = datetime('now')
+          WHERE email = ?
+        `).bind(DEV_ACCOUNT.email).run()
+      }
+
+      await c.env.DB.prepare(
+        "UPDATE customers SET last_login = datetime('now'), updated_at = datetime('now') WHERE id = ?"
+      ).bind(devCustomer.id).run()
+
+      const token = generateSessionToken()
+      const expiresAt = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString() // 1 year
+      await c.env.DB.prepare(`
+        INSERT INTO customer_sessions (customer_id, session_token, expires_at)
+        VALUES (?, ?, ?)
+      `).bind(devCustomer.id, token, expiresAt).run()
+
+      return c.json({
+        success: true,
+        customer: {
+          id: devCustomer.id,
+          email: DEV_ACCOUNT.email,
+          name: DEV_ACCOUNT.name,
+          company_name: DEV_ACCOUNT.company_name,
+          phone: DEV_ACCOUNT.phone,
+          role: 'customer',
+          is_dev: true,
+          credits_remaining: 999999,
+          free_trial_remaining: 999999,
+          free_trial_total: 999999,
+          paid_credits_remaining: 999999
+        },
+        token
+      })
+    }
+
+    // ============================================================
+    // NORMAL CUSTOMER LOGIN
+    // ============================================================
     const customer = await c.env.DB.prepare(
       'SELECT * FROM customers WHERE email = ? AND is_active = 1'
-    ).bind(email.toLowerCase().trim()).first<any>()
+    ).bind(cleanEmail).first<any>()
 
     if (!customer) {
       return c.json({ error: 'Invalid email or password' }, 401)
@@ -284,9 +365,11 @@ customerAuthRoutes.get('/me', async (c) => {
     return c.json({ error: 'Session expired or invalid' }, 401)
   }
 
-  const paidCreditsRemaining = (session.report_credits || 0) - (session.credits_used || 0)
-  const freeTrialRemaining = (session.free_trial_total || 0) - (session.free_trial_used || 0)
-  const totalRemaining = Math.max(0, freeTrialRemaining) + Math.max(0, paidCreditsRemaining)
+  // DEV ACCOUNT: always unlimited
+  const isDev = isDevAccount(session.email || '')
+  const paidCreditsRemaining = isDev ? 999999 : ((session.report_credits || 0) - (session.credits_used || 0))
+  const freeTrialRemaining = isDev ? 999999 : ((session.free_trial_total || 0) - (session.free_trial_used || 0))
+  const totalRemaining = isDev ? 999999 : (Math.max(0, freeTrialRemaining) + Math.max(0, paidCreditsRemaining))
 
   return c.json({
     customer: {
@@ -301,13 +384,16 @@ customerAuthRoutes.get('/me', async (c) => {
       province: session.province,
       postal_code: session.postal_code,
       role: 'customer',
+      is_dev: isDev || undefined,
       credits_remaining: totalRemaining,
-      free_trial_remaining: Math.max(0, freeTrialRemaining),
-      free_trial_total: session.free_trial_total || 0,
-      free_trial_used: session.free_trial_used || 0,
-      paid_credits_remaining: Math.max(0, paidCreditsRemaining),
-      paid_credits_total: session.report_credits || 0,
-      paid_credits_used: session.credits_used || 0
+      free_trial_remaining: isDev ? 999999 : Math.max(0, freeTrialRemaining),
+      free_trial_total: isDev ? 999999 : (session.free_trial_total || 0),
+      free_trial_used: isDev ? 0 : (session.free_trial_used || 0),
+      paid_credits_remaining: isDev ? 999999 : Math.max(0, paidCreditsRemaining),
+      paid_credits_total: isDev ? 999999 : (session.report_credits || 0),
+      paid_credits_used: isDev ? 0 : (session.credits_used || 0),
+      brand_logo_url: session.brand_logo_url || null,
+      brand_business_name: session.brand_business_name || null
     }
   })
 })
@@ -437,4 +523,153 @@ customerAuthRoutes.get('/invoices/:id', async (c) => {
   ).bind(id).all()
 
   return c.json({ invoice, items: items.results })
+})
+
+// ============================================================
+// BRANDING API — Custom company branding for reports/proposals
+// ============================================================
+
+// Helper: get authenticated customer ID from token
+async function getCustomerId(c: any): Promise<number | null> {
+  const token = c.req.header('Authorization')?.replace('Bearer ', '')
+  if (!token) return null
+  const session = await c.env.DB.prepare(`
+    SELECT customer_id FROM customer_sessions
+    WHERE session_token = ? AND expires_at > datetime('now')
+  `).bind(token).first<any>()
+  return session?.customer_id || null
+}
+
+// GET branding settings
+customerAuthRoutes.get('/branding', async (c) => {
+  const customerId = await getCustomerId(c)
+  if (!customerId) return c.json({ error: 'Not authenticated' }, 401)
+
+  const customer = await c.env.DB.prepare(`
+    SELECT brand_business_name, brand_logo_url, brand_primary_color, brand_secondary_color,
+           brand_tagline, brand_phone, brand_email, brand_website, brand_address,
+           brand_license_number, brand_insurance_info,
+           ad_facebook_connected, ad_facebook_page_id, ad_google_connected, ad_google_account_id,
+           ad_meta_pixel_id, ad_google_analytics_id,
+           company_name, name, email, phone
+    FROM customers WHERE id = ?
+  `).bind(customerId).first<any>()
+
+  if (!customer) return c.json({ error: 'Customer not found' }, 404)
+
+  return c.json({
+    branding: {
+      business_name: customer.brand_business_name || customer.company_name || '',
+      logo_url: customer.brand_logo_url || '',
+      primary_color: customer.brand_primary_color || '#1e3a5f',
+      secondary_color: customer.brand_secondary_color || '#0ea5e9',
+      tagline: customer.brand_tagline || '',
+      phone: customer.brand_phone || customer.phone || '',
+      email: customer.brand_email || customer.email || '',
+      website: customer.brand_website || '',
+      address: customer.brand_address || '',
+      license_number: customer.brand_license_number || '',
+      insurance_info: customer.brand_insurance_info || ''
+    },
+    ads: {
+      facebook_connected: !!customer.ad_facebook_connected,
+      facebook_page_id: customer.ad_facebook_page_id || '',
+      google_connected: !!customer.ad_google_connected,
+      google_account_id: customer.ad_google_account_id || '',
+      meta_pixel_id: customer.ad_meta_pixel_id || '',
+      google_analytics_id: customer.ad_google_analytics_id || ''
+    }
+  })
+})
+
+// PUT branding settings (auto-save)
+customerAuthRoutes.put('/branding', async (c) => {
+  const customerId = await getCustomerId(c)
+  if (!customerId) return c.json({ error: 'Not authenticated' }, 401)
+
+  const body = await c.req.json()
+
+  await c.env.DB.prepare(`
+    UPDATE customers SET
+      brand_business_name = ?,
+      brand_logo_url = ?,
+      brand_primary_color = ?,
+      brand_secondary_color = ?,
+      brand_tagline = ?,
+      brand_phone = ?,
+      brand_email = ?,
+      brand_website = ?,
+      brand_address = ?,
+      brand_license_number = ?,
+      brand_insurance_info = ?,
+      updated_at = datetime('now')
+    WHERE id = ?
+  `).bind(
+    body.business_name || null,
+    body.logo_url || null,
+    body.primary_color || '#1e3a5f',
+    body.secondary_color || '#0ea5e9',
+    body.tagline || null,
+    body.phone || null,
+    body.email || null,
+    body.website || null,
+    body.address || null,
+    body.license_number || null,
+    body.insurance_info || null,
+    customerId
+  ).run()
+
+  return c.json({ success: true, message: 'Branding saved' })
+})
+
+// PUT ad connections
+customerAuthRoutes.put('/branding/ads', async (c) => {
+  const customerId = await getCustomerId(c)
+  if (!customerId) return c.json({ error: 'Not authenticated' }, 401)
+
+  const body = await c.req.json()
+
+  await c.env.DB.prepare(`
+    UPDATE customers SET
+      ad_facebook_connected = ?,
+      ad_facebook_page_id = ?,
+      ad_google_connected = ?,
+      ad_google_account_id = ?,
+      ad_meta_pixel_id = ?,
+      ad_google_analytics_id = ?,
+      updated_at = datetime('now')
+    WHERE id = ?
+  `).bind(
+    body.facebook_connected ? 1 : 0,
+    body.facebook_page_id || null,
+    body.google_connected ? 1 : 0,
+    body.google_account_id || null,
+    body.meta_pixel_id || null,
+    body.google_analytics_id || null,
+    customerId
+  ).run()
+
+  return c.json({ success: true, message: 'Ad settings saved' })
+})
+
+// POST logo upload (base64 → stored as data URI)
+customerAuthRoutes.post('/branding/logo', async (c) => {
+  const customerId = await getCustomerId(c)
+  if (!customerId) return c.json({ error: 'Not authenticated' }, 401)
+
+  const body = await c.req.json()
+  const logoData = body.logo_data // base64 data URI
+
+  if (!logoData) return c.json({ error: 'No logo data provided' }, 400)
+
+  // Validate it's a reasonable size (max ~500KB base64)
+  if (logoData.length > 700000) {
+    return c.json({ error: 'Logo too large. Max 500KB. Please use a smaller image.' }, 400)
+  }
+
+  await c.env.DB.prepare(`
+    UPDATE customers SET brand_logo_url = ?, updated_at = datetime('now') WHERE id = ?
+  `).bind(logoData, customerId).run()
+
+  return c.json({ success: true, logo_url: logoData })
 })

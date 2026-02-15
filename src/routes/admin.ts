@@ -309,6 +309,30 @@ adminRoutes.post('/init-db', async (c) => {
     // Migration 0009: Trial flag on orders (so admin can filter trial vs paid)
     try { await c.env.DB.prepare('ALTER TABLE orders ADD COLUMN is_trial INTEGER DEFAULT 0').run() } catch(e) {}
 
+    // Migration 0012: Custom Branding columns on customers table
+    const brandingCols = [
+      'brand_business_name TEXT',
+      'brand_logo_url TEXT',
+      'brand_primary_color TEXT DEFAULT \'#1e3a5f\'',
+      'brand_secondary_color TEXT DEFAULT \'#0ea5e9\'',
+      'brand_tagline TEXT',
+      'brand_phone TEXT',
+      'brand_email TEXT',
+      'brand_website TEXT',
+      'brand_address TEXT',
+      'brand_license_number TEXT',
+      'brand_insurance_info TEXT',
+      'ad_facebook_connected INTEGER DEFAULT 0',
+      'ad_facebook_page_id TEXT',
+      'ad_google_connected INTEGER DEFAULT 0',
+      'ad_google_account_id TEXT',
+      'ad_meta_pixel_id TEXT',
+      'ad_google_analytics_id TEXT'
+    ]
+    for (const col of brandingCols) {
+      try { await c.env.DB.prepare(`ALTER TABLE customers ADD COLUMN ${col}`).run() } catch(e) {}
+    }
+
     // Migration 0010: Remove old CHECK constraint on service_tier
     // Old production DB had CHECK(service_tier IN ('immediate','urgent','regular'))
     // New tiers are 'express' and 'standard'. SQLite requires table recreation to drop constraints.
@@ -391,17 +415,16 @@ adminRoutes.post('/init-db', async (c) => {
       )
     `).run()
 
-    // Seed default credit packages
-    // 5=$37.50 ($7.50/ea), 10=$67.50 ($6.75/ea), 25=$150 ($6/ea), 50=$275 ($5.50/ea), 100=$475 ($4.75/ea)
+    // Seed default credit packages — Pricing: Single=$10, 5=$7/ea, 10=$6/ea, 25=$5.50/ea, 50=$5/ea, 100=$4.75/ea
     await c.env.DB.prepare(`DELETE FROM credit_packages`).run()
     await c.env.DB.prepare(`
       INSERT INTO credit_packages (id, name, description, credits, price_cents, sort_order)
       VALUES
-        (1, '5 Pack', '5 reports — $7.50/ea', 5, 3750, 1),
-        (2, '10 Pack', '10 reports — $6.75/ea', 10, 6750, 2),
-        (3, '25 Pack', '25 reports — $6.00/ea', 25, 15000, 3),
-        (4, '50 Pack', '50 reports — $5.50/ea', 50, 27500, 4),
-        (5, '100 Pack', '100 reports — best value — $4.75/ea', 100, 47500, 5)
+        (1, '5 Pack', '5 reports — $7.00/ea — Save 30%', 5, 3500, 1),
+        (2, '10 Pack', '10 reports — $6.00/ea — Save 40%', 10, 6000, 2),
+        (3, '25 Pack', '25 reports — $5.50/ea — Save 45%', 25, 13750, 3),
+        (4, '50 Pack', '50 reports — $5.00/ea — Save 50%', 50, 25000, 4),
+        (5, '100 Pack', '100 reports — best value — $4.75/ea — Save 52%', 100, 47500, 5)
     `).run()
 
     // Customer portal indexes

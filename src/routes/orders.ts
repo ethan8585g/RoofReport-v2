@@ -17,12 +17,12 @@ function getDeliveryEstimate(tier: string): string {
   return new Date(Date.now() + 30000).toISOString() // 30s buffer for generation
 }
 
-// Get price by tier
+// Get price by tier — Single report = $10 CAD flat
 function getTierPrice(tier: string): number {
   switch (tier) {
-    case 'express': return 12.00
-    case 'standard': return 8.00
-    default: return 8.00
+    case 'express': return 10.00
+    case 'standard': return 10.00
+    default: return 10.00
   }
 }
 

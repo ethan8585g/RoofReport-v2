@@ -216,6 +216,9 @@ app.get('/customer/order', (c) => {
   return c.html(getCustomerOrderPageHTML(mapsKey))
 })
 
+// Customer Branding Setup
+app.get('/customer/branding', (c) => c.html(getBrandingSetupHTML()))
+
 // Customer CRM sub-pages
 app.get('/customer/reports', (c) => c.html(getCrmSubPageHTML('reports', 'Roof Report History', 'fa-file-alt')))
 app.get('/customer/customers', (c) => c.html(getCrmSubPageHTML('customers', 'My Customers', 'fa-users')))
@@ -1209,6 +1212,64 @@ function getCustomerOrderPageHTML(mapsApiKey: string) {
     })();
   </script>
   <script src="/static/customer-order.js"></script>
+</body>
+</html>`
+}
+
+// ============================================================
+// CUSTOM BRANDING SETUP PAGE
+// ============================================================
+function getBrandingSetupHTML() {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  ${getHeadTags()}
+  <title>Custom Branding Setup - Reuse Canada</title>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <header class="bg-brand-800 text-white shadow-lg">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <a href="/customer/dashboard" class="flex items-center space-x-3 hover:opacity-90">
+          <div class="w-10 h-10 bg-gradient-to-br from-pink-500 to-fuchsia-600 rounded-lg flex items-center justify-center">
+            <i class="fas fa-palette text-white text-lg"></i>
+          </div>
+          <div>
+            <h1 class="text-lg font-bold">Custom Branding Setup</h1>
+            <p class="text-brand-200 text-xs">Reuse Canada</p>
+          </div>
+        </a>
+      </div>
+      <nav class="flex items-center space-x-3">
+        <span id="custGreeting" class="text-brand-200 text-sm hidden"><i class="fas fa-user-circle mr-1"></i><span id="custName"></span></span>
+        <a href="/customer/dashboard" class="text-brand-200 hover:text-white text-sm"><i class="fas fa-th-large mr-1"></i>Dashboard</a>
+        <button onclick="custLogout()" class="text-brand-200 hover:text-white text-sm"><i class="fas fa-sign-out-alt mr-1"></i>Logout</button>
+      </nav>
+    </div>
+  </header>
+  <main class="max-w-5xl mx-auto px-4 py-6">
+    <div id="branding-root"></div>
+  </main>
+  <script>
+    (function() {
+      var c = localStorage.getItem('rc_customer');
+      if (!c) { window.location.href = '/customer/login'; return; }
+      try {
+        var u = JSON.parse(c);
+        var g = document.getElementById('custGreeting');
+        var n = document.getElementById('custName');
+        if (g && n) { n.textContent = u.name || u.email; g.classList.remove('hidden'); }
+      } catch(e) {}
+    })();
+    function custLogout() {
+      var token = localStorage.getItem('rc_customer_token');
+      if (token) fetch('/api/customer/logout', { method: 'POST', headers: { 'Authorization': 'Bearer ' + token } })['catch'](function(){});
+      localStorage.removeItem('rc_customer');
+      localStorage.removeItem('rc_customer_token');
+      window.location.href = '/customer/login';
+    }
+  </script>
+  <script src="/static/branding.js"></script>
 </body>
 </html>`
 }

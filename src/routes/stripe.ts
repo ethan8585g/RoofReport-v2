@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import type { Bindings } from '../types'
 import { generateReportForOrder } from './reports'
+import { isDevAccount } from './customer-auth'
 
 export const stripeRoutes = new Hono<{ Bindings: Bindings }>()
 
@@ -141,20 +142,24 @@ stripeRoutes.get('/billing', async (c) => {
   const freeTrialRemaining = Math.max(0, (customer.free_trial_total || 0) - (customer.free_trial_used || 0))
   const paidRemaining = Math.max(0, (customer.report_credits || 0) - (customer.credits_used || 0))
 
+  // DEV ACCOUNT: always show unlimited credits
+  const isDev = isDevAccount(customer.email || '')
+
   return c.json({
     billing: {
-      plan: customer.subscription_plan || 'free',
-      status: customer.subscription_status || 'none',
-      credits_remaining: freeTrialRemaining + paidRemaining,
-      credits_total: customer.report_credits || 0,
+      plan: isDev ? 'dev_unlimited' : (customer.subscription_plan || 'free'),
+      status: isDev ? 'active' : (customer.subscription_status || 'none'),
+      credits_remaining: isDev ? 999999 : (freeTrialRemaining + paidRemaining),
+      credits_total: isDev ? 999999 : (customer.report_credits || 0),
       credits_used: customer.credits_used || 0,
-      free_trial_remaining: freeTrialRemaining,
-      free_trial_total: customer.free_trial_total || 0,
-      free_trial_used: customer.free_trial_used || 0,
-      paid_credits_remaining: paidRemaining,
+      free_trial_remaining: isDev ? 999999 : freeTrialRemaining,
+      free_trial_total: isDev ? 999999 : (customer.free_trial_total || 0),
+      free_trial_used: isDev ? 0 : (customer.free_trial_used || 0),
+      paid_credits_remaining: isDev ? 999999 : paidRemaining,
       subscription_start: customer.subscription_start,
       subscription_end: customer.subscription_end,
       stripe_customer_id: customer.stripe_customer_id || null,
+      is_dev: isDev || undefined,
     },
     payments: payments.results
   })
@@ -353,9 +358,12 @@ stripeRoutes.post('/use-credit', async (c) => {
     const customer = await getCustomerFromToken(c.env.DB, token)
     if (!customer) return c.json({ error: 'Not authenticated' }, 401)
 
+    // DEV ACCOUNT: unlimited free reports, never charge
+    const isDev = isDevAccount(customer.email || '')
+
     // Check free trial first, then paid credits
-    const freeTrialRemaining = Math.max(0, (customer.free_trial_total || 0) - (customer.free_trial_used || 0))
-    const paidRemaining = Math.max(0, (customer.report_credits || 0) - (customer.credits_used || 0))
+    const freeTrialRemaining = isDev ? 999999 : Math.max(0, (customer.free_trial_total || 0) - (customer.free_trial_used || 0))
+    const paidRemaining = isDev ? 999999 : Math.max(0, (customer.report_credits || 0) - (customer.credits_used || 0))
     const totalRemaining = freeTrialRemaining + paidRemaining
 
     if (totalRemaining <= 0) {
@@ -375,12 +383,15 @@ stripeRoutes.post('/use-credit', async (c) => {
     const tier = service_tier || 'standard'
 
     // Determine if this is a free trial order or paid order
-    const isTrial = freeTrialRemaining > 0
-    const price = isTrial ? 0 : ((tier === 'express') ? 12 : 8)
-    const paymentStatus = isTrial ? 'trial' : 'paid'
-    const notes = isTrial 
-      ? `Free trial report (${(customer.free_trial_used || 0) + 1} of ${customer.free_trial_total || 3})` 
-      : 'Paid via credit balance'
+    // DEV ACCOUNT: always free, always marked as dev_test
+    const isTrial = isDev ? true : (freeTrialRemaining > 0)
+    const price = (isDev || isTrial) ? 0 : ((tier === 'express') ? 12 : 8)
+    const paymentStatus = isDev ? 'trial' : (isTrial ? 'trial' : 'paid')
+    const notes = isDev
+      ? `DEV TEST — free unlimited report (dev@reusecanada.ca)`
+      : (isTrial 
+        ? `Free trial report (${(customer.free_trial_used || 0) + 1} of ${customer.free_trial_total || 3})` 
+        : 'Paid via credit balance')
 
     // Ensure master company exists
     await c.env.DB.prepare(
@@ -416,15 +427,17 @@ stripeRoutes.post('/use-credit', async (c) => {
       notes, isTrial ? 1 : 0
     ).run()
 
-    // Deduct from the correct bucket
-    if (isTrial) {
-      await c.env.DB.prepare(
-        'UPDATE customers SET free_trial_used = free_trial_used + 1, updated_at = datetime("now") WHERE id = ?'
-      ).bind(customer.customer_id).run()
-    } else {
-      await c.env.DB.prepare(
-        'UPDATE customers SET credits_used = credits_used + 1, updated_at = datetime("now") WHERE id = ?'
-      ).bind(customer.customer_id).run()
+    // Deduct from the correct bucket (DEV ACCOUNT: skip deduction)
+    if (!isDev) {
+      if (isTrial) {
+        await c.env.DB.prepare(
+          'UPDATE customers SET free_trial_used = free_trial_used + 1, updated_at = datetime("now") WHERE id = ?'
+        ).bind(customer.customer_id).run()
+      } else {
+        await c.env.DB.prepare(
+          'UPDATE customers SET credits_used = credits_used + 1, updated_at = datetime("now") WHERE id = ?'
+        ).bind(customer.customer_id).run()
+      }
     }
 
     const newOrderId = result.meta.last_row_id as number
