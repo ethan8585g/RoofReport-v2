@@ -112,8 +112,8 @@ export async function generateReportForOrder(
     const attemptNum = (existing?.generation_attempts || 0) + 1
     const maxAttempts = 3
 
-    if (existing && existing.status === 'running') {
-      console.warn(`[GenerateDirect] Order ${orderId}: report already running, skipping duplicate`)
+    if (existing && existing.status === 'generating') {
+      console.warn(`[GenerateDirect] Order ${orderId}: report already generating, skipping duplicate`)
       return { success: false, error: 'Report generation already in progress' }
     }
 
@@ -122,17 +122,17 @@ export async function generateReportForOrder(
       return { success: false, error: `Max generation attempts (${maxAttempts}) exceeded. Manual intervention required.` }
     }
 
-    // Transition to 'running' state
+    // Transition to 'generating' state
     if (existing) {
       await env.DB.prepare(`
-        UPDATE reports SET status = 'running', generation_attempts = ?, 
+        UPDATE reports SET status = 'generating', generation_attempts = ?, 
           generation_started_at = datetime('now'), error_message = NULL, updated_at = datetime('now')
         WHERE order_id = ?
       `).bind(attemptNum, orderId).run()
     } else {
       await env.DB.prepare(`
         INSERT OR REPLACE INTO reports (order_id, status, generation_attempts, generation_started_at)
-        VALUES (?, 'running', ?, datetime('now'))
+        VALUES (?, 'generating', ?, datetime('now'))
       `).bind(orderId, attemptNum).run()
     }
 
@@ -227,89 +227,50 @@ export async function generateReportForOrder(
     const edgeSummary = reportData.edge_summary
     const materials = reportData.materials
 
-    if (existing) {
-      await env.DB.prepare(`
-        UPDATE reports SET
-          roof_area_sqft = ?, roof_area_sqm = ?,
-          roof_footprint_sqft = ?, roof_footprint_sqm = ?,
-          area_multiplier = ?,
-          roof_pitch_degrees = ?, roof_pitch_ratio = ?,
-          roof_azimuth_degrees = ?,
-          max_sunshine_hours = ?, num_panels_possible = ?,
-          yearly_energy_kwh = ?, roof_segments = ?,
-          edge_measurements = ?,
-          total_ridge_ft = ?, total_hip_ft = ?, total_valley_ft = ?,
-          total_eave_ft = ?, total_rake_ft = ?,
-          material_estimate = ?,
-          gross_squares = ?, bundle_count = ?,
-          total_material_cost_cad = ?, complexity_class = ?,
-          imagery_quality = ?, imagery_date = ?,
-          confidence_score = ?, field_verification_recommended = ?,
-          professional_report_html = ?,
-          report_version = ?,
-          api_response_raw = ?,
-          status = 'completed', updated_at = datetime('now')
-        WHERE order_id = ?
-      `).bind(
-        reportData.total_true_area_sqft, reportData.total_true_area_sqm,
-        reportData.total_footprint_sqft, reportData.total_footprint_sqm,
-        reportData.area_multiplier,
-        reportData.roof_pitch_degrees, reportData.roof_pitch_ratio,
-        reportData.roof_azimuth_degrees,
-        reportData.max_sunshine_hours, reportData.num_panels_possible,
-        reportData.yearly_energy_kwh, JSON.stringify(reportData.segments),
-        JSON.stringify(reportData.edges),
-        edgeSummary.total_ridge_ft, edgeSummary.total_hip_ft, edgeSummary.total_valley_ft,
-        edgeSummary.total_eave_ft, edgeSummary.total_rake_ft,
-        JSON.stringify(materials),
-        materials.gross_squares, materials.bundle_count,
-        materials.total_material_cost_cad, materials.complexity_class,
-        reportData.quality.imagery_quality || null, reportData.quality.imagery_date || null,
-        reportData.quality.confidence_score, reportData.quality.field_verification_recommended ? 1 : 0,
-        professionalHtml,
-        usedDataLayers ? '3.0' : '2.0',
-        JSON.stringify(reportData),
-        orderId
-      ).run()
-    } else {
-      await env.DB.prepare(`
-        INSERT INTO reports (
-          order_id, roof_area_sqft, roof_area_sqm,
-          roof_footprint_sqft, roof_footprint_sqm, area_multiplier,
-          roof_pitch_degrees, roof_pitch_ratio, roof_azimuth_degrees,
-          max_sunshine_hours, num_panels_possible, yearly_energy_kwh,
-          roof_segments, edge_measurements,
-          total_ridge_ft, total_hip_ft, total_valley_ft,
-          total_eave_ft, total_rake_ft,
-          material_estimate, gross_squares, bundle_count,
-          total_material_cost_cad, complexity_class,
-          imagery_quality, imagery_date,
-          confidence_score, field_verification_recommended,
-          professional_report_html, report_version,
-          api_response_raw, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed')
-      `).bind(
-        orderId,
-        reportData.total_true_area_sqft, reportData.total_true_area_sqm,
-        reportData.total_footprint_sqft, reportData.total_footprint_sqm,
-        reportData.area_multiplier,
-        reportData.roof_pitch_degrees, reportData.roof_pitch_ratio,
-        reportData.roof_azimuth_degrees,
-        reportData.max_sunshine_hours, reportData.num_panels_possible,
-        reportData.yearly_energy_kwh, JSON.stringify(reportData.segments),
-        JSON.stringify(reportData.edges),
-        edgeSummary.total_ridge_ft, edgeSummary.total_hip_ft, edgeSummary.total_valley_ft,
-        edgeSummary.total_eave_ft, edgeSummary.total_rake_ft,
-        JSON.stringify(materials),
-        materials.gross_squares, materials.bundle_count,
-        materials.total_material_cost_cad, materials.complexity_class,
-        reportData.quality.imagery_quality || null, reportData.quality.imagery_date || null,
-        reportData.quality.confidence_score, reportData.quality.field_verification_recommended ? 1 : 0,
-        professionalHtml,
-        usedDataLayers ? '3.0' : '2.0',
-        JSON.stringify(reportData)
-      ).run()
-    }
+    // Always UPDATE — we always have a stub record from the 'generating' state insert above
+    await env.DB.prepare(`
+      UPDATE reports SET
+        roof_area_sqft = ?, roof_area_sqm = ?,
+        roof_footprint_sqft = ?, roof_footprint_sqm = ?,
+        area_multiplier = ?,
+        roof_pitch_degrees = ?, roof_pitch_ratio = ?,
+        roof_azimuth_degrees = ?,
+        max_sunshine_hours = ?, num_panels_possible = ?,
+        yearly_energy_kwh = ?, roof_segments = ?,
+        edge_measurements = ?,
+        total_ridge_ft = ?, total_hip_ft = ?, total_valley_ft = ?,
+        total_eave_ft = ?, total_rake_ft = ?,
+        material_estimate = ?,
+        gross_squares = ?, bundle_count = ?,
+        total_material_cost_cad = ?, complexity_class = ?,
+        imagery_quality = ?, imagery_date = ?,
+        confidence_score = ?, field_verification_recommended = ?,
+        professional_report_html = ?,
+        report_version = ?,
+        api_response_raw = ?,
+        status = 'completed', generation_completed_at = datetime('now'), updated_at = datetime('now')
+      WHERE order_id = ?
+    `).bind(
+      reportData.total_true_area_sqft, reportData.total_true_area_sqm,
+      reportData.total_footprint_sqft, reportData.total_footprint_sqm,
+      reportData.area_multiplier,
+      reportData.roof_pitch_degrees, reportData.roof_pitch_ratio,
+      reportData.roof_azimuth_degrees,
+      reportData.max_sunshine_hours, reportData.num_panels_possible,
+      reportData.yearly_energy_kwh, JSON.stringify(reportData.segments),
+      JSON.stringify(reportData.edges),
+      edgeSummary.total_ridge_ft, edgeSummary.total_hip_ft, edgeSummary.total_valley_ft,
+      edgeSummary.total_eave_ft, edgeSummary.total_rake_ft,
+      JSON.stringify(materials),
+      materials.gross_squares, materials.bundle_count,
+      materials.total_material_cost_cad, materials.complexity_class,
+      reportData.quality.imagery_quality || null, reportData.quality.imagery_date || null,
+      reportData.quality.confidence_score, reportData.quality.field_verification_recommended ? 1 : 0,
+      professionalHtml,
+      usedDataLayers ? '3.0' : '2.0',
+      JSON.stringify(reportData),
+      orderId
+    ).run()
 
     await env.DB.prepare(`
       UPDATE orders SET status = 'completed', delivered_at = datetime('now'), updated_at = datetime('now')
@@ -2059,7 +2020,7 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
   </div>
 
   <!-- ====== ROOF IMAGERY: Central AI overlay + 4-panel directional views ====== -->
-  <div class="p1-section-label">AERIAL ROOF IMAGERY${hasOverlay ? ' &mdash; AI-DETECTED GEOMETRY' : ''}</div>
+  <div class="p1-section-label">AERIAL ROOF IMAGERY${hasOverlay ? ' &mdash; MEASURED ROOF DIAGRAM' : ''}</div>
   
   <!-- Main imagery grid: large overhead + 4 directional panels -->
   <div style="display:grid;grid-template-columns:1.6fr 1fr;gap:6px;margin-bottom:10px">
@@ -2070,7 +2031,7 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
         ${hasOverlay ? `<svg viewBox="0 0 640 640" xmlns="http://www.w3.org/2000/svg" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;border-radius:5px">${overlaySVG}</svg>` : ''}
       </div>
       ${overlayLegend}
-      <div class="p1-aerial-label">${hasOverlay ? 'AI Measurement Overlay' : 'Overhead Satellite'} &mdash; Zoom ${report.metadata.provider === 'google_solar_datalayers' ? '21' : '20'} / Scale 2x</div>
+      <div class="p1-aerial-label">${hasOverlay ? 'Measured Roof Diagram &mdash; All Lines in Feet &amp; Inches' : 'Overhead Satellite'} &mdash; Zoom ${report.metadata.provider === 'google_solar_datalayers' ? '21' : '20'} / Scale 2x</div>
     </div>
 
     <!-- Right column: 4 directional views (N/E/S/W) at pitch 45 for roof angle view -->
@@ -2381,9 +2342,42 @@ document.querySelectorAll('.p1-sv-img').forEach(function(img) {
 }
 
 // ============================================================
-// Generate SVG overlay for satellite image — facet polygons + measurement lines
-// Renders on top of the 640x640 satellite image to show roof analysis proof
-// Coordinates from Gemini Vision AI are normalized 0-1000, mapped to 640x640 viewBox
+// HELPER: Convert decimal feet to feet & inches string (e.g. 32.5 → "32' 6\"")
+// ============================================================
+function feetToFeetInches(ft: number): string {
+  const wholeFeet = Math.floor(ft)
+  const inches = Math.round((ft - wholeFeet) * 12)
+  if (inches === 0 || inches === 12) {
+    return `${inches === 12 ? wholeFeet + 1 : wholeFeet}'`
+  }
+  return `${wholeFeet}' ${inches}"`
+}
+
+// ============================================================
+// HELPER: Calculate the pixel distance of an AI line on the 640px canvas
+// ============================================================
+function pixelDistance(x1: number, y1: number, x2: number, y2: number): number {
+  return Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+}
+
+// ============================================================
+// HELPER: Calculate the angle of rotation for a label along a line
+// Returns degrees for SVG transform rotate
+// ============================================================
+function lineAngleDeg(x1: number, y1: number, x2: number, y2: number): number {
+  let angle = Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI
+  // Keep labels readable (never upside-down)
+  if (angle > 90) angle -= 180
+  if (angle < -90) angle += 180
+  return angle
+}
+
+// ============================================================
+// Generate SVG overlay for satellite image — MEASURED ROOF DIAGRAM
+// Shows perimeter outline, internal corner-to-corner lines, 
+// length in feet & inches on each piece, and facet square footage.
+// Only overlays on the specific requested property roof.
+// Coordinates from Gemini Vision AI are normalized 0-1000, mapped to 640x640 viewBox.
 // ============================================================
 function generateSatelliteOverlaySVG(
   aiGeometry: AIMeasurementAnalysis | null | undefined,
@@ -2396,33 +2390,136 @@ function generateSatelliteOverlaySVG(
     return '' // No overlay — plain satellite image
   }
 
-  const scale = 640 / 1000 // Convert 0-1000 normalized coords to 640px
-
+  const S = 640 / 1000 // Convert 0-1000 normalized coords to 640px viewBox
   let svg = ''
 
-  // ---- 1. Draw facet polygons with semi-transparent fill ----
-  aiGeometry.facets.forEach((facet, i) => {
-    if (!facet.points || facet.points.length < 3) return
-    const color = colors[i % colors.length]
-    const points = facet.points.map(p => `${(p.x * scale).toFixed(1)},${(p.y * scale).toFixed(1)}`).join(' ')
+  // ====================================================================
+  // 0. DEFS — drop shadow filter + arrow markers
+  // ====================================================================
+  svg += `<defs>
+    <filter id="lblShadow" x="-4" y="-4" width="108%" height="108%">
+      <feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="#000" flood-opacity="0.6"/>
+    </filter>
+    <filter id="lineShadow" x="-2%" y="-2%" width="104%" height="104%">
+      <feDropShadow dx="0" dy="0" stdDeviation="1.5" flood-color="#000" flood-opacity="0.5"/>
+    </filter>
+  </defs>`
 
-    svg += `<polygon points="${points}" fill="${color}" fill-opacity="0.30" stroke="${color}" stroke-width="2.5" stroke-opacity="0.9"/>`
-
-    // ---- Facet label: area + pitch ----
-    const cx = facet.points.reduce((s, p) => s + p.x, 0) / facet.points.length * scale
-    const cy = facet.points.reduce((s, p) => s + p.y, 0) / facet.points.length * scale
-
-    // Match AI facet to closest segment by index
-    const seg = segments[i] || segments[0]
-    if (seg) {
-      // Background pill for readability
-      svg += `<rect x="${cx - 42}" y="${cy - 14}" width="84" height="28" rx="4" fill="rgba(0,0,0,0.7)"/>`
-      svg += `<text x="${cx}" y="${cy - 1}" text-anchor="middle" font-size="11" font-weight="800" fill="#fff" font-family="Inter,system-ui,sans-serif">${seg.true_area_sqft.toLocaleString()} ft²</text>`
-      svg += `<text x="${cx}" y="${cy + 11}" text-anchor="middle" font-size="9" font-weight="600" fill="${color}" font-family="Inter,system-ui,sans-serif">${seg.pitch_ratio}</text>`
+  // ====================================================================
+  // 1. COMPUTE THE OUTER PERIMETER — merge all facet points into a convex hull
+  //    This represents the roof's outside perimeter boundary
+  // ====================================================================
+  const allFacetPoints: { x: number; y: number }[] = []
+  aiGeometry.facets.forEach(facet => {
+    if (facet.points) {
+      facet.points.forEach(p => allFacetPoints.push({ x: p.x * S, y: p.y * S }))
     }
   })
 
-  // ---- 2. Draw measurement lines (ridge, hip, valley, eave, rake) ----
+  // Compute convex hull for outer perimeter
+  function convexHull(pts: { x: number; y: number }[]): { x: number; y: number }[] {
+    if (pts.length < 3) return pts
+    const sorted = [...pts].sort((a, b) => a.x - b.x || a.y - b.y)
+    const cross = (O: { x: number; y: number }, A: { x: number; y: number }, B: { x: number; y: number }) =>
+      (A.x - O.x) * (B.y - O.y) - (A.y - O.y) * (B.x - O.x)
+    const lower: { x: number; y: number }[] = []
+    for (const p of sorted) {
+      while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop()
+      lower.push(p)
+    }
+    const upper: { x: number; y: number }[] = []
+    for (let i = sorted.length - 1; i >= 0; i--) {
+      const p = sorted[i]
+      while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop()
+      upper.push(p)
+    }
+    upper.pop(); lower.pop()
+    return lower.concat(upper)
+  }
+
+  const hull = convexHull(allFacetPoints)
+
+  // ====================================================================
+  // 1b. DERIVE STRUCTURAL LINES FROM FACET EDGES (when Gemini returns facets but no lines)
+  //     An edge shared by two facets = internal line (RIDGE/HIP/VALLEY)
+  //     An edge belonging to only one facet = perimeter (EAVE/RAKE)
+  // ====================================================================
+  if ((!aiGeometry.lines || aiGeometry.lines.length === 0) && aiGeometry.facets.length > 0) {
+    // Build edge map: key = "x1,y1-x2,y2" (sorted), value = [facet indices]
+    const edgeKey = (a: { x: number; y: number }, b: { x: number; y: number }) => {
+      const k1 = `${Math.min(a.x, b.x)},${Math.min(a.y, b.y)}-${Math.max(a.x, b.x)},${Math.max(a.y, b.y)}`
+      return k1
+    }
+    const edgeMap: Record<string, { start: { x: number; y: number }; end: { x: number; y: number }; facets: number[] }> = {}
+
+    aiGeometry.facets.forEach((facet, fi) => {
+      if (!facet.points || facet.points.length < 3) return
+      for (let j = 0; j < facet.points.length; j++) {
+        const a = facet.points[j]
+        const b = facet.points[(j + 1) % facet.points.length]
+        const key = edgeKey(a, b)
+        if (!edgeMap[key]) {
+          edgeMap[key] = { start: a, end: b, facets: [] }
+        }
+        edgeMap[key].facets.push(fi)
+      }
+    })
+
+    // Classify derived edges
+    const derivedLines: typeof aiGeometry.lines = []
+    for (const [, edge] of Object.entries(edgeMap)) {
+      if (edge.facets.length >= 2) {
+        // Shared edge = internal (RIDGE for top horizontal, HIP for diagonal)
+        const dx = Math.abs(edge.end.x - edge.start.x)
+        const dy = Math.abs(edge.end.y - edge.start.y)
+        const lineType = dy < dx * 0.3 ? 'RIDGE' : (dx < dy * 0.3 ? 'HIP' : 'HIP')
+        derivedLines.push({
+          type: lineType as any,
+          start: edge.start,
+          end: edge.end
+        })
+      } else {
+        // Single-facet edge = perimeter (EAVE for roughly horizontal, RAKE for roughly vertical)
+        const dx = Math.abs(edge.end.x - edge.start.x)
+        const dy = Math.abs(edge.end.y - edge.start.y)
+        const lineType = dx > dy ? 'EAVE' : 'RAKE'
+        derivedLines.push({
+          type: lineType as any,
+          start: edge.start,
+          end: edge.end
+        })
+      }
+    }
+
+    // Assign derived lines back
+    aiGeometry.lines = derivedLines
+    console.log(`[SVG Overlay] Derived ${derivedLines.length} lines from ${aiGeometry.facets.length} facet edges`)
+  }
+
+  // ====================================================================
+  // 2. DRAW PERIMETER — bold outer boundary (only on the roof, NOT surrounding land)
+  // ====================================================================
+  if (hull.length >= 3) {
+    const perimeterPoints = hull.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')
+    // Bold white perimeter with cyan glow
+    svg += `<polygon points="${perimeterPoints}" fill="none" stroke="#00E5FF" stroke-width="3" stroke-opacity="0.9" filter="url(#lineShadow)"/>`
+    svg += `<polygon points="${perimeterPoints}" fill="none" stroke="#fff" stroke-width="1.2" stroke-opacity="0.5" stroke-dasharray="none"/>`
+  }
+
+  // ====================================================================
+  // 3. DRAW FACET FILLS — light semi-transparent colored fills per facet section
+  // ====================================================================
+  aiGeometry.facets.forEach((facet, i) => {
+    if (!facet.points || facet.points.length < 3) return
+    const color = colors[i % colors.length]
+    const points = facet.points.map(p => `${(p.x * S).toFixed(1)},${(p.y * S).toFixed(1)}`).join(' ')
+    svg += `<polygon points="${points}" fill="${color}" fill-opacity="0.18" stroke="none"/>`
+  })
+
+  // ====================================================================
+  // 4. MATCH AI LINES TO MEASURED EDGES — distribute real footage onto AI line positions
+  //    Group AI lines by type, group edges by type, distribute proportionally by pixel length
+  // ====================================================================
   const lineColors: Record<string, string> = {
     'RIDGE': '#FF1744',  // Bold red
     'HIP': '#2979FF',    // Blue
@@ -2432,34 +2529,145 @@ function generateSatelliteOverlaySVG(
   }
   const lineWidths: Record<string, number> = {
     'RIDGE': 3.5,
-    'HIP': 2.5,
-    'VALLEY': 2.5,
-    'EAVE': 2,
-    'RAKE': 2,
+    'HIP': 3,
+    'VALLEY': 3,
+    'EAVE': 2.5,
+    'RAKE': 2.5,
   }
 
-  aiGeometry.lines.forEach((line) => {
-    const color = lineColors[line.type] || '#FFFFFF'
-    const width = lineWidths[line.type] || 2
-    const x1 = (line.start.x * scale).toFixed(1)
-    const y1 = (line.start.y * scale).toFixed(1)
-    const x2 = (line.end.x * scale).toFixed(1)
-    const y2 = (line.end.y * scale).toFixed(1)
-
-    // Dashed for valley, solid for others
-    const dashAttr = line.type === 'VALLEY' ? ' stroke-dasharray="6,3"' : ''
-    svg += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${color}" stroke-width="${width}"${dashAttr} stroke-linecap="round" opacity="0.95"/>`
+  // Group AI lines by type
+  const aiLinesByType: Record<string, typeof aiGeometry.lines> = {}
+  aiGeometry.lines.forEach(l => {
+    if (!aiLinesByType[l.type]) aiLinesByType[l.type] = []
+    aiLinesByType[l.type].push(l)
   })
 
-  // ---- 3. Draw obstruction markers ----
-  aiGeometry.obstructions.forEach((obs) => {
-    const cx = ((obs.boundingBox.min.x + obs.boundingBox.max.x) / 2 * scale).toFixed(1)
-    const cy = ((obs.boundingBox.min.y + obs.boundingBox.max.y) / 2 * scale).toFixed(1)
-    const w = ((obs.boundingBox.max.x - obs.boundingBox.min.x) * scale)
-    const h = ((obs.boundingBox.max.y - obs.boundingBox.min.y) * scale)
+  // Group measured edges by type (uppercase mapping)
+  const edgesByType: Record<string, EdgeMeasurement[]> = {}
+  edges.forEach(e => {
+    const key = e.edge_type.toUpperCase()
+    if (!edgesByType[key]) edgesByType[key] = []
+    edgesByType[key].push(e)
+  })
 
-    svg += `<rect x="${(parseFloat(cx) - w/2).toFixed(1)}" y="${(parseFloat(cy) - h/2).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="none" stroke="#FFD600" stroke-width="2" stroke-dasharray="4,2" rx="2"/>`
-    svg += `<text x="${cx}" y="${(parseFloat(cy) + 3).toFixed(1)}" text-anchor="middle" font-size="8" font-weight="700" fill="#FFD600" font-family="Inter,system-ui,sans-serif">${obs.type}</text>`
+  // For each AI line, compute its pixel length, then distribute the total measured footage
+  // proportionally across all lines of that type based on pixel length ratio
+  const lineLabels: { x: number; y: number; angle: number; label: string; color: string; type: string }[] = []
+
+  for (const [type, aiLines] of Object.entries(aiLinesByType)) {
+    const color = lineColors[type] || '#FFFFFF'
+    const width = lineWidths[type] || 2
+
+    // Total pixel length for this type
+    const pixLengths = aiLines.map(l => {
+      const px1 = l.start.x * S, py1 = l.start.y * S
+      const px2 = l.end.x * S, py2 = l.end.y * S
+      return pixelDistance(px1, py1, px2, py2)
+    })
+    const totalPxLen = pixLengths.reduce((a, b) => a + b, 0)
+
+    // Total measured footage for this edge type
+    const measuredEdges = edgesByType[type] || []
+    const totalMeasuredFt = measuredEdges.reduce((s, e) => s + e.true_length_ft, 0)
+
+    aiLines.forEach((line, idx) => {
+      const px1 = line.start.x * S, py1 = line.start.y * S
+      const px2 = line.end.x * S, py2 = line.end.y * S
+
+      // ---- Draw the line ----
+      const dashAttr = type === 'VALLEY' ? ' stroke-dasharray="8,4"' : ''
+      // Outer glow line for contrast
+      svg += `<line x1="${px1.toFixed(1)}" y1="${py1.toFixed(1)}" x2="${px2.toFixed(1)}" y2="${py2.toFixed(1)}" stroke="#000" stroke-width="${width + 2}" stroke-linecap="round" opacity="0.3" filter="url(#lineShadow)"/>`
+      // Main colored line
+      svg += `<line x1="${px1.toFixed(1)}" y1="${py1.toFixed(1)}" x2="${px2.toFixed(1)}" y2="${py2.toFixed(1)}" stroke="${color}" stroke-width="${width}"${dashAttr} stroke-linecap="round" opacity="0.95"/>`
+
+      // ---- Draw endpoint dots (corner markers) ----
+      svg += `<circle cx="${px1.toFixed(1)}" cy="${py1.toFixed(1)}" r="3" fill="${color}" stroke="#fff" stroke-width="1" opacity="0.9"/>`
+      svg += `<circle cx="${px2.toFixed(1)}" cy="${py2.toFixed(1)}" r="3" fill="${color}" stroke="#fff" stroke-width="1" opacity="0.9"/>`
+
+      // ---- Calculate measurement for this line ----
+      let lineFt = 0
+      if (totalPxLen > 0 && totalMeasuredFt > 0) {
+        // Distribute proportionally by pixel length
+        lineFt = (pixLengths[idx] / totalPxLen) * totalMeasuredFt
+      } else if (measuredEdges[idx]) {
+        lineFt = measuredEdges[idx].true_length_ft
+      }
+
+      if (lineFt > 0) {
+        const midX = (px1 + px2) / 2
+        const midY = (px1 + py2) / 2  // intentional: slight offset for readability
+        const trueMidY = (py1 + py2) / 2
+        const angle = lineAngleDeg(px1, py1, px2, py2)
+        const label = feetToFeetInches(lineFt)
+
+        lineLabels.push({
+          x: (px1 + px2) / 2,
+          y: trueMidY,
+          angle,
+          label,
+          color,
+          type
+        })
+      }
+    })
+  }
+
+  // ====================================================================
+  // 5. DRAW MEASUREMENT LABELS ON EACH LINE — feet & inches in a pill background
+  // ====================================================================
+  lineLabels.forEach(({ x, y, angle, label, color, type }) => {
+    const labelLen = label.length
+    const pillW = Math.max(labelLen * 6.5 + 10, 42)
+    const pillH = 16
+    // Offset the label slightly ABOVE the line so it doesn't cover the line itself
+    const offsetY = -10
+
+    svg += `<g transform="translate(${x.toFixed(1)},${y.toFixed(1)}) rotate(${angle.toFixed(1)})">`
+    // Background pill
+    svg += `<rect x="${(-pillW / 2).toFixed(1)}" y="${(offsetY - pillH / 2).toFixed(1)}" width="${pillW.toFixed(1)}" height="${pillH}" rx="3" fill="rgba(0,0,0,0.82)" stroke="${color}" stroke-width="0.8"/>`
+    // Measurement text
+    svg += `<text x="0" y="${(offsetY + 4).toFixed(1)}" text-anchor="middle" font-size="10" font-weight="800" fill="#fff" font-family="Inter,system-ui,sans-serif" letter-spacing="0.3">${label}</text>`
+    svg += `</g>`
+  })
+
+  // ====================================================================
+  // 6. DRAW FACET SQUARE FOOTAGE LABELS — centered on each roof section
+  // ====================================================================
+  aiGeometry.facets.forEach((facet, i) => {
+    if (!facet.points || facet.points.length < 3) return
+    const seg = segments[i] || segments[0]
+    if (!seg) return
+
+    const color = colors[i % colors.length]
+
+    // Centroid of facet polygon
+    const cx = facet.points.reduce((s, p) => s + p.x, 0) / facet.points.length * S
+    const cy = facet.points.reduce((s, p) => s + p.y, 0) / facet.points.length * S
+
+    // Area label pill
+    const areaText = `${seg.true_area_sqft.toLocaleString()} sq ft`
+    const pillW = Math.max(areaText.length * 6.5 + 14, 80)
+    const pillH = 30
+
+    svg += `<rect x="${(cx - pillW / 2).toFixed(1)}" y="${(cy - pillH / 2).toFixed(1)}" width="${pillW.toFixed(1)}" height="${pillH}" rx="5" fill="rgba(0,0,0,0.78)" stroke="${color}" stroke-width="1.2"/>`
+    // Area in large bold white text
+    svg += `<text x="${cx.toFixed(1)}" y="${(cy - 1).toFixed(1)}" text-anchor="middle" font-size="12" font-weight="900" fill="#fff" font-family="Inter,system-ui,sans-serif">${seg.true_area_sqft.toLocaleString()} ft²</text>`
+    // Pitch below in accent color
+    svg += `<text x="${cx.toFixed(1)}" y="${(cy + 12).toFixed(1)}" text-anchor="middle" font-size="9" font-weight="600" fill="${color}" font-family="Inter,system-ui,sans-serif">${seg.pitch_ratio}</text>`
+  })
+
+  // ====================================================================
+  // 7. DRAW OBSTRUCTION MARKERS — chimney, vent, skylight, HVAC
+  // ====================================================================
+  aiGeometry.obstructions.forEach((obs) => {
+    const cx = (obs.boundingBox.min.x + obs.boundingBox.max.x) / 2 * S
+    const cy = (obs.boundingBox.min.y + obs.boundingBox.max.y) / 2 * S
+    const w = (obs.boundingBox.max.x - obs.boundingBox.min.x) * S
+    const h = (obs.boundingBox.max.y - obs.boundingBox.min.y) * S
+
+    svg += `<rect x="${(cx - w / 2).toFixed(1)}" y="${(cy - h / 2).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="none" stroke="#FFD600" stroke-width="2" stroke-dasharray="4,2" rx="3"/>`
+    svg += `<text x="${cx.toFixed(1)}" y="${(cy + 3).toFixed(1)}" text-anchor="middle" font-size="8" font-weight="700" fill="#FFD600" font-family="Inter,system-ui,sans-serif">${obs.type}</text>`
   })
 
   return svg
@@ -2476,14 +2684,21 @@ function generateOverlayLegend(
     { color: '#00E676', label: 'Valley', value: `${edgeSummary.total_valley_ft} ft`, style: 'stroke-dasharray="4,2"' },
     { color: '#FF9100', label: 'Eave', value: `${edgeSummary.total_eave_ft} ft`, style: '' },
     { color: '#D500F9', label: 'Rake', value: `${edgeSummary.total_rake_ft} ft`, style: '' },
+    { color: '#00E5FF', label: 'Perimeter', value: '', style: '' },
   ]
 
-  let html = '<div style="display:flex;flex-wrap:wrap;gap:6px 12px;padding:6px 10px;background:rgba(0,0,0,0.75);border-radius:6px;margin-top:6px">'
+  let html = '<div style="display:flex;flex-wrap:wrap;gap:6px 12px;padding:6px 10px;background:rgba(0,0,0,0.80);border-radius:6px;margin-top:6px">'
   items.forEach(item => {
-    if (parseInt(item.value) > 0) {
+    const val = parseInt(item.value) || 0
+    if (val > 0 || item.label === 'Perimeter') {
       html += `<div style="display:flex;align-items:center;gap:4px">`
-      html += `<svg width="16" height="4"><line x1="0" y1="2" x2="16" y2="2" stroke="${item.color}" stroke-width="2.5" ${item.style}/></svg>`
-      html += `<span style="color:#fff;font-size:8px;font-weight:600">${item.label}: ${item.value}</span>`
+      if (item.label === 'Perimeter') {
+        html += `<svg width="16" height="4"><line x1="0" y1="2" x2="16" y2="2" stroke="${item.color}" stroke-width="3"/></svg>`
+        html += `<span style="color:#00E5FF;font-size:8px;font-weight:600">Perimeter</span>`
+      } else {
+        html += `<svg width="16" height="4"><line x1="0" y1="2" x2="16" y2="2" stroke="${item.color}" stroke-width="2.5" ${item.style}/></svg>`
+        html += `<span style="color:#fff;font-size:8px;font-weight:600">${item.label}: ${item.value}</span>`
+      }
       html += `</div>`
     }
   })
