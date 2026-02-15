@@ -55,6 +55,12 @@ export type Bindings = {
 
   // Stripe Webhook Secret — verifies webhook signatures
   STRIPE_WEBHOOK_SECRET: string
+
+  // Admin Bootstrap — Used ONLY for initial admin account creation
+  // Set these env vars, then remove after first login
+  ADMIN_BOOTSTRAP_EMAIL: string
+  ADMIN_BOOTSTRAP_PASSWORD: string
+  ADMIN_BOOTSTRAP_NAME: string
 }
 
 // ============================================================

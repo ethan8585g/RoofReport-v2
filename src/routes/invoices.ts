@@ -106,7 +106,8 @@ invoiceRoutes.post('/', async (c) => {
       subtotal += (item.quantity || 1) * (item.unit_price || 0)
     }
     
-    const taxAmount = Math.round(subtotal * taxRateVal) / 100
+    // taxRateVal is a percentage (e.g. 5.0 = 5% GST)
+    const taxAmount = Math.round(subtotal * (taxRateVal / 100) * 100) / 100
     const total = Math.round((subtotal + taxAmount - discountVal) * 100) / 100
 
     // Due date

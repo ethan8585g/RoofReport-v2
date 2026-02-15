@@ -1,7 +1,31 @@
 import { Hono } from 'hono'
 import type { Bindings } from '../types'
+import { validateAdminSession, requireSuperadmin } from './auth'
 
 export const adminRoutes = new Hono<{ Bindings: Bindings }>()
+
+// ============================================================
+// ADMIN AUTH MIDDLEWARE — Validates session on every request
+// ============================================================
+adminRoutes.use('/*', async (c, next) => {
+  // Allow init-db without auth (it's now protected separately)
+  // All other routes require valid admin session
+  const path = c.req.path.replace('/api/admin', '')
+  
+  // init-db requires auth separately inside the handler
+  if (path === '/init-db') {
+    return next()
+  }
+  
+  const admin = await validateAdminSession(c.env.DB, c.req.header('Authorization'))
+  if (!admin) {
+    return c.json({ error: 'Admin authentication required. Please log in at /login' }, 401)
+  }
+  
+  // Store admin info in context for downstream use
+  c.set('admin' as any, admin)
+  return next()
+})
 
 // Dashboard stats
 adminRoutes.get('/dashboard', async (c) => {
@@ -87,8 +111,18 @@ adminRoutes.get('/dashboard', async (c) => {
   }
 })
 
-// Initialize database tables (called on first load)
+// ============================================================
+// INIT-DB — Protected: requires valid admin session
+// In production, use D1 migrations instead.
+// This endpoint is kept for dev/emergency recovery only.
+// ============================================================
 adminRoutes.post('/init-db', async (c) => {
+  // Require admin auth for schema initialization
+  const admin = await validateAdminSession(c.env.DB, c.req.header('Authorization'))
+  if (!admin || !requireSuperadmin(admin)) {
+    return c.json({ error: 'Superadmin authentication required for database initialization' }, 403)
+  }
+
   try {
     // Create tables if they don't exist
     const schema = `
@@ -212,6 +246,16 @@ adminRoutes.post('/init-db', async (c) => {
       try { await c.env.DB.prepare(`ALTER TABLE reports ADD COLUMN ${col}`).run() } catch(e) {}
     }
 
+    // Migration 0004b: Report generation state machine columns
+    const migration0004bCols = [
+      'generation_attempts INTEGER DEFAULT 0',
+      'generation_started_at TEXT',
+      'generation_completed_at TEXT'
+    ]
+    for (const col of migration0004bCols) {
+      try { await c.env.DB.prepare(`ALTER TABLE reports ADD COLUMN ${col}`).run() } catch(e) {}
+    }
+
     // Migration 0005: Authentication system
     await c.env.DB.prepare(`
       CREATE TABLE IF NOT EXISTS admin_users (
@@ -229,6 +273,22 @@ adminRoutes.post('/init-db', async (c) => {
       )
     `).run()
     try { await c.env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_admin_users_email ON admin_users(email)').run() } catch(e) {}
+
+    // Migration 0005b: Admin sessions table (secure session management)
+    await c.env.DB.prepare(`
+      CREATE TABLE IF NOT EXISTS admin_sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        admin_id INTEGER NOT NULL,
+        session_token TEXT UNIQUE NOT NULL,
+        expires_at TEXT NOT NULL,
+        ip_address TEXT,
+        user_agent TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (admin_id) REFERENCES admin_users(id) ON DELETE CASCADE
+      )
+    `).run()
+    try { await c.env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_admin_sessions_token ON admin_sessions(session_token)').run() } catch(e) {}
+    try { await c.env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_admin_sessions_admin ON admin_sessions(admin_id)').run() } catch(e) {}
 
     // Migration 0006: Customer Portal, Invoices & Sales Tracking
     await c.env.DB.prepare(`

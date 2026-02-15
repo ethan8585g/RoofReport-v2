@@ -158,8 +158,9 @@ crmRoutes.post('/invoices', async (c) => {
   const taxR = tax_rate || 5.0
   let subtotal = 0
   if (items && items.length > 0) { for (const it of items) subtotal += (it.quantity || 1) * (it.unit_price || 0) }
-  const taxAmt = Math.round(subtotal * taxR) / 100
-  const total = subtotal + taxAmt
+  // taxR is a percentage (e.g. 5.0 = 5% GST) — proper rounding to cents
+  const taxAmt = Math.round(subtotal * (taxR / 100) * 100) / 100
+  const total = Math.round((subtotal + taxAmt) * 100) / 100
   const invNum = genInvoiceNum()
 
   const result = await c.env.DB.prepare(`
@@ -199,8 +200,9 @@ crmRoutes.put('/invoices/:id', async (c) => {
   const taxR = body.tax_rate || 5.0
   let subtotal = 0
   if (body.items) { for (const it of body.items) subtotal += (it.quantity || 1) * (it.unit_price || 0) }
-  const taxAmt = Math.round(subtotal * taxR) / 100
-  const total = subtotal + taxAmt
+  // taxR is a percentage (e.g. 5.0 = 5% GST) — proper rounding to cents
+  const taxAmt = Math.round(subtotal * (taxR / 100) * 100) / 100
+  const total = Math.round((subtotal + taxAmt) * 100) / 100
 
   await c.env.DB.prepare(`
     UPDATE crm_invoices SET crm_customer_id=?, subtotal=?, tax_rate=?, tax_amount=?, total=?, due_date=?, notes=?, terms=?, updated_at=datetime('now')

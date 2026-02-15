@@ -104,8 +104,42 @@ export async function generateReportForOrder(
     if (!order) return { success: false, error: 'Order not found' }
 
     const existing = await env.DB.prepare(
-      'SELECT id, status FROM reports WHERE order_id = ?'
+      'SELECT id, status, generation_attempts FROM reports WHERE order_id = ?'
     ).bind(orderId).first<any>()
+
+    // ---- STATE MACHINE: queued -> running -> completed/failed ----
+    // Track generation attempts for retry logic
+    const attemptNum = (existing?.generation_attempts || 0) + 1
+    const maxAttempts = 3
+
+    if (existing && existing.status === 'running') {
+      console.warn(`[GenerateDirect] Order ${orderId}: report already running, skipping duplicate`)
+      return { success: false, error: 'Report generation already in progress' }
+    }
+
+    if (attemptNum > maxAttempts) {
+      console.error(`[GenerateDirect] Order ${orderId}: max attempts (${maxAttempts}) exceeded`)
+      return { success: false, error: `Max generation attempts (${maxAttempts}) exceeded. Manual intervention required.` }
+    }
+
+    // Transition to 'running' state
+    if (existing) {
+      await env.DB.prepare(`
+        UPDATE reports SET status = 'running', generation_attempts = ?, 
+          generation_started_at = datetime('now'), error_message = NULL, updated_at = datetime('now')
+        WHERE order_id = ?
+      `).bind(attemptNum, orderId).run()
+    } else {
+      await env.DB.prepare(`
+        INSERT OR REPLACE INTO reports (order_id, status, generation_attempts, generation_started_at)
+        VALUES (?, 'running', ?, datetime('now'))
+      `).bind(orderId, attemptNum).run()
+    }
+
+    // Update order status to processing
+    await env.DB.prepare(
+      "UPDATE orders SET status = 'processing', updated_at = datetime('now') WHERE id = ?"
+    ).bind(orderId).run()
 
     let reportData: RoofReport
     let apiDuration = 0
@@ -291,6 +325,25 @@ export async function generateReportForOrder(
     }
   } catch (err: any) {
     console.error(`[GenerateDirect] Order ${orderId} failed:`, err.message)
+    
+    // Transition to 'failed' state with error details
+    try {
+      await env.DB.prepare(`
+        UPDATE reports SET 
+          status = 'failed', 
+          error_message = ?,
+          generation_completed_at = datetime('now'),
+          updated_at = datetime('now')
+        WHERE order_id = ?
+      `).bind((err.message || 'Unknown error').substring(0, 1000), orderId).run()
+
+      await env.DB.prepare(
+        "UPDATE orders SET status = 'failed', updated_at = datetime('now') WHERE id = ?"
+      ).bind(orderId).run()
+    } catch (dbErr: any) {
+      console.error(`[GenerateDirect] Failed to update error state for order ${orderId}:`, dbErr.message)
+    }
+    
     return { success: false, error: err.message }
   }
 }

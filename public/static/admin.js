@@ -17,17 +17,33 @@ document.addEventListener('DOMContentLoaded', async () => {
   render();
 });
 
+// Admin auth helper — include Bearer token with every admin API call
+function adminHeaders() {
+  const token = localStorage.getItem('rc_token');
+  return token ? { 'Authorization': 'Bearer ' + token } : {};
+}
+
+async function adminFetch(url) {
+  const res = await fetch(url, { headers: adminHeaders() });
+  if (res.status === 401 || res.status === 403) {
+    localStorage.removeItem('rc_user');
+    localStorage.removeItem('rc_token');
+    window.location.href = '/login';
+    return null;
+  }
+  return res;
+}
+
 async function loadAll() {
   A.loading = true;
   try {
     const [statsRes, ordersRes, gmailRes] = await Promise.all([
-      fetch('/api/auth/admin-stats'),
-      fetch('/api/orders?limit=100'),
+      adminFetch('/api/auth/admin-stats'),
+      adminFetch('/api/orders?limit=100'),
       fetch('/api/auth/gmail/status').catch(() => null)
     ]);
-    A.data = await statsRes.json();
-    const od = await ordersRes.json();
-    A.orders = od.orders || [];
+    if (statsRes) A.data = await statsRes.json();
+    if (ordersRes) { const od = await ordersRes.json(); A.orders = od.orders || []; }
     if (gmailRes && gmailRes.ok) A.gmailStatus = await gmailRes.json();
   } catch (e) { console.error('Load error:', e); }
   A.loading = false;

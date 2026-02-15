@@ -22,30 +22,48 @@ window.saDashboardSetView = function(v) {
   loadView(v);
 };
 
+// Admin auth headers — send Bearer token with every admin API call
+function saHeaders() {
+  const token = localStorage.getItem('rc_token');
+  return token ? { 'Authorization': 'Bearer ' + token } : {};
+}
+
+async function saFetch(url) {
+  const res = await fetch(url, { headers: saHeaders() });
+  if (res.status === 401 || res.status === 403) {
+    // Session expired or invalid — redirect to login
+    localStorage.removeItem('rc_user');
+    localStorage.removeItem('rc_token');
+    window.location.href = '/login';
+    return null;
+  }
+  return res;
+}
+
 async function loadView(view) {
   SA.loading = true;
   renderContent();
   try {
     switch (view) {
       case 'users':
-        const usersRes = await fetch('/api/admin/superadmin/users');
-        SA.data.users = await usersRes.json();
+        const usersRes = await saFetch('/api/admin/superadmin/users');
+        if (usersRes) SA.data.users = await usersRes.json();
         break;
       case 'sales':
-        const salesRes = await fetch(`/api/admin/superadmin/sales?period=${SA.salesPeriod}`);
-        SA.data.sales = await salesRes.json();
+        const salesRes = await saFetch(`/api/admin/superadmin/sales?period=${SA.salesPeriod}`);
+        if (salesRes) SA.data.sales = await salesRes.json();
         break;
       case 'orders':
-        const ordersRes = await fetch(`/api/admin/superadmin/orders?limit=100&status=${SA.ordersFilter}`);
-        SA.data.orders = await ordersRes.json();
+        const ordersRes = await saFetch(`/api/admin/superadmin/orders?limit=100&status=${SA.ordersFilter}`);
+        if (ordersRes) SA.data.orders = await ordersRes.json();
         break;
       case 'signups':
-        const signupsRes = await fetch(`/api/admin/superadmin/signups?period=${SA.signupsPeriod}`);
-        SA.data.signups = await signupsRes.json();
+        const signupsRes = await saFetch(`/api/admin/superadmin/signups?period=${SA.signupsPeriod}`);
+        if (signupsRes) SA.data.signups = await signupsRes.json();
         break;
       case 'marketing':
-        const mktRes = await fetch('/api/admin/superadmin/marketing');
-        SA.data.marketing = await mktRes.json();
+        const mktRes = await saFetch('/api/admin/superadmin/marketing');
+        if (mktRes) SA.data.marketing = await mktRes.json();
         break;
     }
   } catch (e) {

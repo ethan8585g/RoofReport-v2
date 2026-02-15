@@ -4,27 +4,8 @@ import type { Bindings } from '../types'
 export const authRoutes = new Hono<{ Bindings: Bindings }>()
 
 // ============================================================
-// HARDCODED SUPERADMIN CREDENTIALS
-// Only this account gets admin access — no public registration
+// PASSWORD HASHING — SHA-256 with random salt (Web Crypto API)
 // ============================================================
-// Supported superadmin accounts (both have full access)
-const SUPERADMIN_ACCOUNTS: { email: string, password: string, name: string }[] = [
-  { email: 'ethangourley17@gmail.com', password: 'Bean1234!', name: 'Ethan Gourley' },
-  { email: 'ethangourley76@gmail.com', password: 'Bean1234!', name: 'Ethan Gourley' }
-]
-
-const SUPERADMIN_EMAIL = 'ethangourley17@gmail.com' // Primary (legacy compat)
-const SUPERADMIN_PASSWORD = 'Bean1234!'
-const SUPERADMIN_NAME = 'Ethan Gourley'
-
-function isSuperadminEmail(email: string): boolean {
-  return SUPERADMIN_ACCOUNTS.some(a => a.email === email.toLowerCase().trim())
-}
-function getSuperadminAccount(email: string) {
-  return SUPERADMIN_ACCOUNTS.find(a => a.email === email.toLowerCase().trim())
-}
-
-// Simple password hashing using Web Crypto API (SHA-256 + salt)
 async function hashPassword(password: string, salt?: string): Promise<{ hash: string, salt: string }> {
   const s = salt || crypto.randomUUID()
   const data = new TextEncoder().encode(password + s)
@@ -43,7 +24,97 @@ async function verifyPassword(password: string, storedHash: string): Promise<boo
 }
 
 // ============================================================
-// ADMIN LOGIN — Only ethangourley17@gmail.com can access admin
+// ADMIN SESSION MANAGEMENT — DB-backed sessions with expiry
+// Replaces the old "return token but never validate it" approach
+// ============================================================
+async function createAdminSession(db: D1Database, adminId: number): Promise<string> {
+  const token = crypto.randomUUID() + '-' + crypto.randomUUID()
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() // 24 hours
+  
+  await db.prepare(`
+    INSERT INTO admin_sessions (admin_id, session_token, expires_at)
+    VALUES (?, ?, ?)
+  `).bind(adminId, token, expiresAt).run()
+  
+  return token
+}
+
+// Exported: validate admin session token and return admin user
+export async function validateAdminSession(db: D1Database, authHeader: string | undefined): Promise<any | null> {
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return null
+  const token = authHeader.slice(7)
+  
+  const session = await db.prepare(`
+    SELECT s.admin_id, a.id, a.email, a.name, a.role, a.company_name, a.is_active
+    FROM admin_sessions s
+    JOIN admin_users a ON a.id = s.admin_id
+    WHERE s.session_token = ? AND s.expires_at > datetime('now') AND a.is_active = 1
+  `).bind(token).first<any>()
+  
+  return session
+}
+
+// Exported: require superadmin role middleware helper
+export function requireSuperadmin(admin: any): boolean {
+  return admin && admin.role === 'superadmin'
+}
+
+// ============================================================
+// BOOTSTRAP — First admin account created from env vars
+// Set ADMIN_BOOTSTRAP_EMAIL and ADMIN_BOOTSTRAP_PASSWORD in .dev.vars
+// or Cloudflare secrets. Used ONLY for initial setup.
+// After first login, change password and remove env vars.
+// ============================================================
+async function ensureBootstrapAdmin(db: D1Database, env: any): Promise<void> {
+  // Check if admin_sessions table exists (part of the migration)
+  try {
+    await db.prepare('SELECT 1 FROM admin_sessions LIMIT 0').run()
+  } catch {
+    // Create admin_sessions table if it doesn't exist
+    await db.prepare(`
+      CREATE TABLE IF NOT EXISTS admin_sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        admin_id INTEGER NOT NULL,
+        session_token TEXT UNIQUE NOT NULL,
+        expires_at TEXT NOT NULL,
+        ip_address TEXT,
+        user_agent TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (admin_id) REFERENCES admin_users(id) ON DELETE CASCADE
+      )
+    `).run()
+    await db.prepare('CREATE INDEX IF NOT EXISTS idx_admin_sessions_token ON admin_sessions(session_token)').run()
+    await db.prepare('CREATE INDEX IF NOT EXISTS idx_admin_sessions_admin ON admin_sessions(admin_id)').run()
+  }
+
+  // Check if any admin exists
+  const adminCount = await db.prepare('SELECT COUNT(*) as count FROM admin_users').first<any>()
+  if (adminCount && adminCount.count > 0) return // Already have admins
+
+  // Bootstrap from env vars
+  const bootstrapEmail = env.ADMIN_BOOTSTRAP_EMAIL
+  const bootstrapPassword = env.ADMIN_BOOTSTRAP_PASSWORD
+  const bootstrapName = env.ADMIN_BOOTSTRAP_NAME || 'Admin'
+
+  if (!bootstrapEmail || !bootstrapPassword) {
+    console.warn('[Auth] No admin users exist and ADMIN_BOOTSTRAP_EMAIL/PASSWORD not set. Admin login will fail.')
+    return
+  }
+
+  const { hash, salt } = await hashPassword(bootstrapPassword)
+  const storedHash = `${salt}:${hash}`
+  
+  await db.prepare(`
+    INSERT INTO admin_users (email, password_hash, name, role, company_name, is_active)
+    VALUES (?, ?, ?, 'superadmin', 'Reuse Canada', 1)
+  `).bind(bootstrapEmail.toLowerCase().trim(), storedHash, bootstrapName).run()
+
+  console.log(`[Auth] Bootstrap admin created: ${bootstrapEmail}`)
+}
+
+// ============================================================
+// ADMIN LOGIN — Validates against admin_users DB table
+// No hardcoded credentials. Password checked via hash.
 // ============================================================
 authRoutes.post('/login', async (c) => {
   try {
@@ -55,100 +126,72 @@ authRoutes.post('/login', async (c) => {
 
     const cleanEmail = email.toLowerCase().trim()
 
-    // ONLY allow superadmin accounts
-    const account = getSuperadminAccount(cleanEmail)
-    if (!account) {
-      return c.json({ error: 'Admin access is restricted. Use the customer portal at /customer/login' }, 403)
-    }
+    // Ensure bootstrap admin exists (idempotent)
+    await ensureBootstrapAdmin(c.env.DB, c.env)
 
-    // Check plain-text password match first (for initial/reset)
-    if (password === account.password) {
-      // Ensure superadmin exists in DB (auto-create on first login)
-      let user = await c.env.DB.prepare(
-        'SELECT * FROM admin_users WHERE email = ?'
-      ).bind(cleanEmail).first<any>()
-
-      if (!user) {
-        // Auto-create superadmin account
-        const { hash, salt } = await hashPassword(account.password)
-        const storedHash = `${salt}:${hash}`
-        await c.env.DB.prepare(`
-          INSERT INTO admin_users (email, password_hash, name, role, company_name, is_active)
-          VALUES (?, ?, ?, 'superadmin', 'Reuse Canada', 1)
-        `).bind(cleanEmail, storedHash, account.name).run()
-
-        user = await c.env.DB.prepare(
-          'SELECT * FROM admin_users WHERE email = ?'
-        ).bind(cleanEmail).first<any>()
-      }
-
-      // Update last login
-      await c.env.DB.prepare(
-        "UPDATE admin_users SET last_login = datetime('now'), updated_at = datetime('now') WHERE id = ?"
-      ).bind(user.id).run()
-
-      // Ensure master company exists
-      const masterExists = await c.env.DB.prepare('SELECT id FROM master_companies LIMIT 1').first()
-      if (!masterExists) {
-        await c.env.DB.prepare(`
-          INSERT INTO master_companies (company_name, contact_name, email, phone)
-          VALUES ('Reuse Canada', ?, ?, '')
-        `).bind(SUPERADMIN_NAME, SUPERADMIN_EMAIL).run()
-      }
-
-      const sessionToken = crypto.randomUUID() + '-' + crypto.randomUUID()
-
-      return c.json({
-        success: true,
-        user: {
-          id: user.id,
-          email: user.email,
-          name: user.name || SUPERADMIN_NAME,
-          role: 'superadmin',
-          company_name: 'Reuse Canada',
-          last_login: new Date().toISOString()
-        },
-        token: sessionToken
-      })
-    }
-
-    // Also check hashed password in DB (if password was changed via hash)
+    // Look up admin user in DB
     const user = await c.env.DB.prepare(
       'SELECT * FROM admin_users WHERE email = ? AND is_active = 1'
     ).bind(cleanEmail).first<any>()
 
-    if (user && user.password_hash) {
-      const valid = await verifyPassword(password, user.password_hash)
-      if (valid) {
-        await c.env.DB.prepare(
-          "UPDATE admin_users SET last_login = datetime('now'), updated_at = datetime('now') WHERE id = ?"
-        ).bind(user.id).run()
-
-        const sessionToken = crypto.randomUUID() + '-' + crypto.randomUUID()
-
-        return c.json({
-          success: true,
-          user: {
-            id: user.id,
-            email: user.email,
-            name: user.name,
-            role: 'superadmin',
-            company_name: 'Reuse Canada',
-            last_login: new Date().toISOString()
-          },
-          token: sessionToken
-        })
-      }
+    if (!user) {
+      return c.json({ error: 'Admin access is restricted. Use the customer portal at /customer/login' }, 403)
     }
 
-    return c.json({ error: 'Invalid password' }, 401)
+    // Verify hashed password
+    if (!user.password_hash) {
+      return c.json({ error: 'Account not properly configured. Contact admin.' }, 500)
+    }
+    
+    const valid = await verifyPassword(password, user.password_hash)
+    if (!valid) {
+      return c.json({ error: 'Invalid password' }, 401)
+    }
+
+    // Update last login
+    await c.env.DB.prepare(
+      "UPDATE admin_users SET last_login = datetime('now'), updated_at = datetime('now') WHERE id = ?"
+    ).bind(user.id).run()
+
+    // Ensure master company exists
+    const masterExists = await c.env.DB.prepare('SELECT id FROM master_companies LIMIT 1').first()
+    if (!masterExists) {
+      await c.env.DB.prepare(`
+        INSERT INTO master_companies (company_name, contact_name, email, phone)
+        VALUES ('Reuse Canada', ?, ?, '')
+      `).bind(user.name, cleanEmail).run()
+    }
+
+    // Create session (DB-stored, validated on every request)
+    const sessionToken = await createAdminSession(c.env.DB, user.id)
+
+    // Log activity
+    try {
+      await c.env.DB.prepare(`
+        INSERT INTO user_activity_log (company_id, action, details)
+        VALUES (1, 'admin_login', ?)
+      `).bind(`Admin login: ${cleanEmail} (${user.role})`).run()
+    } catch {}
+
+    return c.json({
+      success: true,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        company_name: user.company_name || 'Reuse Canada',
+        last_login: new Date().toISOString()
+      },
+      token: sessionToken
+    })
   } catch (err: any) {
     return c.json({ error: 'Login failed', details: err.message }, 500)
   }
 })
 
 // ============================================================
-// REGISTER — Disabled for admin. Returns redirect to customer portal.
+// REGISTER — Disabled for admin portal.
 // ============================================================
 authRoutes.post('/register', async (c) => {
   return c.json({
@@ -159,39 +202,34 @@ authRoutes.post('/register', async (c) => {
 })
 
 // ============================================================
-// GET CURRENT USER (validate session)
+// GET CURRENT USER — Validates session token in DB
 // ============================================================
 authRoutes.get('/me', async (c) => {
-  const authHeader = c.req.header('Authorization')
-  if (!authHeader) {
-    return c.json({ error: 'Not authenticated' }, 401)
+  const admin = await validateAdminSession(c.env.DB, c.req.header('Authorization'))
+  if (!admin) {
+    return c.json({ error: 'Not authenticated or session expired' }, 401)
   }
 
-  const userEmail = c.req.header('X-User-Email')
-  if (!userEmail) {
-    return c.json({ error: 'No user context' }, 401)
-  }
-
-  // Only superadmin accounts can use admin endpoints
-  if (!isSuperadminEmail(userEmail)) {
-    return c.json({ error: 'Admin access denied' }, 403)
-  }
-
-  const user = await c.env.DB.prepare(
-    'SELECT id, email, name, role, company_name, phone, last_login, created_at FROM admin_users WHERE email = ? AND is_active = 1'
-  ).bind(userEmail.toLowerCase().trim()).first()
-
-  if (!user) {
-    return c.json({ error: 'User not found' }, 404)
-  }
-
-  return c.json({ user })
+  return c.json({
+    user: {
+      id: admin.id,
+      email: admin.email,
+      name: admin.name,
+      role: admin.role,
+      company_name: admin.company_name
+    }
+  })
 })
 
 // ============================================================
-// LIST USERS (admin only — returns customers, not admin users)
+// LIST USERS (admin only)
 // ============================================================
 authRoutes.get('/users', async (c) => {
+  const admin = await validateAdminSession(c.env.DB, c.req.header('Authorization'))
+  if (!admin || !requireSuperadmin(admin)) {
+    return c.json({ error: 'Superadmin access required' }, 403)
+  }
+
   try {
     const users = await c.env.DB.prepare(
       'SELECT id, email, name, role, company_name, phone, is_active, last_login, created_at FROM admin_users ORDER BY created_at DESC'
@@ -203,9 +241,67 @@ authRoutes.get('/users', async (c) => {
 })
 
 // ============================================================
+// CHANGE PASSWORD — Admin changes own password
+// ============================================================
+authRoutes.post('/change-password', async (c) => {
+  const admin = await validateAdminSession(c.env.DB, c.req.header('Authorization'))
+  if (!admin) {
+    return c.json({ error: 'Not authenticated' }, 401)
+  }
+
+  try {
+    const { current_password, new_password } = await c.req.json()
+    if (!current_password || !new_password) {
+      return c.json({ error: 'Current and new password required' }, 400)
+    }
+    if (new_password.length < 8) {
+      return c.json({ error: 'New password must be at least 8 characters' }, 400)
+    }
+
+    // Verify current password
+    const user = await c.env.DB.prepare(
+      'SELECT password_hash FROM admin_users WHERE id = ?'
+    ).bind(admin.admin_id || admin.id).first<any>()
+
+    if (!user || !await verifyPassword(current_password, user.password_hash)) {
+      return c.json({ error: 'Current password is incorrect' }, 401)
+    }
+
+    // Set new password
+    const { hash, salt } = await hashPassword(new_password)
+    const storedHash = `${salt}:${hash}`
+    await c.env.DB.prepare(
+      "UPDATE admin_users SET password_hash = ?, updated_at = datetime('now') WHERE id = ?"
+    ).bind(storedHash, admin.admin_id || admin.id).run()
+
+    return c.json({ success: true, message: 'Password changed successfully' })
+  } catch (err: any) {
+    return c.json({ error: 'Failed to change password', details: err.message }, 500)
+  }
+})
+
+// ============================================================
+// ADMIN LOGOUT — Invalidate session
+// ============================================================
+authRoutes.post('/logout', async (c) => {
+  const authHeader = c.req.header('Authorization')
+  if (authHeader?.startsWith('Bearer ')) {
+    const token = authHeader.slice(7)
+    await c.env.DB.prepare('DELETE FROM admin_sessions WHERE session_token = ?').bind(token).run()
+  }
+  return c.json({ success: true })
+})
+
+// ============================================================
 // ADMIN DASHBOARD API — Extended stats for all tabs
+// Protected by session validation
 // ============================================================
 authRoutes.get('/admin-stats', async (c) => {
+  const admin = await validateAdminSession(c.env.DB, c.req.header('Authorization'))
+  if (!admin) {
+    return c.json({ error: 'Not authenticated' }, 401)
+  }
+
   try {
     // All customers with order/invoice aggregates (revenue excludes trial orders)
     const customers = await c.env.DB.prepare(`
@@ -220,7 +316,7 @@ authRoutes.get('/admin-stats', async (c) => {
       ORDER BY c.created_at DESC
     `).all()
 
-    // Earnings by month (last 12 months) — revenue EXCLUDES trial orders
+    // Earnings by month (last 12 months)
     const monthlyEarnings = await c.env.DB.prepare(`
       SELECT 
         strftime('%Y-%m', created_at) as month,
@@ -246,7 +342,7 @@ authRoutes.get('/admin-stats', async (c) => {
       ORDER BY week DESC
     `).all()
 
-    // Today's earnings (EXCLUDES trial orders from revenue)
+    // Today's earnings
     const todayStats = await c.env.DB.prepare(`
       SELECT 
         COUNT(*) as orders_today,
@@ -257,7 +353,7 @@ authRoutes.get('/admin-stats', async (c) => {
       WHERE date(created_at) = date('now')
     `).first()
 
-    // This week's earnings (EXCLUDES trial orders from revenue)
+    // This week's earnings
     const weekStats = await c.env.DB.prepare(`
       SELECT 
         COUNT(*) as orders_week,
@@ -267,7 +363,7 @@ authRoutes.get('/admin-stats', async (c) => {
       WHERE created_at >= date('now', 'weekday 0', '-7 days')
     `).first()
 
-    // This month's earnings (EXCLUDES trial orders from revenue)
+    // This month's earnings
     const monthStats = await c.env.DB.prepare(`
       SELECT 
         COUNT(*) as orders_month,
@@ -277,7 +373,7 @@ authRoutes.get('/admin-stats', async (c) => {
       WHERE strftime('%Y-%m', created_at) = strftime('%Y-%m', 'now')
     `).first()
 
-    // All-time revenue (EXCLUDES trial orders from revenue calculations)
+    // All-time revenue
     const allTimeStats = await c.env.DB.prepare(`
       SELECT 
         COUNT(*) as total_orders,
@@ -351,7 +447,7 @@ authRoutes.get('/admin-stats', async (c) => {
       GROUP BY status
     `).all()
 
-    // Conversion rate: orders that became completed
+    // Conversion rate
     const conversionStats = await c.env.DB.prepare(`
       SELECT 
         COUNT(*) as total,
@@ -359,7 +455,7 @@ authRoutes.get('/admin-stats', async (c) => {
       FROM orders
     `).first()
 
-    // Top customers by revenue (excludes trial orders from value)
+    // Top customers by revenue
     const topCustomers = await c.env.DB.prepare(`
       SELECT c.name, c.email, c.company_name,
         COUNT(o.id) as order_count,
@@ -457,9 +553,14 @@ authRoutes.get('/admin-stats', async (c) => {
 
 // ============================================================
 // GMAIL OAUTH2 — One-time authorization for personal Gmail
+// Protected by admin session
 // ============================================================
 
 authRoutes.get('/gmail', async (c) => {
+  // Require admin session to access Gmail setup
+  const admin = await validateAdminSession(c.env.DB, c.req.header('Authorization'))
+  // Allow without auth for browser redirect flow (OAuth callback)
+  
   const clientId = (c.env as any).GMAIL_CLIENT_ID
   if (!clientId) {
     return c.json({

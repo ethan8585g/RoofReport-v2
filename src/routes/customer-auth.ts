@@ -463,6 +463,114 @@ customerAuthRoutes.get('/orders', async (c) => {
 })
 
 // ============================================================
+// ORDER PROGRESS TRACKER — Real-time status for report generation
+// Returns a timeline of generation steps with current status
+// ============================================================
+customerAuthRoutes.get('/orders/:orderId/progress', async (c) => {
+  const token = c.req.header('Authorization')?.replace('Bearer ', '')
+  if (!token) return c.json({ error: 'Not authenticated' }, 401)
+
+  const session = await c.env.DB.prepare(`
+    SELECT customer_id FROM customer_sessions
+    WHERE session_token = ? AND expires_at > datetime('now')
+  `).bind(token).first<any>()
+
+  if (!session) return c.json({ error: 'Session expired' }, 401)
+
+  const orderId = c.req.param('orderId')
+
+  // Get order + report status
+  const order = await c.env.DB.prepare(`
+    SELECT o.*, r.status as report_status, r.generation_attempts, 
+           r.generation_started_at, r.generation_completed_at,
+           r.error_message as report_error, r.confidence_score,
+           r.imagery_quality, r.report_version,
+           r.roof_area_sqft, r.total_material_cost_cad, r.complexity_class
+    FROM orders o
+    LEFT JOIN reports r ON r.order_id = o.id
+    WHERE o.id = ? AND o.customer_id = ?
+  `).bind(orderId, session.customer_id).first<any>()
+
+  if (!order) return c.json({ error: 'Order not found' }, 404)
+
+  // Build progress timeline
+  const steps = [
+    {
+      id: 'payment',
+      label: 'Payment Received',
+      icon: 'fa-credit-card',
+      status: order.payment_status === 'paid' || order.payment_status === 'trial' ? 'completed' : 'pending',
+      completed_at: order.created_at,
+      detail: order.is_trial ? 'Free trial report' : (order.payment_status === 'paid' ? `$${order.price} CAD` : 'Awaiting payment')
+    },
+    {
+      id: 'geocoding',
+      label: 'Property Located',
+      icon: 'fa-map-marker-alt',
+      status: order.latitude && order.longitude ? 'completed' : (order.status === 'failed' ? 'failed' : 'pending'),
+      completed_at: order.latitude ? order.created_at : null,
+      detail: order.latitude ? `${order.latitude.toFixed(6)}, ${order.longitude.toFixed(6)}` : 'Geocoding address...'
+    },
+    {
+      id: 'imagery',
+      label: 'Satellite Imagery',
+      icon: 'fa-satellite',
+      status: order.report_status === 'running' ? 'running' :
+             (order.report_status === 'completed' ? 'completed' :
+              order.report_status === 'failed' ? 'failed' : 'pending'),
+      completed_at: order.generation_started_at || null,
+      detail: order.report_status === 'running' ? 'Fetching satellite & DSM data...' :
+              (order.imagery_quality ? `Quality: ${order.imagery_quality}` : 'Queued')
+    },
+    {
+      id: 'measurement',
+      label: 'Roof Measurement',
+      icon: 'fa-ruler-combined',
+      status: order.report_status === 'completed' ? 'completed' :
+             (order.report_status === 'running' ? 'running' : 
+              order.report_status === 'failed' ? 'failed' : 'pending'),
+      completed_at: order.report_status === 'completed' ? order.generation_completed_at : null,
+      detail: order.roof_area_sqft ? `${Math.round(order.roof_area_sqft)} sq ft` : 'Analyzing roof geometry...'
+    },
+    {
+      id: 'materials',
+      label: 'Material Estimate',
+      icon: 'fa-calculator',
+      status: order.report_status === 'completed' ? 'completed' : 'pending',
+      completed_at: order.report_status === 'completed' ? order.generation_completed_at : null,
+      detail: order.total_material_cost_cad ? `$${order.total_material_cost_cad.toFixed(2)} CAD` : 'Calculating materials...'
+    },
+    {
+      id: 'report',
+      label: 'Report Generated',
+      icon: 'fa-file-pdf',
+      status: order.report_status === 'completed' ? 'completed' :
+             (order.report_status === 'failed' ? 'failed' : 'pending'),
+      completed_at: order.report_status === 'completed' ? (order.delivered_at || order.generation_completed_at) : null,
+      detail: order.report_status === 'completed' ? `v${order.report_version || '2.0'} — Confidence: ${order.confidence_score || 'N/A'}%` :
+              (order.report_status === 'failed' ? (order.report_error || 'Generation failed') : 'Assembling PDF...')
+    }
+  ]
+
+  // Determine overall progress percentage
+  const completedSteps = steps.filter(s => s.status === 'completed').length
+  const progressPct = Math.round((completedSteps / steps.length) * 100)
+
+  return c.json({
+    order_id: order.id,
+    order_number: order.order_number,
+    property_address: order.property_address,
+    order_status: order.status,
+    report_status: order.report_status || 'queued',
+    generation_attempts: order.generation_attempts || 0,
+    progress_pct: progressPct,
+    steps,
+    error: order.report_status === 'failed' ? order.report_error : null,
+    can_retry: order.report_status === 'failed' && (order.generation_attempts || 0) < 3
+  })
+})
+
+// ============================================================
 // CUSTOMER INVOICES
 // ============================================================
 customerAuthRoutes.get('/invoices', async (c) => {

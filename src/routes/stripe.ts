@@ -96,6 +96,49 @@ function encodeStripeParams(obj: any, prefix?: string): string {
 }
 
 // ============================================================
+// STRIPE WEBHOOK SIGNATURE VERIFICATION (Web Crypto API)
+// ============================================================
+async function verifyStripeSignature(payload: string, sigHeader: string, secret: string): Promise<boolean> {
+  try {
+    // Parse signature header
+    const elements = sigHeader.split(',')
+    let timestamp = ''
+    const signatures: string[] = []
+    for (const el of elements) {
+      const [key, val] = el.trim().split('=')
+      if (key === 't') timestamp = val
+      if (key === 'v1') signatures.push(val)
+    }
+    if (!timestamp || signatures.length === 0) return false
+
+    // Reject if timestamp is too old (5 minute tolerance)
+    const tsNum = parseInt(timestamp)
+    if (Math.abs(Date.now() / 1000 - tsNum) > 300) {
+      console.warn('[Webhook] Timestamp outside tolerance window')
+      return false
+    }
+
+    // Compute expected signature: HMAC-SHA256(secret, timestamp.payload)
+    const signedPayload = `${timestamp}.${payload}`
+    const key = await crypto.subtle.importKey(
+      'raw',
+      new TextEncoder().encode(secret),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign']
+    )
+    const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(signedPayload))
+    const expectedSig = Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, '0')).join('')
+
+    // Constant-time comparison
+    return signatures.some(s => s === expectedSig)
+  } catch (err: any) {
+    console.error('[Webhook] Signature verification error:', err.message)
+    return false
+  }
+}
+
+// ============================================================
 // AUTH MIDDLEWARE — Extract customer from session token
 // ============================================================
 async function getCustomerFromToken(db: D1Database, token: string | undefined): Promise<any | null> {
@@ -527,12 +570,29 @@ stripeRoutes.post('/use-credit', async (c) => {
 
 // ============================================================
 // STRIPE WEBHOOK — Process payment confirmations
+// Verifies Stripe-Signature header when STRIPE_WEBHOOK_SECRET is set
 // ============================================================
 stripeRoutes.post('/webhook', async (c) => {
   try {
     const rawBody = await c.req.text()
+    const webhookSecret = (c.env as any).STRIPE_WEBHOOK_SECRET
     
-    // Parse the event (in production, verify signature with STRIPE_WEBHOOK_SECRET)
+    // Verify Stripe webhook signature if secret is configured
+    if (webhookSecret) {
+      const sigHeader = c.req.header('Stripe-Signature')
+      if (!sigHeader) {
+        console.warn('[Webhook] Missing Stripe-Signature header')
+        return c.json({ error: 'Missing Stripe-Signature header' }, 400)
+      }
+      
+      const isValid = await verifyStripeSignature(rawBody, sigHeader, webhookSecret)
+      if (!isValid) {
+        console.warn('[Webhook] Invalid Stripe-Signature')
+        return c.json({ error: 'Invalid signature' }, 400)
+      }
+    }
+    
+    // Parse the event
     let event: any
     try {
       event = JSON.parse(rawBody)
