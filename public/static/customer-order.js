@@ -68,7 +68,7 @@ function renderOrderPage() {
   const paidCredits = b.paid_credits_remaining || 0;
   const isTrialAvailable = freeTrialRemaining > 0;
   const tiers = [
-    { id: 'standard', label: 'Roof Report', desc: 'Instant', price: 8, icon: 'fa-bolt', color: 'brand' },
+    { id: 'standard', label: 'Roof Report', desc: 'Instant AI-Powered', price: 10, icon: 'fa-bolt', color: 'brand' },
   ];
 
   const selectedTierInfo = tiers.find(t => t.id === orderState.selectedTier) || tiers[0];
@@ -103,15 +103,24 @@ function renderOrderPage() {
           </div>
         </div>
       ` : `
-        <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 flex items-center justify-between">
-          <div class="flex items-center gap-3">
-            <div class="w-10 h-10 bg-amber-100 rounded-lg flex items-center justify-center"><i class="fas fa-credit-card text-amber-600"></i></div>
-            <div>
-              <p class="font-semibold text-amber-800">No credits remaining — pay per report or buy a credit pack</p>
-              <p class="text-sm text-amber-600">Starting at $4.75 CAD per report with credit packs</p>
+        <div class="bg-gradient-to-r from-brand-800 to-brand-900 rounded-xl p-5 mb-6 shadow-lg">
+          <div class="flex items-center justify-between gap-4">
+            <div class="flex items-center gap-4">
+              <div class="w-12 h-12 bg-amber-500 rounded-xl flex items-center justify-center shadow"><i class="fas fa-crown text-white text-xl"></i></div>
+              <div>
+                <p class="font-bold text-white text-base">Your 3 Free Trials Are Used Up!</p>
+                <p class="text-sm text-brand-200 mt-0.5">Credit packs start at <strong class="text-amber-400">$5.00/report</strong> — save up to 50% vs single purchase</p>
+              </div>
+            </div>
+            <div class="flex gap-2 flex-shrink-0">
+              <a href="/pricing" class="bg-amber-500 hover:bg-amber-400 text-gray-900 px-5 py-2.5 rounded-xl text-sm font-black transition-all hover:scale-105 shadow-lg"><i class="fas fa-tags mr-1.5"></i>Buy Credits</a>
             </div>
           </div>
-          <a href="/pricing" class="bg-brand-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-brand-700">Buy Credits</a>
+          <div class="mt-3 grid grid-cols-3 gap-2">
+            <div class="bg-white/10 rounded-lg px-3 py-2 text-center"><p class="text-amber-400 font-black text-sm">$7/ea</p><p class="text-white/60 text-[10px]">5 Pack</p></div>
+            <div class="bg-white/10 rounded-lg px-3 py-2 text-center"><p class="text-amber-400 font-black text-sm">$6/ea</p><p class="text-white/60 text-[10px]">10 Pack</p></div>
+            <div class="bg-white/10 rounded-lg px-3 py-2 text-center"><p class="text-amber-400 font-black text-sm">$5/ea</p><p class="text-white/60 text-[10px]">50 Pack</p></div>
+          </div>
         </div>
       `}
 
@@ -202,7 +211,7 @@ function renderOrderPage() {
       </div>
 
       <!-- Credit Packs Upsell -->
-      ${credits <= 2 ? `
+      ${credits <= 3 ? `
         <div class="mt-8 bg-white rounded-2xl border border-gray-200 p-6">
           <h3 class="text-lg font-bold text-gray-800 mb-4"><i class="fas fa-tags text-brand-500 mr-2"></i>Save with Credit Packs</h3>
           <div class="grid grid-cols-5 gap-3">

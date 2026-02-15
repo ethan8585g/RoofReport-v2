@@ -279,8 +279,9 @@ stripeRoutes.post('/checkout/report', async (c) => {
     if (!property_address) return c.json({ error: 'Property address is required' }, 400)
 
     const tier = service_tier || 'standard'
-    const prices: Record<string, number> = { express: 1200, standard: 800 }
-    const priceCents = prices[tier] || 800
+    // Single report = $10 CAD flat (1000 cents)
+    const prices: Record<string, number> = { express: 1000, standard: 1000 }
+    const priceCents = prices[tier] || 1000
     const tierLabels: Record<string, string> = { express: 'Express', standard: 'Standard' }
 
     // Ensure Stripe customer
@@ -385,7 +386,7 @@ stripeRoutes.post('/use-credit', async (c) => {
     // Determine if this is a free trial order or paid order
     // DEV ACCOUNT: always free, always marked as dev_test
     const isTrial = isDev ? true : (freeTrialRemaining > 0)
-    const price = (isDev || isTrial) ? 0 : ((tier === 'express') ? 12 : 8)
+    const price = (isDev || isTrial) ? 0 : 10  // Single report = $10 CAD flat
     const paymentStatus = isDev ? 'trial' : (isTrial ? 'trial' : 'paid')
     const notes = isDev
       ? `DEV TEST — free unlimited report (dev@reusecanada.ca)`
@@ -574,8 +575,8 @@ stripeRoutes.post('/webhook', async (c) => {
           // Single report purchase — create order automatically
           const tier = meta.service_tier || 'standard'
           const address = meta.property_address || 'Unknown address'
-          const tierPrices: Record<string, number> = { express: 12, standard: 8 }
-          const price = tierPrices[tier] || 8
+          // Single report = $10 CAD flat
+          const price = 10
 
           const d = new Date().toISOString().slice(0, 10).replace(/-/g, '')
           const rand = Math.floor(Math.random() * 9999).toString().padStart(4, '0')
