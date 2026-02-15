@@ -2,9 +2,9 @@
 
 ## Project Overview
 - **Name**: Reuse Canada Roof Measurement Reports
-- **Version**: 5.0 (Solar DataLayers + GeoTIFF DSM Engine)
+- **Version**: 6.1 (Solar DataLayers + GeoTIFF DSM + Full CRM Suite)
 - **Goal**: Professional roof measurement reports for roofing contractors installing new roofs
-- **Features**: Marketing landing page, login/register system, admin dashboard with order management, Google Solar API, **Solar DataLayers GeoTIFF processing**, Material BOM, Edge Analysis, Gmail OAuth2 Email Delivery, PDF download
+- **Features**: Marketing landing page, login/register system, admin dashboard with order management, Google Solar API, **Solar DataLayers GeoTIFF processing**, Material BOM, Edge Analysis, Gmail OAuth2 Email Delivery, PDF download, **Full CRM Suite** (Customers, Invoices, Proposals, Jobs, Sales Pipeline, D2D Manager)
 
 ## URLs
 - **Live Sandbox**: https://3000-ing8ae0z5fkhj91kq4pyi-dfc00ec5.sandbox.novita.ai
@@ -244,11 +244,15 @@ The v5.0 engine uses a **hybrid approach** combining the best of both Google Sol
 1. **Gmail Setup**: Create OAuth2 credentials in GCP Console, visit `/api/auth/gmail` to authorize
 2. **Measurements**: For rural properties without API coverage, use Gemini AI vision analysis
 3. **Stripe Payments**: Set STRIPE_SECRET_KEY and STRIPE_PUBLISHABLE_KEY
-4. **Cloudflare Deploy**: Deploy to production with `npx wrangler pages deploy dist`
-5. **Email Report PDF**: Enhance email endpoint to auto-trigger DataLayers generation + email
+4. **Sales Pipeline**: Implement Kanban-style lead tracking (Lead → Contact → Proposal → Closed)
+5. **D2D Manager**: Territory maps, knock tracking, conversion stats, team management
+6. **FullCalendar Integration**: Add FullCalendar.js to Job Management for calendar-based scheduling
+7. **Proposal PDF**: Generate downloadable proposal PDFs from the Proposals module
+8. **Email Report PDF**: Enhance email endpoint to auto-trigger DataLayers generation + email
 
 ## Deployment
 - **Platform**: Cloudflare Pages (via Wrangler)
-- **Status**: Active (Sandbox)
-- **Last Updated**: 2026-02-14
+- **Production**: https://roofing-measurement-tool.pages.dev
+- **Status**: Active (Cloudflare Pages + Sandbox)
+- **Last Updated**: 2026-02-15
 - **Build**: `npm run build` (Vite SSR)
