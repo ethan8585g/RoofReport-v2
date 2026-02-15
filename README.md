@@ -48,6 +48,29 @@ Each report generates a branded 3-page HTML document:
 | `/order/new` | 5-step order form |
 | `/order/:id` | Order confirmation/tracking |
 | `/settings` | API keys & config |
+| `/customer/login` | Customer login/register portal |
+| `/customer/dashboard` | Customer dashboard — 8-tile nav hub with quick stats |
+| `/customer/order` | Order a new roof report (address + pay/credit) |
+| `/customer/invoice/:id` | View a specific invoice |
+| `/customer/reports` | **CRM** — Roof Report History (completed orders) |
+| `/customer/customers` | **CRM** — My Customers (add/edit/search/view contacts) |
+| `/customer/invoices` | **CRM** — Invoices (create, send, mark paid, line items) |
+| `/customer/proposals` | **CRM** — Proposals & Estimates (labor/material/other costs) |
+| `/customer/jobs` | **CRM** — Job Management (schedule, checklist, status workflow) |
+| `/customer/pipeline` | **CRM** — Sales Pipeline (Coming Soon) |
+| `/customer/d2d` | **CRM** — D2D Manager (Coming Soon) |
+| `/pricing` | Public pricing page for credit packs |
+
+## CRM Module (v6.0)
+Each logged-in customer gets a full roofing business CRM:
+- **Customers**: Add/edit/search/delete contacts, track lifetime revenue, view invoices & proposals per client
+- **Invoices**: Create with multiple line items, GST calculation, mark as draft/sent/paid/overdue
+- **Proposals**: Create roof estimates with labor + material + other costs, mark open/sold
+- **Jobs**: Schedule with date/time/crew, checklist (permit, material delivery, dumpster, inspection), start/complete workflow
+- **Pipeline**: (Coming Soon) Lead tracking through contact → proposal → closed stages
+- **D2D Manager**: (Coming Soon) Territory maps, knock tracking, conversion stats, team management
+
+All CRM data is per-user (owner_id scoped) — each customer manages their own contacts, invoices, proposals, and jobs independently.
 
 ## API Endpoints
 | Method | Endpoint | Description |
