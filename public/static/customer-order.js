@@ -14,6 +14,9 @@ const orderState = {
   lng: null,
   loading: true,
   ordering: false,
+  map: null,
+  marker: null,
+  geocoder: null
 };
 
 function getToken() { return localStorage.getItem('rc_customer_token') || ''; }
@@ -22,7 +25,108 @@ function authHeaders() { return { 'Authorization': 'Bearer ' + getToken(), 'Cont
 document.addEventListener('DOMContentLoaded', async () => {
   await loadOrderData();
   renderOrderPage();
+  renderOrderPage();
+
+  // Check for Google Maps API load status
+  setTimeout(() => {
+    if (typeof google === 'undefined' || typeof google.maps === 'undefined') {
+      const errEl = document.getElementById('mapError');
+      if (errEl) {
+        errEl.textContent = 'Google Maps API failed to load. Please check your network connection or API configuration.';
+        errEl.classList.remove('hidden');
+      }
+    }
+  }, 3000);
+
+  // Try initializing map if Google script is already loaded
+  if (window.googleMapsReady && typeof initOrderMap === 'function') {
+    initOrderMap();
+  }
 });
+
+// Global callback for Google Maps
+window.initOrderMap = function () {
+  if (!document.getElementById('orderMap')) return;
+
+  orderState.geocoder = new google.maps.Geocoder();
+  const defaultLoc = { lat: 53.5461, lng: -113.4938 }; // Edmonton default
+
+  orderState.map = new google.maps.Map(document.getElementById('orderMap'), {
+    zoom: 11,
+    center: defaultLoc,
+    mapTypeId: 'hybrid',
+    streetViewControl: false,
+    mapTypeControl: false,
+    fullscreenControl: false
+  });
+
+  orderState.marker = new google.maps.Marker({
+    map: orderState.map,
+    position: defaultLoc,
+    draggable: true,
+    animation: google.maps.Animation.DROP,
+    title: "Drag to center of roof"
+  });
+
+  // Drag listener
+  orderState.marker.addListener('dragend', () => {
+    const pos = orderState.marker.getPosition();
+    orderState.lat = pos.lat();
+    orderState.lng = pos.lng();
+    document.getElementById('locationMsg').classList.remove('hidden');
+    document.getElementById('locationMsgText').textContent = `Pin location updated: ${pos.lat().toFixed(6)}, ${pos.lng().toFixed(6)}`;
+  });
+
+  // Map click listener (move pin to click)
+  orderState.map.addListener('click', (e) => {
+    orderState.marker.setPosition(e.latLng);
+    orderState.lat = e.latLng.lat();
+    orderState.lng = e.latLng.lng();
+    document.getElementById('locationMsg').classList.remove('hidden');
+    document.getElementById('locationMsgText').textContent = `Pin location updated: ${e.latLng.lat().toFixed(6)}, ${e.latLng.lng().toFixed(6)}`;
+  });
+};
+
+function geocodeAndCenter() {
+  if (!orderState.geocoder || !orderState.map) return;
+
+  const fullAddress = [
+    document.getElementById('orderAddress').value,
+    document.getElementById('orderCity').value,
+    document.getElementById('orderProvince').value
+  ].filter(Boolean).join(', ');
+
+  if (!fullAddress) return;
+
+  orderState.geocoder.geocode({ 'address': fullAddress }, (results, status) => {
+    if (status === 'OK' && results[0]) {
+      const loc = results[0].geometry.location;
+      orderState.map.setCenter(loc);
+      orderState.map.setZoom(21); // High zoom for roof selection
+      orderState.marker.setPosition(loc);
+      orderState.lat = loc.lat();
+      orderState.lng = loc.lng();
+      document.getElementById('mapError').classList.add('hidden');
+    } else {
+      document.getElementById('mapError').classList.remove('hidden');
+      document.getElementById('mapError').textContent = 'Could not find location: ' + status;
+    }
+  });
+}
+
+function updateAddressFromFields() {
+  orderState.address = document.getElementById('orderAddress').value;
+  orderState.city = document.getElementById('orderCity').value;
+  orderState.province = document.getElementById('orderProvince').value;
+  orderState.postalCode = document.getElementById('orderPostal').value;
+
+  // Debounce geocoding
+  if (orderState.debounceTimer) clearTimeout(orderState.debounceTimer);
+  orderState.debounceTimer = setTimeout(() => {
+    geocodeAndCenter();
+  }, 1000);
+}
+
 
 async function loadOrderData() {
   orderState.loading = true;
@@ -139,7 +243,7 @@ function renderOrderPage() {
             <input type="text" id="orderAddress" placeholder="123 Main St, Edmonton, AB"
               value="${orderState.address}"
               class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-brand-500 focus:border-brand-500 text-sm"
-              oninput="orderState.address = this.value">
+              oninput="updateAddressFromFields()">
           </div>
 
           <div class="grid grid-cols-3 gap-4">
@@ -147,20 +251,47 @@ function renderOrderPage() {
               <label class="block text-sm font-medium text-gray-700 mb-1">City</label>
               <input type="text" id="orderCity" placeholder="Edmonton" value="${orderState.city}"
                 class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500"
-                oninput="orderState.city = this.value">
+                oninput="updateAddressFromFields()">
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">Province</label>
               <input type="text" id="orderProvince" placeholder="AB" value="${orderState.province}"
                 class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500"
-                oninput="orderState.province = this.value">
+                oninput="updateAddressFromFields()">
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">Postal Code</label>
               <input type="text" id="orderPostal" placeholder="T5A 1A1" value="${orderState.postalCode}"
                 class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500"
-                oninput="orderState.postalCode = this.value">
+                oninput="updateAddressFromFields()">
             </div>
+          </div>
+          
+           <!-- Location Map -->
+          <div class="bg-gray-50 border-2 border-dashed border-gray-200 rounded-xl p-1 relative">
+             <div class="absolute top-3 left-3 right-3 z-10 bg-white/90 backdrop-blur-sm p-3 rounded-lg border border-gray-200 shadow-sm flex items-start gap-3">
+               <div class="text-brand-600 mt-1"><i class="fas fa-info-circle"></i></div>
+               <div>
+                 <p class="text-sm font-bold text-gray-800">Confirm Location Accuracy</p>
+                 <p class="text-xs text-gray-600">Drag the <span class="text-red-600 font-bold">RED PIN</span> to the center of the roof structure to ensure maximum report accuracy.</p>
+                 <div id="locationMsg" class="hidden mt-1 text-xs text-green-700 font-mono bg-green-50 px-2 py-1 rounded border border-green-100"><i class="fas fa-crosshairs mr-1"></i><span id="locationMsgText"></span></div>
+               </div>
+             </div>
+             
+             <!-- Error overlay -->
+             <div id="mapError" class="hidden absolute inset-0 z-20 bg-gray-100/90 flex items-center justify-center text-red-600 font-semibold p-4 text-center"></div>
+
+             <div id="orderMap" class="w-full h-80 rounded-lg bg-gray-200"></div>
+          </div>
+
+          <!-- Confirm Location Checkbox -->
+          <div class="flex items-start gap-3 p-3 bg-yellow-50 border border-yellow-200 rounded-xl">
+            <div class="flex items-center h-5">
+              <input type="checkbox" id="confirmLocation" class="w-5 h-5 text-brand-600 border-gray-300 rounded focus:ring-brand-500 cursor-pointer">
+            </div>
+            <label for="confirmLocation" class="text-sm text-gray-700 font-medium cursor-pointer select-none">
+              I have verified that the <span class="text-red-600 font-bold">RED PIN</span> is on the roof structure. <span class="text-gray-500 font-normal">(Required to proceed)</span>
+            </label>
           </div>
 
           <!-- Service Tier -->
@@ -216,8 +347,8 @@ function renderOrderPage() {
           <h3 class="text-lg font-bold text-gray-800 mb-4"><i class="fas fa-tags text-brand-500 mr-2"></i>Save with Credit Packs</h3>
           <div class="grid grid-cols-5 gap-3">
             ${orderState.packages.map(pkg => {
-              const priceEach = (pkg.price_cents / 100 / pkg.credits).toFixed(2);
-              return `
+    const priceEach = (pkg.price_cents / 100 / pkg.credits).toFixed(2);
+    return `
                 <button onclick="buyPackage(${pkg.id})" class="p-3 border border-gray-200 rounded-xl text-center hover:border-brand-300 hover:shadow-md transition-all">
                   <p class="font-bold text-gray-800">${pkg.name}</p>
                   <p class="text-xs text-gray-500 mb-1">${pkg.credits} credit${pkg.credits > 1 ? 's' : ''}</p>
@@ -225,12 +356,17 @@ function renderOrderPage() {
                   <p class="text-[10px] text-gray-400">$${priceEach}/ea</p>
                 </button>
               `;
-            }).join('')}
+  }).join('')}
           </div>
         </div>
       ` : ''}
     </div>
   `;
+
+  // Re-init map if it was already loaded (when switching tiers or re-rendering)
+  if (window.googleMapsReady && typeof initOrderMap === 'function') {
+    setTimeout(initOrderMap, 100);
+  }
 }
 
 function selectTier(tier) {
@@ -254,6 +390,29 @@ function validate() {
     showMsg('error', '<i class="fas fa-exclamation-triangle mr-1"></i>Please enter a property address.');
     return false;
   }
+
+  // STRICT VALIDATION: Must have coordinates (Pin on Map)
+  if (!orderState.lat || !orderState.lng) {
+    showMsg('error', '<i class="fas fa-map-marker-alt mr-1"></i>Please wait for the map to load or drag the pin to the roof location.');
+    // Scroll to map
+    const mapEl = document.getElementById('orderMap');
+    if (mapEl) mapEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return false;
+  }
+
+  // STRICT VALIDATION: Must check the box
+  const confirmBox = document.getElementById('confirmLocation');
+  if (!confirmBox || !confirmBox.checked) {
+    showMsg('error', '<i class="fas fa-check-square mr-1"></i>Please check the box to confirm the pin is on the roof.');
+    // Scroll to checkbox
+    if (confirmBox) confirmBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    // Highlight it
+    if (confirmBox) confirmBox.parentElement.parentElement.classList.add('ring-2', 'ring-red-500');
+    return false;
+  } else {
+    if (confirmBox) confirmBox.parentElement.parentElement.classList.remove('ring-2', 'ring-red-500');
+  }
+
   return true;
 }
 
@@ -272,6 +431,8 @@ async function useCredit() {
         property_province: document.getElementById('orderProvince').value.trim(),
         property_postal_code: document.getElementById('orderPostal').value.trim(),
         service_tier: orderState.selectedTier,
+        latitude: orderState.lat,
+        longitude: orderState.lng
       })
     });
     const data = await res.json();
@@ -303,6 +464,8 @@ async function payWithStripe() {
         property_province: document.getElementById('orderProvince').value.trim(),
         property_postal_code: document.getElementById('orderPostal').value.trim(),
         service_tier: orderState.selectedTier,
+        latitude: orderState.lat,
+        longitude: orderState.lng
       })
     });
     const data = await res.json();

@@ -457,7 +457,7 @@ aiAnalysisRoutes.post('/:orderId/analyze', async (c) => {
 
     // Build satellite image URL
     const satelliteUrl = env.mapsKey
-      ? `https://maps.googleapis.com/maps/api/staticmap?center=${order.latitude},${order.longitude}&zoom=20&size=640x640&maptype=satellite&key=${env.mapsKey}`
+      ? `https://maps.googleapis.com/maps/api/staticmap?center=${order.latitude},${order.longitude}&zoom=21&size=640x640&maptype=satellite&key=${env.mapsKey}`
       : null
 
     let geometryResult = null

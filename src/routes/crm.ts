@@ -111,7 +111,7 @@ crmRoutes.delete('/customers/:id', async (c) => {
 // CRM INVOICES
 // ============================================================
 
-function genInvoiceNum() { const d = new Date().toISOString().slice(0,10).replace(/-/g,''); return `INV-${d}-${Math.floor(Math.random()*9999).toString().padStart(4,'0')}` }
+function genInvoiceNum() { const d = new Date().toISOString().slice(0, 10).replace(/-/g, ''); return `INV-${d}-${Math.floor(Math.random() * 9999).toString().padStart(4, '0')}` }
 
 crmRoutes.get('/invoices', async (c) => {
   const ownerId = await getOwnerId(c)
@@ -186,7 +186,7 @@ crmRoutes.put('/invoices/:id', async (c) => {
   if (!ownerId) return c.json({ error: 'Not authenticated' }, 401)
   const body = await c.req.json()
   const id = c.req.param('id')
-  
+
   // If updating status
   if (body.status) {
     let extra = ''
@@ -234,7 +234,7 @@ crmRoutes.delete('/invoices/:id', async (c) => {
 // CRM PROPOSALS
 // ============================================================
 
-function genProposalNum() { const d = new Date().toISOString().slice(0,10).replace(/-/g,''); return `PROP-${d}-${Math.floor(Math.random()*9999).toString().padStart(4,'0')}` }
+function genProposalNum() { const d = new Date().toISOString().slice(0, 10).replace(/-/g, ''); return `PROP-${d}-${Math.floor(Math.random() * 9999).toString().padStart(4, '0')}` }
 
 crmRoutes.get('/proposals', async (c) => {
   const ownerId = await getOwnerId(c)
@@ -304,7 +304,7 @@ crmRoutes.delete('/proposals/:id', async (c) => {
 // CRM JOBS
 // ============================================================
 
-function genJobNum() { const d = new Date().toISOString().slice(0,10).replace(/-/g,''); return `JOB-${d}-${Math.floor(Math.random()*9999).toString().padStart(4,'0')}` }
+function genJobNum() { const d = new Date().toISOString().slice(0, 10).replace(/-/g, ''); return `JOB-${d}-${Math.floor(Math.random() * 9999).toString().padStart(4, '0')}` }
 
 const DEFAULT_CHECKLIST = [
   { item_type: 'permit', label: 'Building Permit', sort_order: 0 },
@@ -453,3 +453,98 @@ crmRoutes.get('/stats', async (c) => {
     return c.json({ customers: 0, invoices_owing: 0, proposals_open: 0, jobs_upcoming: 0 })
   }
 })
+
+// ============================================================
+// CRM DEALS / PIPELINE
+// ============================================================
+
+// LIST Deals
+crmRoutes.get('/deals', async (c) => {
+  const ownerId = await getOwnerId(c)
+  if (!ownerId) return c.json({ error: 'Not authenticated' }, 401)
+
+  const rules = await c.env.DB.prepare(
+    `SELECT cd.*, cc.name as customer_name, cc.phone as customer_phone, cc.email as customer_email 
+     FROM crm_deals cd 
+     LEFT JOIN crm_customers cc ON cd.crm_customer_id = cc.id 
+     WHERE cd.owner_id = ? 
+     ORDER BY cd.updated_at DESC`
+  ).bind(ownerId).all()
+
+  // Group by stage for easy frontend consumption? Or just return flat list.
+  // Flat list is more standard REST.
+  return c.json({ deals: rules.results })
+})
+
+// CREATE Deal
+crmRoutes.post('/deals', async (c) => {
+  const ownerId = await getOwnerId(c)
+  if (!ownerId) return c.json({ error: 'Not authenticated' }, 401)
+  const body = await c.req.json()
+
+  if (!body.title) return c.json({ error: 'Deal title is required' }, 400)
+
+  // If customer doesn't exist, maybe create one? 
+  // For now, assume customer_id is passed OR we just store a note. 
+  // Let's assume frontend handles customer selection or creation.
+
+  const result = await c.env.DB.prepare(`
+    INSERT INTO crm_deals (owner_id, crm_customer_id, title, value, stage, notes, priority, expected_close_date)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(ownerId, body.crm_customer_id || null, body.title, body.value || 0, body.stage || 'lead', body.notes || null, body.priority || 'medium', body.expected_close_date || null).run()
+
+  return c.json({ success: true, id: result.meta.last_row_id })
+})
+
+// UPDATE Deal (Move stage, edit details)
+crmRoutes.put('/deals/:id', async (c) => {
+  const ownerId = await getOwnerId(c)
+  if (!ownerId) return c.json({ error: 'Not authenticated' }, 401)
+  const id = c.req.param('id')
+  const body = await c.req.json()
+
+  // Dynamic update builder
+  // But for now, let's just update key fields if present
+  // Simplified for specific "Move Stage" action logic often used in Kanban
+
+  if (body.stage && Object.keys(body).length === 1) {
+    // Just moving stage
+    await c.env.DB.prepare("UPDATE crm_deals SET stage = ?, updated_at = datetime('now') WHERE id = ? AND owner_id = ?")
+      .bind(body.stage, id, ownerId).run()
+    return c.json({ success: true })
+  }
+
+  await c.env.DB.prepare(`
+    UPDATE crm_deals SET 
+      crm_customer_id = COALESCE(?, crm_customer_id),
+      title = COALESCE(?, title), 
+      value = COALESCE(?, value), 
+      stage = COALESCE(?, stage), 
+      notes = COALESCE(?, notes), 
+      priority = COALESCE(?, priority), 
+      expected_close_date = COALESCE(?, expected_close_date),
+      updated_at = datetime('now')
+    WHERE id = ? AND owner_id = ?
+  `).bind(
+    body.crm_customer_id !== undefined ? body.crm_customer_id : null,
+    body.title,
+    body.value,
+    body.stage,
+    body.notes,
+    body.priority,
+    body.expected_close_date,
+    id, ownerId
+  ).run()
+
+  return c.json({ success: true })
+})
+
+// DELETE Deal
+crmRoutes.delete('/deals/:id', async (c) => {
+  const ownerId = await getOwnerId(c)
+  if (!ownerId) return c.json({ error: 'Not authenticated' }, 401)
+  const id = c.req.param('id')
+  await c.env.DB.prepare('DELETE FROM crm_deals WHERE id = ? AND owner_id = ?').bind(id, ownerId).run()
+  return c.json({ success: true })
+})
+

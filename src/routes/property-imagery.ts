@@ -57,7 +57,7 @@ propertyImageryRoutes.post('/generate', async (c) => {
   // Zoom levels chosen to show property structures (shops, sheds, equipment, outbuildings)
   // Zoom 20 = close-up, Zoom 19 = property detail, Zoom 18 = property + yard, Zoom 17 = neighbourhood context
   const imageConfigs = [
-    { zoom: 20, size: '640x640', label: 'Close-Up View (Zoom 20)', desc: 'Structures, equipment, rooftop detail' },
+    { zoom: 21, size: '640x640', label: 'Close-Up View (Zoom 21)', desc: 'Structures, equipment, rooftop detail' },
     { zoom: 19, size: '640x640', label: 'Property Detail (Zoom 19)', desc: 'Buildings, sheds, outbuildings, driveways' },
     { zoom: 18, size: '640x640', label: 'Full Property (Zoom 18)', desc: 'Lot boundaries, garages, shops, yards' },
     { zoom: 17, size: '640x640', label: 'Neighbourhood Context (Zoom 17)', desc: 'Surrounding area, access roads, adjacent lots' },

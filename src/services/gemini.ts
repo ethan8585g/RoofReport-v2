@@ -36,7 +36,7 @@ async function fetchImageAsBase64(imageUrl: string): Promise<string> {
   }
   const buffer = await response.arrayBuffer()
   const bytes = new Uint8Array(buffer)
-  
+
   // Convert to base64 using Web API (Cloudflare Workers compatible)
   let binary = ''
   for (let i = 0; i < bytes.length; i++) {
@@ -61,7 +61,7 @@ interface GeminiCallOptions {
 
 async function callGemini(opts: GeminiCallOptions): Promise<any> {
   const model = opts.model || 'gemini-2.0-flash'
-  
+
   // Build request body
   const requestBody: any = {
     contents: opts.contents,
@@ -76,7 +76,7 @@ async function callGemini(opts: GeminiCallOptions): Promise<any> {
   if (opts.accessToken) {
     const url = `${GEMINI_REST_BASE}/${model}:generateContent`
     console.log(`[Gemini] Calling Generative Language API with Bearer token: ${model}`)
-    
+
     const response = await fetch(url, {
       method: 'POST',
       headers: {
@@ -95,13 +95,13 @@ async function callGemini(opts: GeminiCallOptions): Promise<any> {
 
     const errText = await response.text()
     console.warn(`[Gemini] Bearer auth failed (${response.status}): ${errText.substring(0, 200)}`)
-    
+
     // If Bearer fails, try Vertex AI Platform endpoint as fallback
     if (opts.project && opts.location) {
       try {
         const vertexUrl = getVertexAIUrl(opts.project, opts.location, model, 'generateContent')
         console.log(`[Gemini] Trying Vertex AI Platform fallback: ${model} via ${opts.location}`)
-        
+
         const vertexResponse = await fetch(vertexUrl, {
           method: 'POST',
           headers: {
@@ -128,7 +128,7 @@ async function callGemini(opts: GeminiCallOptions): Promise<any> {
   if (opts.apiKey) {
     const url = `${GEMINI_REST_BASE}/${model}:generateContent?key=${opts.apiKey}`
     console.log(`[Gemini] Calling REST API with API key: ${model}`)
-    
+
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -300,8 +300,8 @@ Number of Segments: ${solarData.segmentCount}
 
 Segment Details:
 ${solarData.segments.map((s, i) =>
-  `- Segment ${i+1}: Pitch ${s.pitchDegrees.toFixed(1)}°, Azimuth ${s.azimuthDegrees.toFixed(1)}°, Area ${s.areaSqm.toFixed(1)}m²`
-).join('\n')}
+    `- Segment ${i + 1}: Pitch ${s.pitchDegrees.toFixed(1)}°, Azimuth ${s.azimuthDegrees.toFixed(1)}°, Area ${s.areaSqm.toFixed(1)}m²`
+  ).join('\n')}
 
 Provide a JSON response with EXACTLY these fields:
 1. "summary": A professional assessment paragraph (max 80 words) about the roof condition, complexity, and recommendations. Reference Canadian building codes where relevant.
@@ -350,7 +350,7 @@ export async function quickMeasure(
   const mapsKey = env.mapsKey || env.apiKey
   if (!mapsKey) throw new Error('No Maps API key available')
 
-  const satelliteUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=20&size=640x640&maptype=satellite&key=${mapsKey}`
+  const satelliteUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=21&size=640x640&maptype=satellite&key=${mapsKey}`
 
   const analysis = await analyzeRoofGeometry(satelliteUrl, env)
   if (!analysis) throw new Error('AI analysis returned empty result')

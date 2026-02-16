@@ -21,6 +21,7 @@ import {
   type DataLayersAnalysis
 } from '../services/solar-datalayers'
 import { analyzeRoofGeometry } from '../services/gemini'
+import { GmailService } from '../services/gmail'
 
 export const reportsRoutes = new Hono<{ Bindings: Bindings }>()
 
@@ -277,6 +278,36 @@ export async function generateReportForOrder(
       WHERE id = ?
     `).bind(orderId).run()
 
+    // --- EMAIL AUTOMATION ---
+    if (order.requester_email) {
+      console.log(`[GenerateDirect] Sending email to ${order.requester_email}`)
+      const emailSubject = `Roof Report Ready: ${order.property_address}`
+      // Production URL
+      const reportUrl = `https://b098341d.roofing-measurement-tool-9i0.pages.dev/api/reports/${orderId}/html`
+
+      const emailBody = `
+        <h1>Your Roof Measurement Report is Ready!</h1>
+        <p>Property: <strong>${order.property_address}</strong></p>
+        <p>We have successfully analyzed the roof geometry and generated your professional report.</p>
+        <div style="margin: 20px 0;">
+          <a href="${reportUrl}" style="background-color: #007bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: bold;">View Full Report</a>
+        </div>
+        <p>Total Area: ${reportData.total_true_area_sqft} sq ft</p>
+        <p>Pitch: ${reportData.roof_pitch_degrees}&deg;</p>
+        <hr>
+        <p><small>Reuse Canada Roofing Report Services</small></p>
+      `
+
+      try {
+        // Use Resend for reliable delivery
+        await sendViaResend(env.RESEND_API_KEY || '', order.requester_email, emailSubject, emailBody)
+        console.log(`[GenerateDirect] Email sent successfully`)
+      } catch (emailErr: any) {
+        console.error(`[GenerateDirect] Failed to send email:`, emailErr)
+        // Non-critical: don't fail the whole function if email fails
+      }
+    }
+
     const version = usedDataLayers ? '3.0' : '2.0'
     return {
       success: true,
@@ -286,7 +317,7 @@ export async function generateReportForOrder(
     }
   } catch (err: any) {
     console.error(`[GenerateDirect] Order ${orderId} failed:`, err.message)
-    
+
     // Transition to 'failed' state with error details
     try {
       await env.DB.prepare(`
@@ -304,7 +335,7 @@ export async function generateReportForOrder(
     } catch (dbErr: any) {
       console.error(`[GenerateDirect] Failed to update error state for order ${orderId}:`, dbErr.message)
     }
-    
+
     return { success: false, error: err.message }
   }
 }
@@ -347,10 +378,10 @@ function buildDataLayersReport(orderId: any, order: any, dlResult: any, dlSegmen
       dsm_url: dlResult.dsmUrl,
       mask_url: dlResult.maskUrl,
       flux_url: null,
-      north_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${dlResult.latitude},${dlResult.longitude}&heading=0&pitch=45&fov=80&key=${mapsApiKey}`,
-      south_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${dlResult.latitude},${dlResult.longitude}&heading=180&pitch=45&fov=80&key=${mapsApiKey}`,
-      east_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${dlResult.latitude},${dlResult.longitude}&heading=90&pitch=45&fov=80&key=${mapsApiKey}`,
-      west_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${dlResult.latitude},${dlResult.longitude}&heading=270&pitch=45&fov=80&key=${mapsApiKey}`,
+      north_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${dlResult.latitude},${dlResult.longitude}&heading=0&pitch=10&fov=60&key=${mapsApiKey}`,
+      south_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${dlResult.latitude},${dlResult.longitude}&heading=180&pitch=10&fov=60&key=${mapsApiKey}`,
+      east_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${dlResult.latitude},${dlResult.longitude}&heading=90&pitch=10&fov=60&key=${mapsApiKey}`,
+      west_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${dlResult.latitude},${dlResult.longitude}&heading=270&pitch=10&fov=60&key=${mapsApiKey}`,
     },
     quality: {
       imagery_quality: dlResult.imageryQuality as any,
@@ -689,7 +720,7 @@ reportsRoutes.post('/:orderId/generate-enhanced', async (c) => {
           const emailHtml = buildEmailWrapper(
             professionalHtml,
             order.property_address,
-            `RM-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${String(orderId).padStart(4,'0')}`,
+            `RM-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${String(orderId).padStart(4, '0')}`,
             recipientEmail
           )
           const gmailRefreshToken = (c.env as any).GMAIL_REFRESH_TOKEN || ''
@@ -697,12 +728,12 @@ reportsRoutes.post('/:orderId/generate-enhanced', async (c) => {
           const gmailClientSecret = (c.env as any).GMAIL_CLIENT_SECRET || ''
 
           if (gmailRefreshToken && gmailClientId && gmailClientSecret) {
-            await sendGmailOAuth2(
-              gmailClientId, gmailClientSecret, gmailRefreshToken,
+            const gmailService = new GmailService(gmailClientId, gmailClientSecret, gmailRefreshToken)
+            await gmailService.sendEmail(
               recipientEmail,
               `Roof Measurement Report - ${order.property_address}`,
               emailHtml,
-              c.env.GMAIL_SENDER_EMAIL
+              c.env.GMAIL_SENDER_EMAIL || undefined
             )
             emailResult = { sent: true, to: recipientEmail, method: 'gmail_oauth2' }
           }
@@ -747,29 +778,29 @@ function generateSegmentsFromDLAnalysis(dl: DataLayersAnalysis): RoofSegment[] {
   // Larger roofs tend to have more segments
   const segmentCount = totalFootprintSqft > 3000 ? 6
     : totalFootprintSqft > 2000 ? 4
-    : totalFootprintSqft > 1000 ? 4
-    : 2
+      : totalFootprintSqft > 1000 ? 4
+        : 2
 
   // Standard segment distributions for common Alberta roof types
   const segmentDefs = segmentCount >= 6
     ? [
-        { name: 'Main South Face',   pct: 0.25, pitchOff: 0,    azBase: 180 },
-        { name: 'Main North Face',   pct: 0.25, pitchOff: 0,    azBase: 0   },
-        { name: 'East Wing Upper',   pct: 0.15, pitchOff: -3,   azBase: 90  },
-        { name: 'West Wing Upper',   pct: 0.15, pitchOff: -3,   azBase: 270 },
-        { name: 'East Wing Lower',   pct: 0.10, pitchOff: -5,   azBase: 90  },
-        { name: 'West Wing Lower',   pct: 0.10, pitchOff: -5,   azBase: 270 },
-      ]
+      { name: 'Main South Face', pct: 0.25, pitchOff: 0, azBase: 180 },
+      { name: 'Main North Face', pct: 0.25, pitchOff: 0, azBase: 0 },
+      { name: 'East Wing Upper', pct: 0.15, pitchOff: -3, azBase: 90 },
+      { name: 'West Wing Upper', pct: 0.15, pitchOff: -3, azBase: 270 },
+      { name: 'East Wing Lower', pct: 0.10, pitchOff: -5, azBase: 90 },
+      { name: 'West Wing Lower', pct: 0.10, pitchOff: -5, azBase: 270 },
+    ]
     : segmentCount >= 4
-    ? [
-        { name: 'Main South Face',  pct: 0.35, pitchOff: 0,    azBase: 180 },
-        { name: 'Main North Face',  pct: 0.35, pitchOff: 0,    azBase: 0   },
-        { name: 'East Wing',        pct: 0.15, pitchOff: -3,   azBase: 90  },
-        { name: 'West Wing',        pct: 0.15, pitchOff: -3,   azBase: 270 },
+      ? [
+        { name: 'Main South Face', pct: 0.35, pitchOff: 0, azBase: 180 },
+        { name: 'Main North Face', pct: 0.35, pitchOff: 0, azBase: 0 },
+        { name: 'East Wing', pct: 0.15, pitchOff: -3, azBase: 90 },
+        { name: 'West Wing', pct: 0.15, pitchOff: -3, azBase: 270 },
       ]
-    : [
-        { name: 'Main South Face',  pct: 0.50, pitchOff: 0,    azBase: 180 },
-        { name: 'Main North Face',  pct: 0.50, pitchOff: 0,    azBase: 0   },
+      : [
+        { name: 'Main South Face', pct: 0.50, pitchOff: 0, azBase: 180 },
+        { name: 'Main North Face', pct: 0.50, pitchOff: 0, azBase: 0 },
       ]
 
   return segmentDefs.map(def => {
@@ -961,7 +992,7 @@ reportsRoutes.post('/:orderId/email', async (c) => {
     // Get report data for subject line
     const reportData = order.api_response_raw ? JSON.parse(order.api_response_raw) : null
     const reportNum = reportData
-      ? `RM-${new Date(reportData.generated_at).toISOString().slice(0,10).replace(/-/g,'')}-${String(reportData.order_id).padStart(4,'0')}`
+      ? `RM-${new Date(reportData.generated_at).toISOString().slice(0, 10).replace(/-/g, '')}-${String(reportData.order_id).padStart(4, '0')}`
       : `RM-${orderId}`
     const propertyAddress = order.property_address || 'Property'
 
@@ -1000,7 +1031,8 @@ reportsRoutes.post('/:orderId/email', async (c) => {
     if (gmailRefreshToken && gmailClientId && gmailClientSecret) {
       // ---- GMAIL OAUTH2 (Personal Gmail — Best option) ----
       try {
-        await sendGmailOAuth2(gmailClientId, gmailClientSecret, gmailRefreshToken, recipientEmail, subject, emailHtml, senderEmail)
+        const gmailService = new GmailService(gmailClientId, gmailClientSecret, gmailRefreshToken)
+        await gmailService.sendEmail(recipientEmail, subject, emailHtml, senderEmail || undefined)
         emailMethod = 'gmail_oauth2'
       } catch (gmailErr: any) {
         console.error('[Email] Gmail OAuth2 failed:', gmailErr.message)
@@ -1273,96 +1305,7 @@ async function sendViaResend(
   }
 }
 
-// ============================================================
-// GMAIL OAUTH2 — Send email using OAuth2 refresh token
-// Works with personal Gmail. One-time consent at /api/auth/gmail
-// ============================================================
-async function sendGmailOAuth2(
-  clientId: string, clientSecret: string, refreshToken: string,
-  to: string, subject: string, htmlBody: string,
-  senderEmail?: string | null
-): Promise<void> {
-  // Exchange refresh token for access token
-  const tokenResp = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'refresh_token',
-      client_id: clientId,
-      client_secret: clientSecret,
-      refresh_token: refreshToken
-    }).toString()
-  })
 
-  if (!tokenResp.ok) {
-    const err = await tokenResp.text()
-    throw new Error(`Gmail OAuth2 token refresh failed (${tokenResp.status}): ${err}`)
-  }
-
-  const tokenData: any = await tokenResp.json()
-  const accessToken = tokenData.access_token
-
-  // Build RFC 2822 email
-  const boundary = 'boundary_' + Date.now()
-  const fromAddr = senderEmail || 'me'
-
-  // Base64 encode the HTML body in chunks
-  const htmlBodyBytes = new TextEncoder().encode(htmlBody)
-  let htmlBase64 = ''
-  const chunk = 3 * 1024
-  for (let i = 0; i < htmlBodyBytes.length; i += chunk) {
-    const slice = htmlBodyBytes.slice(i, i + chunk)
-    let binary = ''
-    for (let j = 0; j < slice.length; j++) binary += String.fromCharCode(slice[j])
-    htmlBase64 += btoa(binary)
-  }
-
-  const rawMessage = [
-    `From: Reuse Canada Reports <${fromAddr}>`,
-    `To: ${to}`,
-    `Subject: =?UTF-8?B?${btoa(unescape(encodeURIComponent(subject)))}?=`,
-    `MIME-Version: 1.0`,
-    `Content-Type: multipart/alternative; boundary="${boundary}"`,
-    '',
-    `--${boundary}`,
-    'Content-Type: text/plain; charset=UTF-8',
-    'Content-Transfer-Encoding: 7bit',
-    '',
-    'Your professional roof measurement report is ready. View this email in an HTML-capable client to see the full 3-page report.',
-    '',
-    `--${boundary}`,
-    'Content-Type: text/html; charset=UTF-8',
-    'Content-Transfer-Encoding: base64',
-    '',
-    htmlBase64,
-    '',
-    `--${boundary}--`
-  ].join('\r\n')
-
-  // Encode to base64url for Gmail API
-  const messageBytes = new TextEncoder().encode(rawMessage)
-  let messageBinary = ''
-  for (let i = 0; i < messageBytes.length; i++) messageBinary += String.fromCharCode(messageBytes[i])
-  const encodedMessage = btoa(messageBinary)
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '')
-
-  // Send via Gmail API — 'me' = the authorized user
-  const sendResp = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${accessToken}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({ raw: encodedMessage })
-  })
-
-  if (!sendResp.ok) {
-    const err = await sendResp.text()
-    throw new Error(`Gmail send failed (${sendResp.status}): ${err}`)
-  }
-}
 
 // ============================================================
 // REAL Google Solar API Call — buildingInsights:findClosest
@@ -1387,6 +1330,9 @@ async function callGoogleSolarAPI(
   }
 
   const data: any = await response.json()
+  // Refined Centering: Use the API's reported usage center if available, otherwise original lat/lng
+  const centerLat = data.center?.latitude || lat
+  const centerLng = data.center?.longitude || lng
   const solarPotential = data.solarPotential
 
   if (!solarPotential) {
@@ -1471,7 +1417,7 @@ async function callGoogleSolarAPI(
       homeowner_name: order.homeowner_name,
       requester_name: order.requester_name,
       requester_company: order.requester_company,
-      latitude: lat, longitude: lng
+      latitude: centerLat, longitude: centerLng
     },
     total_footprint_sqft: totalFootprintSqft,
     total_footprint_sqm: totalFootprintSqm,
@@ -1489,19 +1435,22 @@ async function callGoogleSolarAPI(
     num_panels_possible: maxPanels,
     yearly_energy_kwh: Math.round(yearlyEnergy),
     imagery: {
-      // Max zoom for roof isolation: zoom 21 for residential, 20 for large commercial (>500m²)
-      // scale=2 for high-res (1280x1280 actual pixels on 640x640 viewport)
-      satellite_url: `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=${totalFootprintSqm > 500 ? 20 : 21}&size=640x640&scale=2&maptype=satellite&key=${imageKey}`,
-      satellite_overhead_url: `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=${totalFootprintSqm > 500 ? 20 : 21}&size=640x640&scale=2&maptype=satellite&key=${imageKey}`,
-      satellite_context_url: `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=${totalFootprintSqm > 500 ? 18 : 19}&size=640x640&scale=2&maptype=satellite&key=${imageKey}`,
+      // Max zoom for roof isolation: zoom 21 (High Res)
+      // SCALE=2 is critical for high-DPI displays
+      satellite_url: `https://maps.googleapis.com/maps/api/staticmap?center=${centerLat},${centerLng}&zoom=21&size=640x640&scale=2&maptype=satellite&key=${imageKey}`,
+      satellite_overhead_url: `https://maps.googleapis.com/maps/api/staticmap?center=${centerLat},${centerLng}&zoom=21&size=640x640&scale=2&maptype=satellite&key=${imageKey}`,
+      // Context view slightly zoomed out
+      satellite_context_url: `https://maps.googleapis.com/maps/api/staticmap?center=${centerLat},${centerLng}&zoom=19&size=640x640&scale=2&maptype=satellite&key=${imageKey}`,
       dsm_url: null,
       mask_url: null,
       flux_url: null,
-      // Street View at pitch 45° for roof-angled perspective, scale=2 for clarity
-      north_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${lat},${lng}&heading=0&pitch=45&fov=80&key=${imageKey}`,
-      south_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${lat},${lng}&heading=180&pitch=45&fov=80&key=${imageKey}`,
-      east_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${lat},${lng}&heading=90&pitch=45&fov=80&key=${imageKey}`,
-      west_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${lat},${lng}&heading=270&pitch=45&fov=80&key=${imageKey}`,
+      // Street View Improvements:
+      // Pitch: 10 (was 45) -> Looks closer to horizontal, captures house facade/roof height without causing "sky-only" view
+      // FOV: 60 (was 80) -> Zooms in slightly to frame the house better
+      north_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${centerLat},${centerLng}&heading=0&pitch=10&fov=60&key=${imageKey}`,
+      south_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${centerLat},${centerLng}&heading=180&pitch=10&fov=60&key=${imageKey}`,
+      east_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${centerLat},${centerLng}&heading=90&pitch=10&fov=60&key=${imageKey}`,
+      west_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${centerLat},${centerLng}&heading=270&pitch=10&fov=60&key=${imageKey}`,
     },
     quality: {
       imagery_quality: imageryQuality as any,
@@ -1537,10 +1486,10 @@ function generateMockRoofReport(order: any, apiKey?: string): RoofReport {
 
   // Segment definitions — realistic Alberta residential
   const segmentDefs = [
-    { name: 'Main South Face',  footprintPct: 0.35, pitchMin: 22, pitchMax: 32, azBase: 175 },
-    { name: 'Main North Face',  footprintPct: 0.35, pitchMin: 22, pitchMax: 32, azBase: 355 },
-    { name: 'East Wing',        footprintPct: 0.15, pitchMin: 18, pitchMax: 28, azBase: 85 },
-    { name: 'West Wing',        footprintPct: 0.15, pitchMin: 18, pitchMax: 28, azBase: 265 },
+    { name: 'Main South Face', footprintPct: 0.35, pitchMin: 22, pitchMax: 32, azBase: 175 },
+    { name: 'Main North Face', footprintPct: 0.35, pitchMin: 22, pitchMax: 32, azBase: 355 },
+    { name: 'East Wing', footprintPct: 0.15, pitchMin: 18, pitchMax: 28, azBase: 85 },
+    { name: 'West Wing', footprintPct: 0.15, pitchMin: 18, pitchMax: 28, azBase: 265 },
   ]
 
   const segments: RoofSegment[] = segmentDefs.map(def => {
@@ -1624,16 +1573,16 @@ function generateMockRoofReport(order: any, apiKey?: string): RoofReport {
       mask_url: null,
       flux_url: null,
       north_url: lat && lng && apiKey
-        ? `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${lat},${lng}&heading=0&pitch=45&fov=80&key=${apiKey}`
+        ? `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${lat},${lng}&heading=0&pitch=10&fov=60&key=${apiKey}`
         : null,
       south_url: lat && lng && apiKey
-        ? `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${lat},${lng}&heading=180&pitch=45&fov=80&key=${apiKey}`
+        ? `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${lat},${lng}&heading=180&pitch=10&fov=60&key=${apiKey}`
         : null,
       east_url: lat && lng && apiKey
-        ? `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${lat},${lng}&heading=90&pitch=45&fov=80&key=${apiKey}`
+        ? `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${lat},${lng}&heading=90&pitch=10&fov=60&key=${apiKey}`
         : null,
       west_url: lat && lng && apiKey
-        ? `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${lat},${lng}&heading=270&pitch=45&fov=80&key=${apiKey}`
+        ? `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${lat},${lng}&heading=270&pitch=10&fov=60&key=${apiKey}`
         : null,
     },
     quality: {
@@ -1658,6 +1607,7 @@ function generateMockRoofReport(order: any, apiKey?: string): RoofReport {
 
 // ============================================================
 // EDGE GENERATION — Derive roof edges from segment data
+// "Weld, Paint, Polish" Protocol Implementation
 // ============================================================
 function generateEdgesFromSegments(
   segments: RoofSegment[],
@@ -1667,123 +1617,114 @@ function generateEdgesFromSegments(
 
   if (segments.length === 0) return edges
 
-  // Estimate building dimensions from footprint
-  // Assume roughly 1.5:1 length-to-width ratio
+  // PHASE 1: THE WELD (Geometry & Anchor)
+  // Define bounding box (L x W)
+  // Assume roughly 1.5:1 length-to-width ratio for estimation
   const buildingWidthFt = Math.sqrt(totalFootprintSqft / 1.5)
   const buildingLengthFt = buildingWidthFt * 1.5
+
+  // Snap dimensions to nearest 0.5 ft (Vertex Locking)
+  const widthClean = Math.round(buildingWidthFt * 2) / 2
+  const lengthClean = Math.round(buildingLengthFt * 2) / 2
 
   // Average pitch for factor calculations
   const avgPitch = segments.reduce((s, seg) => s + seg.pitch_degrees, 0) / segments.length
 
-  // ---- RIDGE LINES ----
-  // Main ridge runs along the length of the building
-  const mainRidgePlanFt = buildingLengthFt * 0.85 // ridge is slightly shorter than building
+  // PHASE 2: THE PAINT (Classification & Logic)
+  // Strictly classify: 
+  // - Sloped outer edges = RAKE (Purple)
+  // - Horizontal outer edges = EAVE (Orange)
+  // - Horizontal peak = RIDGE (Red)
+  // - Sloped intersection = HIP/VALLEY (Blue/Green)
+
+  const isHipRoof = segments.length >= 4
+
+  // ---- RIDGE LINES (RED) ----
+  // Highest horizontal line
+  const mainRidgeLen = isHipRoof
+    ? lengthClean * 0.6 // Ridge is shorter on hip roof
+    : lengthClean       // Ridge spans full length on gable
+
   edges.push({
     edge_type: 'ridge',
-    label: 'Main Ridge Line',
-    plan_length_ft: Math.round(mainRidgePlanFt),
-    true_length_ft: Math.round(mainRidgePlanFt), // Ridges are horizontal
+    label: 'Main Ridge',
+    plan_length_ft: mainRidgeLen,
+    true_length_ft: mainRidgeLen, // Horizontal
     adjacent_segments: [0, 1],
     pitch_factor: 1.0
   })
 
-  // If 4+ segments, add a secondary ridge for the wing
-  if (segments.length >= 4) {
-    const wingRidgePlanFt = buildingWidthFt * 0.5
-    edges.push({
-      edge_type: 'ridge',
-      label: 'Wing Ridge Line',
-      plan_length_ft: Math.round(wingRidgePlanFt),
-      true_length_ft: Math.round(wingRidgePlanFt),
-      adjacent_segments: [2, 3],
-      pitch_factor: 1.0
-    })
-  }
+  // ---- PERIMETER: EAVES (ORANGE) vs RAKES (PURPLE) ----
+  // Long sides are always eaves (drainage)
+  const sideEaveLen = lengthClean
+  edges.push({ edge_type: 'eave', label: 'Front Eave', plan_length_ft: sideEaveLen, true_length_ft: sideEaveLen, pitch_factor: 1.0 })
+  edges.push({ edge_type: 'eave', label: 'Back Eave', plan_length_ft: sideEaveLen, true_length_ft: sideEaveLen, pitch_factor: 1.0 })
 
-  // ---- HIP LINES ----
-  // Hips run from ridge ends down to building corners at 45-degree plan angle
-  if (segments.length >= 4) {
-    const hipPlanFt = buildingWidthFt / 2 * Math.SQRT2 // diagonal from ridge end to corner
+  if (isHipRoof) {
+    // HIP ROOF: Ends are also sloping up to ridge, but base is horizontal Eave
+    // "All sides have eaves"
+    const endEaveLen = widthClean
+    edges.push({ edge_type: 'eave', label: 'Left Eave', plan_length_ft: endEaveLen, true_length_ft: endEaveLen, pitch_factor: 1.0 })
+    edges.push({ edge_type: 'eave', label: 'Right Eave', plan_length_ft: endEaveLen, true_length_ft: endEaveLen, pitch_factor: 1.0 })
+
+    // ---- HIP LINES (BLUE) ----
+    // Connect corners to ridge ends
+    // 4 hips
+    const runX = (lengthClean - mainRidgeLen) / 2
+    const runY = widthClean / 2
+    const hipPlan = Math.sqrt(runX * runX + runY * runY)
     const hipFactor = hipValleyFactor(avgPitch)
-    const hipTrueFt = hipPlanFt * hipFactor
+    const hipTrue = hipPlan * hipFactor
 
-    const hipLabels = ['NE Hip', 'NW Hip', 'SE Hip', 'SW Hip']
     for (let i = 0; i < 4; i++) {
       edges.push({
         edge_type: 'hip',
-        label: hipLabels[i] || `Hip ${i + 1}`,
-        plan_length_ft: Math.round(hipPlanFt),
-        true_length_ft: Math.round(hipTrueFt),
+        label: `Corner Hip ${i + 1}`,
+        plan_length_ft: Math.round(hipPlan * 10) / 10,
+        true_length_ft: Math.round(hipTrue * 10) / 10,
         pitch_factor: Math.round(hipFactor * 1000) / 1000
       })
     }
-  }
+  } else {
+    // GABLE ROOF: Ends are RAKES (Sloped)
+    // "If an edge vector has a non-zero slope relative to ground, it MUST be a RAKE"
+    const rakePlan = widthClean / 2 // Rise from eave to ridge
+    const rakeTrue = rakePlan * rakeFactor(avgPitch)
 
-  // ---- VALLEY LINES ----
-  // If building has intersecting wings, valleys form where they meet
-  if (segments.length >= 4) {
-    const valleyPlanFt = buildingWidthFt * 0.35
-    const valleyFactor = hipValleyFactor(avgPitch)
-    const valleyTrueFt = valleyPlanFt * valleyFactor
-
-    edges.push({
-      edge_type: 'valley',
-      label: 'East Valley',
-      plan_length_ft: Math.round(valleyPlanFt),
-      true_length_ft: Math.round(valleyTrueFt),
-      pitch_factor: Math.round(valleyFactor * 1000) / 1000
-    })
-    edges.push({
-      edge_type: 'valley',
-      label: 'West Valley',
-      plan_length_ft: Math.round(valleyPlanFt),
-      true_length_ft: Math.round(valleyTrueFt),
-      pitch_factor: Math.round(valleyFactor * 1000) / 1000
-    })
-  }
-
-  // ---- EAVE LINES ----
-  // Eaves run along the bottom perimeter of the roof
-  const eavePerimeter = (buildingLengthFt + buildingWidthFt) * 2 * 0.9
-  const eaveSections = segments.length >= 4
-    ? [
-        { label: 'South Eave', length: buildingLengthFt * 0.9 },
-        { label: 'North Eave', length: buildingLengthFt * 0.9 },
-        { label: 'East Eave', length: buildingWidthFt * 0.4 },
-        { label: 'West Eave', length: buildingWidthFt * 0.4 }
-      ]
-    : [
-        { label: 'South Eave', length: buildingLengthFt * 0.95 },
-        { label: 'North Eave', length: buildingLengthFt * 0.95 }
-      ]
-
-  for (const eave of eaveSections) {
-    edges.push({
-      edge_type: 'eave',
-      label: eave.label,
-      plan_length_ft: Math.round(eave.length),
-      true_length_ft: Math.round(eave.length), // Eaves are horizontal
-      pitch_factor: 1.0
-    })
-  }
-
-  // ---- RAKE EDGES ----
-  // Rakes are the sloped edges at gable ends
-  if (segments.length <= 3) {
-    // Gable roof — has rakes at each end
-    const rakeRiseFt = (buildingWidthFt / 2) * Math.tan(avgPitch * Math.PI / 180)
-    const rakePlanFt = buildingWidthFt / 2
-    const rakeRealFt = rakePlanFt * rakeFactor(avgPitch)
-
-    for (const label of ['East Rake (Left)', 'East Rake (Right)', 'West Rake (Left)', 'West Rake (Right)']) {
+    // 4 Rakes (2 at each end)
+    const rakeLabels = ['Left Rake (Front)', 'Left Rake (Back)', 'Right Rake (Front)', 'Right Rake (Back)']
+    for (const label of rakeLabels) {
       edges.push({
         edge_type: 'rake',
-        label,
-        plan_length_ft: Math.round(rakePlanFt),
-        true_length_ft: Math.round(rakeRealFt),
+        label: label,
+        plan_length_ft: Math.round(rakePlan * 10) / 10,
+        true_length_ft: Math.round(rakeTrue * 10) / 10,
         pitch_factor: Math.round(rakeFactor(avgPitch) * 1000) / 1000
       })
     }
+  }
+
+  // ---- VALLEYS (GREEN) ----
+  // Only if complex
+  if (segments.length > 4) {
+    const valleyLen = widthClean * 0.4
+    const vFactor = hipValleyFactor(avgPitch)
+    const vTrue = valleyLen * vFactor
+    edges.push({
+      edge_type: 'valley',
+      label: 'Valley 1',
+      plan_length_ft: Math.round(valleyLen),
+      true_length_ft: Math.round(vTrue),
+      pitch_factor: Math.round(vFactor * 1000) / 1000
+    })
+    // Add typical Drift Correction: assure symmetry if needed
+    edges.push({
+      edge_type: 'valley',
+      label: 'Valley 2',
+      plan_length_ft: Math.round(valleyLen),
+      true_length_ft: Math.round(vTrue),
+      pitch_factor: Math.round(vFactor * 1000) / 1000
+    })
   }
 
   return edges
@@ -1816,7 +1757,7 @@ function generateProfessionalReportHTML(report: RoofReport): string {
   const mat = report.materials
   const es = report.edge_summary
   const quality = report.quality
-  const reportNum = `RM-${new Date(report.generated_at).toISOString().slice(0,10).replace(/-/g,'')}-${String(report.order_id).padStart(4,'0')}`
+  const reportNum = `RM-${new Date(report.generated_at).toISOString().slice(0, 10).replace(/-/g, '')}-${String(report.order_id).padStart(4, '0')}`
   const reportDate = new Date(report.generated_at).toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' })
   const fullAddress = [prop.address, prop.city, prop.province, prop.postal_code].filter(Boolean).join(', ')
   const netSquares = Math.round(report.total_true_area_sqft / 100 * 10) / 10
@@ -1841,7 +1782,7 @@ function generateProfessionalReportHTML(report: RoofReport): string {
   const eastUrl = report.imagery?.east_url || ''
   const westUrl = report.imagery?.west_url || ''
   // Facet colors for the roof diagram
-  const facetColors = ['#FF6B8A','#5B9BD5','#70C070','#FFB347','#C084FC','#F472B6','#34D399','#FBBF24','#60A5FA','#A78BFA','#FB923C','#4ADE80']
+  const facetColors = ['#FF6B8A', '#5B9BD5', '#70C070', '#FFB347', '#C084FC', '#F472B6', '#34D399', '#FBBF24', '#60A5FA', '#A78BFA', '#FB923C', '#4ADE80']
 
   // Generate satellite overlay SVG from AI geometry
   const overlaySVG = generateSatelliteOverlaySVG(report.ai_geometry, report.segments, report.edges, es, facetColors)
@@ -1854,8 +1795,8 @@ function generateProfessionalReportHTML(report: RoofReport): string {
   const bundleCount3Tab = Math.ceil(grossSquares * 3)  // 3-tab shingles: 3 bundles per square
   const providerLabel = report.metadata.provider === 'mock' ? 'SIMULATED DATA'
     : report.metadata.provider === 'google_solar_datalayers' ? 'GOOGLE SOLAR DATALAYERS'
-    : report.metadata.provider === 'google_solar_api' ? 'GOOGLE SOLAR API'
-    : 'GOOGLE SOLAR API'
+      : report.metadata.provider === 'google_solar_api' ? 'GOOGLE SOLAR API'
+        : 'GOOGLE SOLAR API'
   const confidenceColor = quality.confidence_score >= 90 ? '#00E676' : quality.confidence_score >= 75 ? '#FFB300' : '#FF5252'
 
   return `<!DOCTYPE html>
@@ -1987,9 +1928,44 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
   .p1{-webkit-print-color-adjust:exact;print-color-adjust:exact}
   body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 }
+/* Print Button - Hidden on print */
+@media print {
+  .p1-print-btn { display: none !important; }
+}
+.p1-print-btn {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  background: #00E5FF;
+  color: #0A1929;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0,229,255,0.3);
+  z-index: 100;
+  text-decoration: none;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+.p1-print-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0,229,255,0.4);
+  background: #E0F7FA;
+}
 </style>
 </head>
 <body>
+
+<!-- Print Button -->
+<a href="#" onclick="window.print();return false;" class="p1-print-btn">
+  <svg style="width:14px;height:14px" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path></svg>
+  PRINT / SAVE PDF
+</a>
 
 <!-- ==================== PAGE 1: ROOF MEASUREMENT DASHBOARD ==================== -->
 <div class="page p1">
@@ -2038,19 +2014,19 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
     <div style="display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:5px">
       <div class="p1-aerial-card" style="padding:4px">
         ${northUrl ? `<img class="p1-sv-img" src="${northUrl}" alt="North" style="height:75px;width:100%;object-fit:cover;border-radius:4px" data-dir="N" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-sv-nodata" style="height:75px;font-size:9px">No imagery<br>available</div>` : '<div class="p1-sv-nodata" style="display:flex;height:75px;font-size:9px">N/A</div>'}
-        <div class="p1-aerial-label" style="font-size:7px;margin-top:2px">NORTH <span style="color:rgba(0,229,255,0.4);font-size:6px">0&deg;/45&deg;</span></div>
+        <div class="p1-aerial-label" style="font-size:7px;margin-top:2px">NORTH <span style="color:rgba(0,229,255,0.4);font-size:6px">0&deg;/10&deg;</span></div>
       </div>
       <div class="p1-aerial-card" style="padding:4px">
         ${eastUrl ? `<img class="p1-sv-img" src="${eastUrl}" alt="East" style="height:75px;width:100%;object-fit:cover;border-radius:4px" data-dir="E" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-sv-nodata" style="height:75px;font-size:9px">No imagery<br>available</div>` : '<div class="p1-sv-nodata" style="display:flex;height:75px;font-size:9px">N/A</div>'}
-        <div class="p1-aerial-label" style="font-size:7px;margin-top:2px">EAST <span style="color:rgba(0,229,255,0.4);font-size:6px">90&deg;/45&deg;</span></div>
+        <div class="p1-aerial-label" style="font-size:7px;margin-top:2px">EAST <span style="color:rgba(0,229,255,0.4);font-size:6px">90&deg;/10&deg;</span></div>
       </div>
       <div class="p1-aerial-card" style="padding:4px">
         ${southUrl ? `<img class="p1-sv-img" src="${southUrl}" alt="South" style="height:75px;width:100%;object-fit:cover;border-radius:4px" data-dir="S" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-sv-nodata" style="height:75px;font-size:9px">No imagery<br>available</div>` : '<div class="p1-sv-nodata" style="display:flex;height:75px;font-size:9px">N/A</div>'}
-        <div class="p1-aerial-label" style="font-size:7px;margin-top:2px">SOUTH <span style="color:rgba(0,229,255,0.4);font-size:6px">180&deg;/45&deg;</span></div>
+        <div class="p1-aerial-label" style="font-size:7px;margin-top:2px">SOUTH <span style="color:rgba(0,229,255,0.4);font-size:6px">180&deg;/10&deg;</span></div>
       </div>
       <div class="p1-aerial-card" style="padding:4px">
         ${westUrl ? `<img class="p1-sv-img" src="${westUrl}" alt="West" style="height:75px;width:100%;object-fit:cover;border-radius:4px" data-dir="W" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-sv-nodata" style="height:75px;font-size:9px">No imagery<br>available</div>` : '<div class="p1-sv-nodata" style="display:flex;height:75px;font-size:9px">N/A</div>'}
-        <div class="p1-aerial-label" style="font-size:7px;margin-top:2px">WEST <span style="color:rgba(0,229,255,0.4);font-size:6px">270&deg;/45&deg;</span></div>
+        <div class="p1-aerial-label" style="font-size:7px;margin-top:2px">WEST <span style="color:rgba(0,229,255,0.4);font-size:6px">270&deg;/10&deg;</span></div>
       </div>
     </div>
   </div>
@@ -2074,7 +2050,7 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
     <div class="p1-card">
       <div class="p1-card-label">WASTE FACTOR</div>
       <div style="font-size:20px;font-weight:900;color:#FF6B8A;line-height:1">${mat.waste_pct}%</div>
-      <div class="p1-card-detail">${mat.complexity_class.replace('_',' ')} complexity</div>
+      <div class="p1-card-detail">${mat.complexity_class.replace('_', ' ')} complexity</div>
     </div>
     <!-- Facets -->
     <div class="p1-card">
@@ -2217,7 +2193,7 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
     </div>
     <div class="p2-badge-box">
       <div class="p2-badge-label">COMPLEXITY</div>
-      <div class="p2-badge-value" style="text-transform:uppercase">${mat.complexity_class.replace('_',' ')}</div>
+      <div class="p2-badge-value" style="text-transform:uppercase">${mat.complexity_class.replace('_', ' ')}</div>
     </div>
     <div class="p2-badge-box" style="border-color:#0091EA">
       <div class="p2-badge-label" style="color:#0091EA">EST. MATERIAL COST</div>
@@ -2248,7 +2224,7 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
     <!-- Facet Breakdown with colors -->
     <div class="p3-box">
       <div class="p3-box-title">FACET BREAKDOWN (${report.segments.length} segments)</div>
-      ${report.segments.map((s, i) => `<div class="p3-facet"><div class="p3-facet-color" style="background:${facetColors[i % facetColors.length]}"></div><b>${s.name || 'Facet ' + (i+1)}:</b>&nbsp;${s.true_area_sqft.toLocaleString()} sq ft &bull; Pitch: ${s.pitch_ratio} (${s.pitch_degrees}&deg;) &bull; ${s.azimuth_direction || ''}</div>`).join('')}
+      ${report.segments.map((s, i) => `<div class="p3-facet"><div class="p3-facet-color" style="background:${facetColors[i % facetColors.length]}"></div><b>${s.name || 'Facet ' + (i + 1)}:</b>&nbsp;${s.true_area_sqft.toLocaleString()} sq ft &bull; Pitch: ${s.pitch_ratio} (${s.pitch_degrees}&deg;) &bull; ${s.azimuth_direction || ''}</div>`).join('')}
       <div style="margin-top:8px;padding-top:6px;border-top:2px solid #E0ECF5;font-size:10px;font-weight:700;color:#002F6C;display:flex;justify-content:space-between">
         <span>TOTAL:</span><span>${report.total_true_area_sqft.toLocaleString()} sq ft (${report.total_true_area_sqm?.toFixed(1) || ''} m&sup2;)</span>
       </div>
@@ -2715,17 +2691,17 @@ function generateOverlayLegend(
 // Generate SVG roof diagram from segments
 function generateRoofDiagramSVG(segments: RoofSegment[], colors: string[]): string {
   if (segments.length === 0) return '<text x="250" y="140" text-anchor="middle" fill="#999" font-size="14">No segment data</text>'
-  
+
   const n = segments.length
   const cx = 250, cy = 130
   // Create a simplified overhead roof shape
   // Main rectangle with ridge line, divided into colored facets
   const w = 360, h = 180
-  const left = cx - w/2, top = cy - h/2, right = cx + w/2, bottom = cy + h/2
+  const left = cx - w / 2, top = cy - h / 2, right = cx + w / 2, bottom = cy + h / 2
   const ridgeY = cy
-  
+
   let svg = ''
-  
+
   if (n <= 2) {
     // Simple gable: top half and bottom half
     svg += `<polygon points="${left},${ridgeY} ${cx},${top} ${right},${ridgeY}" fill="${colors[0]}80" stroke="#002F6C" stroke-width="1.5"/>`
@@ -2733,91 +2709,91 @@ function generateRoofDiagramSVG(segments: RoofSegment[], colors: string[]): stri
     svg += `<line x1="${left}" y1="${ridgeY}" x2="${right}" y2="${ridgeY}" stroke="#E53935" stroke-width="3"/>`
     // Labels
     const s0 = segments[0], s1 = segments[1] || segments[0]
-    svg += `<text x="${cx}" y="${ridgeY-30}" text-anchor="middle" font-size="10" font-weight="700" fill="#002F6C">${s0.true_area_sqft} sq ft</text>`
-    svg += `<text x="${cx}" y="${ridgeY-18}" text-anchor="middle" font-size="9" fill="#335C8A">Pitch: ${s0.pitch_ratio}</text>`
-    svg += `<text x="${cx}" y="${ridgeY+38}" text-anchor="middle" font-size="10" font-weight="700" fill="#002F6C">${s1.true_area_sqft} sq ft</text>`
-    svg += `<text x="${cx}" y="${ridgeY+50}" text-anchor="middle" font-size="9" fill="#335C8A">Pitch: ${s1.pitch_ratio}</text>`
+    svg += `<text x="${cx}" y="${ridgeY - 30}" text-anchor="middle" font-size="10" font-weight="700" fill="#002F6C">${s0.true_area_sqft} sq ft</text>`
+    svg += `<text x="${cx}" y="${ridgeY - 18}" text-anchor="middle" font-size="9" fill="#335C8A">Pitch: ${s0.pitch_ratio}</text>`
+    svg += `<text x="${cx}" y="${ridgeY + 38}" text-anchor="middle" font-size="10" font-weight="700" fill="#002F6C">${s1.true_area_sqft} sq ft</text>`
+    svg += `<text x="${cx}" y="${ridgeY + 50}" text-anchor="middle" font-size="9" fill="#335C8A">Pitch: ${s1.pitch_ratio}</text>`
   } else if (n <= 4) {
     // Hip roof: 4 triangular facets
     const pts = [
       // Top (N)
-      `${left},${top} ${right},${top} ${right-50},${ridgeY-10} ${left+50},${ridgeY-10}`,
+      `${left},${top} ${right},${top} ${right - 50},${ridgeY - 10} ${left + 50},${ridgeY - 10}`,
       // Bottom (S)
-      `${left},${bottom} ${right},${bottom} ${right-50},${ridgeY+10} ${left+50},${ridgeY+10}`,
+      `${left},${bottom} ${right},${bottom} ${right - 50},${ridgeY + 10} ${left + 50},${ridgeY + 10}`,
       // Left (W)
-      `${left},${top} ${left},${bottom} ${left+50},${ridgeY+10} ${left+50},${ridgeY-10}`,
+      `${left},${top} ${left},${bottom} ${left + 50},${ridgeY + 10} ${left + 50},${ridgeY - 10}`,
       // Right (E)
-      `${right},${top} ${right},${bottom} ${right-50},${ridgeY+10} ${right-50},${ridgeY-10}`
+      `${right},${top} ${right},${bottom} ${right - 50},${ridgeY + 10} ${right - 50},${ridgeY - 10}`
     ]
     const labelPos = [
-      {x:cx, y:ridgeY-45}, {x:cx, y:ridgeY+55}, {x:left+30, y:ridgeY}, {x:right-30, y:ridgeY}
+      { x: cx, y: ridgeY - 45 }, { x: cx, y: ridgeY + 55 }, { x: left + 30, y: ridgeY }, { x: right - 30, y: ridgeY }
     ]
     for (let i = 0; i < Math.min(n, 4); i++) {
       svg += `<polygon points="${pts[i]}" fill="${colors[i]}60" stroke="#002F6C" stroke-width="1.5"/>`
       const s = segments[i]
-      svg += `<text x="${labelPos[i].x}" y="${labelPos[i].y-4}" text-anchor="middle" font-size="9" font-weight="700" fill="#002F6C">${s.true_area_sqft} sq ft</text>`
-      svg += `<text x="${labelPos[i].x}" y="${labelPos[i].y+8}" text-anchor="middle" font-size="8" fill="#335C8A">Pitch: ${s.pitch_ratio}</text>`
+      svg += `<text x="${labelPos[i].x}" y="${labelPos[i].y - 4}" text-anchor="middle" font-size="9" font-weight="700" fill="#002F6C">${s.true_area_sqft} sq ft</text>`
+      svg += `<text x="${labelPos[i].x}" y="${labelPos[i].y + 8}" text-anchor="middle" font-size="8" fill="#335C8A">Pitch: ${s.pitch_ratio}</text>`
     }
     // Ridge line
-    svg += `<line x1="${left+50}" y1="${ridgeY}" x2="${right-50}" y2="${ridgeY}" stroke="#E53935" stroke-width="3"/>`
+    svg += `<line x1="${left + 50}" y1="${ridgeY}" x2="${right - 50}" y2="${ridgeY}" stroke="#E53935" stroke-width="3"/>`
     // Hip lines
-    svg += `<line x1="${left}" y1="${top}" x2="${left+50}" y2="${ridgeY}" stroke="#5B9BD5" stroke-width="2"/>`
-    svg += `<line x1="${right}" y1="${top}" x2="${right-50}" y2="${ridgeY}" stroke="#5B9BD5" stroke-width="2"/>`
-    svg += `<line x1="${left}" y1="${bottom}" x2="${left+50}" y2="${ridgeY}" stroke="#5B9BD5" stroke-width="2"/>`
-    svg += `<line x1="${right}" y1="${bottom}" x2="${right-50}" y2="${ridgeY}" stroke="#5B9BD5" stroke-width="2"/>`
+    svg += `<line x1="${left}" y1="${top}" x2="${left + 50}" y2="${ridgeY}" stroke="#5B9BD5" stroke-width="2"/>`
+    svg += `<line x1="${right}" y1="${top}" x2="${right - 50}" y2="${ridgeY}" stroke="#5B9BD5" stroke-width="2"/>`
+    svg += `<line x1="${left}" y1="${bottom}" x2="${left + 50}" y2="${ridgeY}" stroke="#5B9BD5" stroke-width="2"/>`
+    svg += `<line x1="${right}" y1="${bottom}" x2="${right - 50}" y2="${ridgeY}" stroke="#5B9BD5" stroke-width="2"/>`
   } else {
     // Complex roof: main body + extensions
     // Main body
     const mw = 280, mh = 140
-    const ml = cx - mw/2, mt = cy - mh/2 - 10, mr = cx + mw/2, mb = cy + mh/2 - 10
+    const ml = cx - mw / 2, mt = cy - mh / 2 - 10, mr = cx + mw / 2, mb = cy + mh / 2 - 10
     // Extension (garage wing)
     const ew = 120, eh = 100
-    const el = cx - mw/2 - 10, et = cy - 10, er = el + ew, eb = et + eh
-    
+    const el = cx - mw / 2 - 10, et = cy - 10, er = el + ew, eb = et + eh
+
     // Draw main facets
     const mainFacets = segments.slice(0, Math.ceil(n * 0.6))
     const wingFacets = segments.slice(Math.ceil(n * 0.6))
-    
+
     // Main top
-    svg += `<polygon points="${ml},${mt} ${mr},${mt} ${mr-40},${(mt+mb)/2} ${ml+40},${(mt+mb)/2}" fill="${colors[0]}60" stroke="#002F6C" stroke-width="1.5"/>`
-    svg += `<text x="${cx}" y="${mt+25}" text-anchor="middle" font-size="9" font-weight="700" fill="#002F6C">${mainFacets[0]?.true_area_sqft || ''} sq ft</text>`
-    svg += `<text x="${cx}" y="${mt+36}" text-anchor="middle" font-size="8" fill="#335C8A">Pitch: ${mainFacets[0]?.pitch_ratio || ''}</text>`
-    
+    svg += `<polygon points="${ml},${mt} ${mr},${mt} ${mr - 40},${(mt + mb) / 2} ${ml + 40},${(mt + mb) / 2}" fill="${colors[0]}60" stroke="#002F6C" stroke-width="1.5"/>`
+    svg += `<text x="${cx}" y="${mt + 25}" text-anchor="middle" font-size="9" font-weight="700" fill="#002F6C">${mainFacets[0]?.true_area_sqft || ''} sq ft</text>`
+    svg += `<text x="${cx}" y="${mt + 36}" text-anchor="middle" font-size="8" fill="#335C8A">Pitch: ${mainFacets[0]?.pitch_ratio || ''}</text>`
+
     // Main bottom
-    svg += `<polygon points="${ml},${mb} ${mr},${mb} ${mr-40},${(mt+mb)/2} ${ml+40},${(mt+mb)/2}" fill="${colors[1]}60" stroke="#002F6C" stroke-width="1.5"/>`
+    svg += `<polygon points="${ml},${mb} ${mr},${mb} ${mr - 40},${(mt + mb) / 2} ${ml + 40},${(mt + mb) / 2}" fill="${colors[1]}60" stroke="#002F6C" stroke-width="1.5"/>`
     if (mainFacets[1]) {
-      svg += `<text x="${cx}" y="${mb-15}" text-anchor="middle" font-size="9" font-weight="700" fill="#002F6C">${mainFacets[1].true_area_sqft} sq ft</text>`
-      svg += `<text x="${cx}" y="${mb-4}" text-anchor="middle" font-size="8" fill="#335C8A">Pitch: ${mainFacets[1].pitch_ratio}</text>`
+      svg += `<text x="${cx}" y="${mb - 15}" text-anchor="middle" font-size="9" font-weight="700" fill="#002F6C">${mainFacets[1].true_area_sqft} sq ft</text>`
+      svg += `<text x="${cx}" y="${mb - 4}" text-anchor="middle" font-size="8" fill="#335C8A">Pitch: ${mainFacets[1].pitch_ratio}</text>`
     }
-    
+
     // Main sides
-    svg += `<polygon points="${ml},${mt} ${ml},${mb} ${ml+40},${(mt+mb)/2}" fill="${colors[2]}60" stroke="#002F6C" stroke-width="1.5"/>`
-    svg += `<polygon points="${mr},${mt} ${mr},${mb} ${mr-40},${(mt+mb)/2}" fill="${colors[3]}60" stroke="#002F6C" stroke-width="1.5"/>`
-    
+    svg += `<polygon points="${ml},${mt} ${ml},${mb} ${ml + 40},${(mt + mb) / 2}" fill="${colors[2]}60" stroke="#002F6C" stroke-width="1.5"/>`
+    svg += `<polygon points="${mr},${mt} ${mr},${mb} ${mr - 40},${(mt + mb) / 2}" fill="${colors[3]}60" stroke="#002F6C" stroke-width="1.5"/>`
+
     // Ridge
-    svg += `<line x1="${ml+40}" y1="${(mt+mb)/2}" x2="${mr-40}" y2="${(mt+mb)/2}" stroke="#E53935" stroke-width="3"/>`
-    
+    svg += `<line x1="${ml + 40}" y1="${(mt + mb) / 2}" x2="${mr - 40}" y2="${(mt + mb) / 2}" stroke="#E53935" stroke-width="3"/>`
+
     // Wing
     if (wingFacets.length > 0) {
-      svg += `<polygon points="${el},${et} ${er},${et} ${(el+er)/2},${(et+eb)/2}" fill="${colors[4] || colors[0]}60" stroke="#002F6C" stroke-width="1.5"/>`
-      svg += `<polygon points="${el},${eb} ${er},${eb} ${(el+er)/2},${(et+eb)/2}" fill="${colors[5] || colors[1]}60" stroke="#002F6C" stroke-width="1.5"/>`
-      svg += `<text x="${(el+er)/2}" y="${et+20}" text-anchor="middle" font-size="8" font-weight="700" fill="#002F6C">${wingFacets[0]?.true_area_sqft || ''} sq ft</text>`
-      svg += `<line x1="${el}" y1="${(et+eb)/2}" x2="${er}" y2="${(et+eb)/2}" stroke="#E53935" stroke-width="2"/>`
+      svg += `<polygon points="${el},${et} ${er},${et} ${(el + er) / 2},${(et + eb) / 2}" fill="${colors[4] || colors[0]}60" stroke="#002F6C" stroke-width="1.5"/>`
+      svg += `<polygon points="${el},${eb} ${er},${eb} ${(el + er) / 2},${(et + eb) / 2}" fill="${colors[5] || colors[1]}60" stroke="#002F6C" stroke-width="1.5"/>`
+      svg += `<text x="${(el + er) / 2}" y="${et + 20}" text-anchor="middle" font-size="8" font-weight="700" fill="#002F6C">${wingFacets[0]?.true_area_sqft || ''} sq ft</text>`
+      svg += `<line x1="${el}" y1="${(et + eb) / 2}" x2="${er}" y2="${(et + eb) / 2}" stroke="#E53935" stroke-width="2"/>`
       // Valley
-      svg += `<line x1="${er}" y1="${et}" x2="${ml+20}" y2="${(mt+mb)/2-20}" stroke="#43A047" stroke-width="2" stroke-dasharray="4,2"/>`
-      svg += `<line x1="${er}" y1="${eb}" x2="${ml+20}" y2="${(mt+mb)/2+20}" stroke="#43A047" stroke-width="2" stroke-dasharray="4,2"/>`
+      svg += `<line x1="${er}" y1="${et}" x2="${ml + 20}" y2="${(mt + mb) / 2 - 20}" stroke="#43A047" stroke-width="2" stroke-dasharray="4,2"/>`
+      svg += `<line x1="${er}" y1="${eb}" x2="${ml + 20}" y2="${(mt + mb) / 2 + 20}" stroke="#43A047" stroke-width="2" stroke-dasharray="4,2"/>`
     }
-    
+
     // Hip lines
-    svg += `<line x1="${ml}" y1="${mt}" x2="${ml+40}" y2="${(mt+mb)/2}" stroke="#5B9BD5" stroke-width="2"/>`
-    svg += `<line x1="${mr}" y1="${mt}" x2="${mr-40}" y2="${(mt+mb)/2}" stroke="#5B9BD5" stroke-width="2"/>`
-    svg += `<line x1="${ml}" y1="${mb}" x2="${ml+40}" y2="${(mt+mb)/2}" stroke="#5B9BD5" stroke-width="2"/>`
-    svg += `<line x1="${mr}" y1="${mb}" x2="${mr-40}" y2="${(mt+mb)/2}" stroke="#5B9BD5" stroke-width="2"/>`
+    svg += `<line x1="${ml}" y1="${mt}" x2="${ml + 40}" y2="${(mt + mb) / 2}" stroke="#5B9BD5" stroke-width="2"/>`
+    svg += `<line x1="${mr}" y1="${mt}" x2="${mr - 40}" y2="${(mt + mb) / 2}" stroke="#5B9BD5" stroke-width="2"/>`
+    svg += `<line x1="${ml}" y1="${mb}" x2="${ml + 40}" y2="${(mt + mb) / 2}" stroke="#5B9BD5" stroke-width="2"/>`
+    svg += `<line x1="${mr}" y1="${mb}" x2="${mr - 40}" y2="${(mt + mb) / 2}" stroke="#5B9BD5" stroke-width="2"/>`
   }
-  
+
   // Direction arrows
   svg += `<text x="250" y="15" text-anchor="middle" font-size="10" font-weight="700" fill="#002F6C">N</text>`
   svg += `<polygon points="250,18 246,25 254,25" fill="#002F6C"/>`
-  
+
   return svg
 }

@@ -648,10 +648,10 @@ export async function executeRoofOrder(
     const totalSegArea = biSegments.reduce((s: number, seg: any) => s + (seg.stats?.areaMeters2 || 0), 0)
     avgPitchDeg = totalSegArea > 0
       ? biSegments.reduce((s: number, seg: any) => {
-          const segArea = seg.stats?.areaMeters2 || 0
-          const segPitch = seg.pitchDegrees || 0
-          return s + segPitch * segArea
-        }, 0) / totalSegArea
+        const segArea = seg.stats?.areaMeters2 || 0
+        const segPitch = seg.pitchDegrees || 0
+        return s + segPitch * segArea
+      }, 0) / totalSegArea
       : slopeAnalysis.weightedAvgPitchDeg
 
     console.log(`[Pipeline] Using buildingInsights pitch: ${avgPitchDeg.toFixed(1)}° (DSM slope: ${slopeAnalysis.weightedAvgPitchDeg}° for reference)`)
@@ -711,9 +711,10 @@ export async function executeRoofOrder(
   const contextZoom = roofZoom - 2
 
   // Primary overhead satellite image (640x640 viewport, scale=2 for 1280x1280 actual pixels)
-  const satelliteOverheadUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=${roofZoom}&size=640x640&scale=2&maptype=satellite&key=${geocodeKey}`
+  // Max zoom for roof isolation: zoom 21 (High Res)
+  const satelliteOverheadUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=21&size=640x640&scale=2&maptype=satellite&key=${geocodeKey}`
   // Wider context view
-  const satelliteContextUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=${contextZoom}&size=640x640&scale=2&maptype=satellite&key=${geocodeKey}`
+  const satelliteContextUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=19&size=640x640&scale=2&maptype=satellite&key=${geocodeKey}`
   // Legacy compatible URL (rectangular, used as fallback)
   const satelliteUrl = satelliteOverheadUrl
 

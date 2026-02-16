@@ -3,7 +3,7 @@
 // Detects which module to render via data-module attribute
 // ============================================================
 
-(function() {
+(function () {
   'use strict';
 
   const root = document.getElementById('crm-root');
@@ -54,8 +54,8 @@
       (onSave ? '<div class="px-6 py-4 border-t border-gray-100 flex justify-end gap-2"><button onclick="document.getElementById(\'crmModal\').remove()" class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm">Cancel</button><button id="modalSaveBtn" class="px-6 py-2 bg-brand-600 text-white rounded-lg text-sm font-semibold hover:bg-brand-700">' + (saveLabel || 'Save') + '</button></div>' : '') +
       '</div>';
     document.body.appendChild(overlay);
-    overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
-    if (onSave) { document.getElementById('modalSaveBtn').addEventListener('click', function() { onSave(); }); }
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove(); });
+    if (onSave) { document.getElementById('modalSaveBtn').addEventListener('click', function () { onSave(); }); }
     return overlay;
   }
 
@@ -69,7 +69,7 @@
     t.className = 'fixed bottom-4 right-4 z-[60] px-5 py-3 rounded-xl shadow-xl text-sm font-medium text-white ' + (type === 'error' ? 'bg-red-600' : 'bg-green-600');
     t.innerHTML = '<i class="fas ' + (type === 'error' ? 'fa-exclamation-circle' : 'fa-check-circle') + ' mr-2"></i>' + msg;
     document.body.appendChild(t);
-    setTimeout(function() { t.remove(); }, 3000);
+    setTimeout(function () { t.remove(); }, 3000);
   }
 
   // ============================================================
@@ -91,12 +91,12 @@
   function initReports() {
     root.innerHTML = '<div class="text-center py-8"><div class="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-brand-500 mx-auto mb-3"></div><p class="text-gray-500 text-sm">Loading reports...</p></div>';
     fetch('/api/customer/orders', { headers: authHeadersOnly() })
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
-        var orders = (data.orders || []).filter(function(o) { return o.report_status === 'completed' || o.status === 'completed'; });
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        var orders = (data.orders || []).filter(function (o) { return o.report_status === 'completed' || o.status === 'completed'; });
         renderReports(orders);
       })
-      .catch(function() { root.innerHTML = '<p class="text-red-500">Failed to load reports.</p>'; });
+      .catch(function () { root.innerHTML = '<p class="text-red-500">Failed to load reports.</p>'; });
   }
 
   function renderReports(orders) {
@@ -126,9 +126,9 @@
     var url = '/api/crm/customers';
     if (search) url += '?search=' + encodeURIComponent(search);
     fetch(url, { headers: authHeadersOnly() })
-      .then(function(r) { return r.json(); })
-      .then(function(data) { customersData = data.customers || []; renderCustomers(data); })
-      .catch(function() { root.innerHTML = '<p class="text-red-500">Failed to load customers.</p>'; });
+      .then(function (r) { return r.json(); })
+      .then(function (data) { customersData = data.customers || []; renderCustomers(data); })
+      .catch(function () { root.innerHTML = '<p class="text-red-500">Failed to load customers.</p>'; });
   }
 
   function renderCustomers(data) {
@@ -177,41 +177,41 @@
     };
   }
 
-  window._crmSearchCustomers = function() {
+  window._crmSearchCustomers = function () {
     var s = document.getElementById('custSearch');
     loadCustomers(s ? s.value.trim() : '');
   };
 
-  window._crmAddCustomer = function() {
-    showModal('Add New Customer', customerFormHTML(), function() {
+  window._crmAddCustomer = function () {
+    showModal('Add New Customer', customerFormHTML(), function () {
       var data = getCustomerFormData();
       if (!data.name) { toast('Customer name is required.', 'error'); return; }
       fetch('/api/crm/customers', { method: 'POST', headers: authHeaders(), body: JSON.stringify(data) })
-        .then(function(r) { return r.json(); })
-        .then(function(res) { if (res.success) { closeModal(); toast('Customer added!'); loadCustomers(); } else { toast(res.error || 'Failed', 'error'); } })
-        .catch(function() { toast('Network error', 'error'); });
+        .then(function (r) { return r.json(); })
+        .then(function (res) { if (res.success) { closeModal(); toast('Customer added!'); loadCustomers(); } else { toast(res.error || 'Failed', 'error'); } })
+        .catch(function () { toast('Network error', 'error'); });
     }, 'Add Customer');
   };
 
-  window._crmEditCustomer = function(id) {
+  window._crmEditCustomer = function (id) {
     fetch('/api/crm/customers/' + id, { headers: authHeadersOnly() })
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
         var c = data.customer;
-        showModal('Edit Customer', customerFormHTML(c), function() {
+        showModal('Edit Customer', customerFormHTML(c), function () {
           var fd = getCustomerFormData();
           if (!fd.name) { toast('Name required', 'error'); return; }
           fetch('/api/crm/customers/' + id, { method: 'PUT', headers: authHeaders(), body: JSON.stringify(fd) })
-            .then(function(r) { return r.json(); })
-            .then(function(res) { if (res.success) { closeModal(); toast('Customer updated!'); loadCustomers(); } else { toast(res.error || 'Failed', 'error'); } });
+            .then(function (r) { return r.json(); })
+            .then(function (res) { if (res.success) { closeModal(); toast('Customer updated!'); loadCustomers(); } else { toast(res.error || 'Failed', 'error'); } });
         }, 'Save Changes');
       });
   };
 
-  window._crmViewCustomer = function(id) {
+  window._crmViewCustomer = function (id) {
     fetch('/api/crm/customers/' + id, { headers: authHeadersOnly() })
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
         var c = data.customer;
         var invs = data.invoices || [];
         var props = data.proposals || [];
@@ -241,10 +241,10 @@
       });
   };
 
-  window._crmDeleteCustomer = function(id) {
+  window._crmDeleteCustomer = function (id) {
     if (!confirm('Delete this customer?')) return;
     fetch('/api/crm/customers/' + id, { method: 'DELETE', headers: authHeadersOnly() })
-      .then(function() { toast('Customer deleted'); loadCustomers(); });
+      .then(function () { toast('Customer deleted'); loadCustomers(); });
   };
 
   // ============================================================
@@ -260,9 +260,9 @@
     var url = '/api/crm/invoices';
     if (statusFilter) url += '?status=' + statusFilter;
     fetch(url, { headers: authHeadersOnly() })
-      .then(function(r) { return r.json(); })
-      .then(function(data) { invoicesData = data.invoices || []; renderInvoices(data); })
-      .catch(function() { root.innerHTML = '<p class="text-red-500">Failed to load invoices.</p>'; });
+      .then(function (r) { return r.json(); })
+      .then(function (data) { invoicesData = data.invoices || []; renderInvoices(data); })
+      .catch(function () { root.innerHTML = '<p class="text-red-500">Failed to load invoices.</p>'; });
   }
 
   function renderInvoices(data) {
@@ -279,7 +279,7 @@
 
     // Filter tabs
     html += '<div class="flex gap-1 mb-4 bg-white rounded-lg border p-1 overflow-x-auto">';
-    var filters = [['','All'],['owing','Owing'],['paid','Paid']];
+    var filters = [['', 'All'], ['owing', 'Owing'], ['paid', 'Paid']];
     for (var f = 0; f < filters.length; f++) {
       html += '<button onclick="window._crmFilterInvoices(\'' + filters[f][0] + '\')" class="px-4 py-1.5 rounded-lg text-xs font-medium transition-colors hover:bg-gray-100 ' + (((!window._invFilter && !filters[f][0]) || window._invFilter === filters[f][0]) ? 'bg-brand-600 text-white' : 'text-gray-600') + '">' + filters[f][1] + '</button>';
     }
@@ -303,13 +303,13 @@
   }
 
   window._invFilter = '';
-  window._crmFilterInvoices = function(status) { window._invFilter = status; loadInvoices(status); };
+  window._crmFilterInvoices = function (status) { window._invFilter = status; loadInvoices(status); };
 
-  window._crmNewInvoice = function() {
+  window._crmNewInvoice = function () {
     // First load customers for the dropdown
     fetch('/api/crm/customers', { headers: authHeadersOnly() })
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
         var custs = data.customers || [];
         var body = '<div class="space-y-3">' +
           '<div><label class="block text-xs font-medium text-gray-600 mb-1">Customer *</label>' + customerSelectHTML(custs, '', 'invCustomer') + '</div>' +
@@ -318,12 +318,12 @@
           '<div class="grid grid-cols-2 gap-3"><div><label class="block text-xs font-medium text-gray-600 mb-1">Due Date</label><input type="date" id="invDue" class="w-full px-2 py-2 border border-gray-300 rounded-lg text-sm"></div><div><label class="block text-xs font-medium text-gray-600 mb-1">Tax Rate (%)</label><input type="number" id="invTax" value="5" class="w-full px-2 py-2 border border-gray-300 rounded-lg text-sm" step="0.1"></div></div>' +
           '<div><label class="block text-xs font-medium text-gray-600 mb-1">Notes</label><textarea id="invNotes" rows="2" class="w-full px-2 py-2 border border-gray-300 rounded-lg text-sm" placeholder="Optional notes..."></textarea></div></div>';
 
-        showModal('Create Invoice', body, function() {
+        showModal('Create Invoice', body, function () {
           var custId = document.getElementById('invCustomer').value;
           if (!custId) { toast('Select a customer', 'error'); return; }
           var rows = document.querySelectorAll('.invItemRow');
           var items = [];
-          rows.forEach(function(r) {
+          rows.forEach(function (r) {
             var desc = r.querySelector('.invDesc').value.trim();
             var qty = parseFloat(r.querySelector('.invQty').value) || 1;
             var price = parseFloat(r.querySelector('.invPrice').value) || 0;
@@ -337,13 +337,13 @@
             notes: document.getElementById('invNotes').value.trim()
           };
           fetch('/api/crm/invoices', { method: 'POST', headers: authHeaders(), body: JSON.stringify(payload) })
-            .then(function(r) { return r.json(); })
-            .then(function(res) { if (res.success) { closeModal(); toast('Invoice created!'); loadInvoices(); } else { toast(res.error || 'Failed', 'error'); } });
+            .then(function (r) { return r.json(); })
+            .then(function (res) { if (res.success) { closeModal(); toast('Invoice created!'); loadInvoices(); } else { toast(res.error || 'Failed', 'error'); } });
         }, 'Create Invoice');
       });
   };
 
-  window._crmAddInvItem = function() {
+  window._crmAddInvItem = function () {
     var container = document.getElementById('invItems');
     if (!container) return;
     var row = document.createElement('div');
@@ -352,16 +352,16 @@
     container.appendChild(row);
   };
 
-  window._crmMarkInvoice = function(id, status) {
+  window._crmMarkInvoice = function (id, status) {
     fetch('/api/crm/invoices/' + id, { method: 'PUT', headers: authHeaders(), body: JSON.stringify({ status: status }) })
-      .then(function(r) { return r.json(); })
-      .then(function(res) { if (res.success) { toast('Invoice marked as ' + status); loadInvoices(window._invFilter); } });
+      .then(function (r) { return r.json(); })
+      .then(function (res) { if (res.success) { toast('Invoice marked as ' + status); loadInvoices(window._invFilter); } });
   };
 
-  window._crmDeleteInvoice = function(id) {
+  window._crmDeleteInvoice = function (id) {
     if (!confirm('Delete this invoice?')) return;
     fetch('/api/crm/invoices/' + id, { method: 'DELETE', headers: authHeadersOnly() })
-      .then(function() { toast('Invoice deleted'); loadInvoices(window._invFilter); });
+      .then(function () { toast('Invoice deleted'); loadInvoices(window._invFilter); });
   };
 
   // ============================================================
@@ -376,9 +376,9 @@
     var url = '/api/crm/proposals';
     if (statusFilter) url += '?status=' + statusFilter;
     fetch(url, { headers: authHeadersOnly() })
-      .then(function(r) { return r.json(); })
-      .then(function(data) { renderProposals(data); })
-      .catch(function() { root.innerHTML = '<p class="text-red-500">Failed to load proposals.</p>'; });
+      .then(function (r) { return r.json(); })
+      .then(function (data) { renderProposals(data); })
+      .catch(function () { root.innerHTML = '<p class="text-red-500">Failed to load proposals.</p>'; });
   }
 
   function renderProposals(data) {
@@ -394,7 +394,7 @@
 
     // Filter
     html += '<div class="flex gap-1 mb-4 bg-white rounded-lg border p-1 overflow-x-auto">';
-    var filters = [['','All'],['open','Open'],['sold','Sold']];
+    var filters = [['', 'All'], ['open', 'Open'], ['sold', 'Sold']];
     for (var f = 0; f < filters.length; f++) {
       html += '<button onclick="window._crmFilterProposals(\'' + filters[f][0] + '\')" class="px-4 py-1.5 rounded-lg text-xs font-medium transition-colors hover:bg-gray-100 ' + (((!window._propFilter && !filters[f][0]) || window._propFilter === filters[f][0]) ? 'bg-brand-600 text-white' : 'text-gray-600') + '">' + filters[f][1] + '</button>';
     }
@@ -418,12 +418,12 @@
   }
 
   window._propFilter = '';
-  window._crmFilterProposals = function(s) { window._propFilter = s; loadProposals(s); };
+  window._crmFilterProposals = function (s) { window._propFilter = s; loadProposals(s); };
 
-  window._crmNewProposal = function() {
+  window._crmNewProposal = function () {
     fetch('/api/crm/customers', { headers: authHeadersOnly() })
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
         var custs = data.customers || [];
         var body = '<div class="space-y-3">' +
           '<div><label class="block text-xs font-medium text-gray-600 mb-1">Customer *</label>' + customerSelectHTML(custs, '', 'propCustomer') + '</div>' +
@@ -434,7 +434,7 @@
           '<div><label class="block text-xs font-medium text-gray-600 mb-1">Valid Until</label><input type="date" id="propValid" class="w-full px-2 py-2 border border-gray-300 rounded-lg text-sm"></div>' +
           '<div><label class="block text-xs font-medium text-gray-600 mb-1">Notes</label><textarea id="propNotes" rows="2" class="w-full px-2 py-2 border border-gray-300 rounded-lg text-sm"></textarea></div></div>';
 
-        showModal('Create Proposal', body, function() {
+        showModal('Create Proposal', body, function () {
           var custId = document.getElementById('propCustomer').value;
           var title = document.getElementById('propTitle').value.trim();
           if (!custId || !title) { toast('Customer and title required', 'error'); return; }
@@ -449,22 +449,22 @@
             notes: document.getElementById('propNotes').value.trim()
           };
           fetch('/api/crm/proposals', { method: 'POST', headers: authHeaders(), body: JSON.stringify(payload) })
-            .then(function(r) { return r.json(); })
-            .then(function(res) { if (res.success) { closeModal(); toast('Proposal created!'); loadProposals(); } else { toast(res.error || 'Failed', 'error'); } });
+            .then(function (r) { return r.json(); })
+            .then(function (res) { if (res.success) { closeModal(); toast('Proposal created!'); loadProposals(); } else { toast(res.error || 'Failed', 'error'); } });
         }, 'Create Proposal');
       });
   };
 
-  window._crmMarkProposal = function(id, status) {
+  window._crmMarkProposal = function (id, status) {
     fetch('/api/crm/proposals/' + id, { method: 'PUT', headers: authHeaders(), body: JSON.stringify({ status: status }) })
-      .then(function(r) { return r.json(); })
-      .then(function(res) { if (res.success) { toast('Proposal updated'); loadProposals(window._propFilter); } });
+      .then(function (r) { return r.json(); })
+      .then(function (res) { if (res.success) { toast('Proposal updated'); loadProposals(window._propFilter); } });
   };
 
-  window._crmDeleteProposal = function(id) {
+  window._crmDeleteProposal = function (id) {
     if (!confirm('Delete this proposal?')) return;
     fetch('/api/crm/proposals/' + id, { method: 'DELETE', headers: authHeadersOnly() })
-      .then(function() { toast('Proposal deleted'); loadProposals(window._propFilter); });
+      .then(function () { toast('Proposal deleted'); loadProposals(window._propFilter); });
   };
 
   // ============================================================
@@ -479,9 +479,9 @@
     var url = '/api/crm/jobs';
     if (statusFilter) url += '?status=' + statusFilter;
     fetch(url, { headers: authHeadersOnly() })
-      .then(function(r) { return r.json(); })
-      .then(function(data) { renderJobs(data); })
-      .catch(function() { root.innerHTML = '<p class="text-red-500">Failed to load jobs.</p>'; });
+      .then(function (r) { return r.json(); })
+      .then(function (data) { renderJobs(data); })
+      .catch(function () { root.innerHTML = '<p class="text-red-500">Failed to load jobs.</p>'; });
   }
 
   function renderJobs(data) {
@@ -497,7 +497,7 @@
 
     // Filter tabs
     html += '<div class="flex gap-1 mb-4 bg-white rounded-lg border p-1 overflow-x-auto">';
-    var filters = [['','All'],['scheduled','Scheduled'],['in_progress','In Progress'],['completed','Completed']];
+    var filters = [['', 'All'], ['scheduled', 'Scheduled'], ['in_progress', 'In Progress'], ['completed', 'Completed']];
     for (var f = 0; f < filters.length; f++) {
       html += '<button onclick="window._crmFilterJobs(\'' + filters[f][0] + '\')" class="px-4 py-1.5 rounded-lg text-xs font-medium transition-colors hover:bg-gray-100 ' + (((!window._jobFilter && !filters[f][0]) || window._jobFilter === filters[f][0]) ? 'bg-brand-600 text-white' : 'text-gray-600') + '">' + filters[f][1] + '</button>';
     }
@@ -523,12 +523,12 @@
   }
 
   window._jobFilter = '';
-  window._crmFilterJobs = function(s) { window._jobFilter = s; loadJobs(s); };
+  window._crmFilterJobs = function (s) { window._jobFilter = s; loadJobs(s); };
 
-  window._crmNewJob = function() {
+  window._crmNewJob = function () {
     fetch('/api/crm/customers', { headers: authHeadersOnly() })
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
         var custs = data.customers || [];
         var body = '<div class="space-y-3">' +
           '<div><label class="block text-xs font-medium text-gray-600 mb-1">Customer</label>' + customerSelectHTML(custs, '', 'jobCustomer') + '</div>' +
@@ -538,7 +538,7 @@
           '<div class="grid grid-cols-3 gap-3"><div><label class="block text-xs font-medium text-gray-600 mb-1">Job Type</label><select id="jobType" class="w-full px-2 py-2 border border-gray-300 rounded-lg text-sm"><option value="install">Install</option><option value="repair">Repair</option><option value="inspection">Inspection</option><option value="maintenance">Maintenance</option></select></div><div><label class="block text-xs font-medium text-gray-600 mb-1">Duration</label><input type="text" id="jobDuration" class="w-full px-2 py-2 border border-gray-300 rounded-lg text-sm" placeholder="e.g. 2 days"></div><div><label class="block text-xs font-medium text-gray-600 mb-1">Crew Size</label><input type="number" id="jobCrew" class="w-full px-2 py-2 border border-gray-300 rounded-lg text-sm" value="4"></div></div>' +
           '<div><label class="block text-xs font-medium text-gray-600 mb-1">Notes</label><textarea id="jobNotes" rows="2" class="w-full px-2 py-2 border border-gray-300 rounded-lg text-sm"></textarea></div></div>';
 
-        showModal('Schedule New Job', body, function() {
+        showModal('Schedule New Job', body, function () {
           var title = document.getElementById('jobTitle').value.trim();
           var date = document.getElementById('jobDate').value;
           if (!title || !date) { toast('Title and date required', 'error'); return; }
@@ -552,22 +552,22 @@
             notes: document.getElementById('jobNotes').value.trim()
           };
           fetch('/api/crm/jobs', { method: 'POST', headers: authHeaders(), body: JSON.stringify(payload) })
-            .then(function(r) { return r.json(); })
-            .then(function(res) { if (res.success) { closeModal(); toast('Job scheduled!'); loadJobs(); } else { toast(res.error || 'Failed', 'error'); } });
+            .then(function (r) { return r.json(); })
+            .then(function (res) { if (res.success) { closeModal(); toast('Job scheduled!'); loadJobs(); } else { toast(res.error || 'Failed', 'error'); } });
         }, 'Schedule Job');
       });
   };
 
-  window._crmMarkJob = function(id, status) {
+  window._crmMarkJob = function (id, status) {
     fetch('/api/crm/jobs/' + id, { method: 'PUT', headers: authHeaders(), body: JSON.stringify({ status: status }) })
-      .then(function(r) { return r.json(); })
-      .then(function(res) { if (res.success) { toast('Job updated'); loadJobs(window._jobFilter); } });
+      .then(function (r) { return r.json(); })
+      .then(function (res) { if (res.success) { toast('Job updated'); loadJobs(window._jobFilter); } });
   };
 
-  window._crmViewJob = function(id) {
+  window._crmViewJob = function (id) {
     fetch('/api/crm/jobs/' + id, { headers: authHeadersOnly() })
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
         var j = data.job;
         var checklist = data.checklist || [];
         var body = '<div class="space-y-4">' +
@@ -595,31 +595,251 @@
       });
   };
 
-  window._crmToggleChecklist = function(jobId, itemId, checked) {
+  window._crmToggleChecklist = function (jobId, itemId, checked) {
     fetch('/api/crm/jobs/' + jobId + '/checklist/' + itemId, { method: 'PUT', headers: authHeaders(), body: JSON.stringify({ is_completed: checked }) });
   };
 
-  window._crmDeleteJob = function(id) {
+  window._crmDeleteJob = function (id) {
     if (!confirm('Delete this job?')) return;
     fetch('/api/crm/jobs/' + id, { method: 'DELETE', headers: authHeadersOnly() })
-      .then(function() { toast('Job deleted'); loadJobs(window._jobFilter); });
+      .then(function () { toast('Job deleted'); loadJobs(window._jobFilter); });
   };
 
   // ============================================================
   // MODULE: PIPELINE
   // ============================================================
+  // ============================================================
+  // MODULE: PIPELINE (Kanban)
+  // ============================================================
   function initPipeline() {
-    root.innerHTML = '<div class="bg-white rounded-2xl border p-12 text-center">' +
-      '<div class="w-20 h-20 bg-gradient-to-br from-gray-100 to-gray-200 rounded-full flex items-center justify-center mx-auto mb-6"><i class="fas fa-funnel-dollar text-gray-400 text-3xl"></i></div>' +
-      '<h2 class="text-2xl font-bold text-gray-800 mb-3">Sales Pipeline</h2>' +
-      '<p class="text-gray-500 mb-2 max-w-md mx-auto">Track your leads through every stage of the sales process — from first contact to signed contract.</p>' +
-      '<div class="inline-flex items-center gap-2 bg-blue-50 text-blue-700 px-4 py-2 rounded-full text-sm font-medium mt-4"><i class="fas fa-code-branch mr-1"></i>Coming Soon</div>' +
-      '<div class="mt-8 grid grid-cols-2 md:grid-cols-4 gap-3 max-w-2xl mx-auto">' +
-      '<div class="bg-gray-50 rounded-xl p-4 text-center"><div class="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center mx-auto mb-2"><i class="fas fa-bullseye text-blue-500"></i></div><p class="text-xs font-semibold text-gray-700">Lead Capture</p></div>' +
-      '<div class="bg-gray-50 rounded-xl p-4 text-center"><div class="w-10 h-10 bg-amber-100 rounded-lg flex items-center justify-center mx-auto mb-2"><i class="fas fa-phone-alt text-amber-500"></i></div><p class="text-xs font-semibold text-gray-700">Contact Made</p></div>' +
-      '<div class="bg-gray-50 rounded-xl p-4 text-center"><div class="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center mx-auto mb-2"><i class="fas fa-file-signature text-purple-500"></i></div><p class="text-xs font-semibold text-gray-700">Proposal Sent</p></div>' +
-      '<div class="bg-gray-50 rounded-xl p-4 text-center"><div class="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center mx-auto mb-2"><i class="fas fa-handshake text-green-500"></i></div><p class="text-xs font-semibold text-gray-700">Won / Closed</p></div>' +
-      '</div></div>';
+    // Pipeline Header
+    let html = '<div class="flex flex-col h-full overflow-hidden">';
+    html += '<div class="flex justify-between items-center mb-6 px-1">';
+    html += '<div><h2 class="text-2xl font-bold text-gray-800">Sales Pipeline</h2><p class="text-gray-500 text-sm">Drag and drop deals to move them through stages.</p></div>';
+    html += '<button onclick="openDealModal()" class="bg-brand-600 text-white px-4 py-2 rounded-lg hover:bg-brand-700 transition-colors shadow-md flex items-center gap-2"><i class="fas fa-plus"></i> Add Deal</button>';
+    html += '</div>';
+
+    // Kanban Board Container
+    html += '<div class="flex-1 overflow-x-auto overflow-y-hidden">';
+    html += '<div class="flex h-full gap-4 min-w-[1000px] pb-4" id="kanbanBoard">';
+
+    // Columns will be injected here
+    html += '</div></div></div>';
+
+    // Modal
+    html += `
+      <div id="dealModal" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md mx-4 overflow-hidden transform transition-all scale-95 opacity-0" id="dealModalContent">
+          <div class="bg-gray-50 px-6 py-4 border-b flex justify-between items-center">
+            <h3 class="text-lg font-bold text-gray-800" id="dealModalTitle">New Deal</h3>
+            <button onclick="closeDealModal()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+          </div>
+          <div class="p-6">
+            <form id="dealForm" onsubmit="handleDealSubmit(event)">
+              <input type="hidden" name="id" id="dealId">
+              <div class="space-y-4">
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 mb-1">Deal Title</label>
+                  <input type="text" name="title" id="dealTitle" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-brand-500 outline-none" placeholder="e.g. Roof Replacement - Smith" required>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 mb-1">Value ($)</label>
+                  <input type="number" name="value" id="dealValue" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-brand-500 outline-none" placeholder="0.00">
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 mb-1">Stage</label>
+                  <select name="stage" id="dealStage" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-brand-500 outline-none">
+                    <option value="lead">Lead Capture</option>
+                    <option value="contacted">Contact Made</option>
+                    <option value="proposal">Proposal Sent</option>
+                    <option value="won">Won / Closed</option>
+                    <option value="lost">Lost</option>
+                  </select>
+                </div>
+              </div>
+              <div class="mt-6 flex justify-end gap-3">
+                <button type="button" onclick="closeDealModal()" class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+                <button type="submit" class="px-4 py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700 shadow-sm">Save Deal</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    `;
+
+    root.innerHTML = html;
+    loadDeals();
+  }
+
+  window.openDealModal = function (deal = null) {
+    const modal = document.getElementById('dealModal');
+    const content = document.getElementById('dealModalContent');
+    modal.classList.remove('hidden');
+    modal.classList.add('flex'); // Ensure flex display
+    setTimeout(() => {
+      content.classList.remove('scale-95', 'opacity-0');
+      content.classList.add('scale-100', 'opacity-100');
+    }, 10);
+
+    if (deal) {
+      document.getElementById('dealModalTitle').innerText = 'Edit Deal';
+      document.getElementById('dealId').value = deal.id;
+      document.getElementById('dealTitle').value = deal.title;
+      document.getElementById('dealValue').value = deal.value;
+      document.getElementById('dealStage').value = deal.stage;
+    } else {
+      document.getElementById('dealModalTitle').innerText = 'New Deal';
+      document.getElementById('dealForm').reset();
+      document.getElementById('dealId').value = '';
+    }
+  };
+
+  window.closeDealModal = function () {
+    const modal = document.getElementById('dealModal');
+    const content = document.getElementById('dealModalContent');
+    content.classList.remove('scale-100', 'opacity-100');
+    content.classList.add('scale-95', 'opacity-0');
+    setTimeout(() => {
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+    }, 200);
+  };
+
+  window.handleDealSubmit = function (e) {
+    e.preventDefault();
+    const formData = new FormData(e.target);
+    const id = formData.get('id');
+    const data = {
+      title: formData.get('title'),
+      value: parseFloat(formData.get('value')) || 0,
+      stage: formData.get('stage')
+    };
+
+    const url = id ? `/api/crm/deals/${id}` : '/api/crm/deals';
+    const method = id ? 'PUT' : 'POST';
+
+    fetch(url, {
+      method: method,
+      headers: authHeaders(),
+      body: JSON.stringify(data)
+    })
+      .then(res => res.json())
+      .then(res => {
+        if (res.error) { toast(res.error, 'error'); return; }
+        toast(id ? 'Deal updated' : 'Deal created');
+        closeDealModal();
+        loadDeals();
+      })
+      .catch(err => toast('Error saving deal', 'error'));
+  };
+
+  function loadDeals() {
+    fetch('/api/crm/deals', { headers: authHeadersOnly() })
+      .then(res => res.json())
+      .then(data => {
+        renderKanban(data.deals || []);
+      })
+      .catch(err => console.error(err));
+  }
+
+  function renderKanban(deals) {
+    const stages = [
+      { id: 'lead', title: 'Lead Capture', color: 'bg-gray-100', border: 'border-gray-200', icon: 'fa-bullseye', iconColor: 'text-gray-500' },
+      { id: 'contacted', title: 'Contact Made', color: 'bg-blue-50', border: 'border-blue-200', icon: 'fa-phone-alt', iconColor: 'text-blue-500' },
+      { id: 'proposal', title: 'Proposal Sent', color: 'bg-purple-50', border: 'border-purple-200', icon: 'fa-file-signature', iconColor: 'text-purple-500' },
+      { id: 'won', title: 'Won / Closed', color: 'bg-green-50', border: 'border-green-200', icon: 'fa-handshake', iconColor: 'text-green-500' }
+      // 'Lost' is usually hidden or separate, but we can add it if requested. User said "Won" as last step in prompt.
+    ];
+
+    const board = document.getElementById('kanbanBoard');
+    if (!board) return;
+    board.innerHTML = '';
+
+    stages.forEach(stage => {
+      const stageDeals = deals.filter(d => d.stage === stage.id);
+      const sum = stageDeals.reduce((acc, d) => acc + (d.value || 0), 0);
+
+      const col = document.createElement('div');
+      col.className = `flex-1 min-w-[280px] max-w-[350px] flex flex-col h-full bg-white rounded-xl border ${stage.border} shadow-sm`;
+      col.innerHTML = `
+        <div class="p-3 border-b ${stage.border} flex justify-between items-center ${stage.color} rounded-t-xl">
+          <div class="flex items-center gap-2">
+            <div class="w-8 h-8 rounded-lg bg-white flex items-center justify-center shadow-sm"><i class="fas ${stage.icon} ${stage.iconColor} text-sm"></i></div>
+            <div>
+              <h3 class="font-bold text-gray-700 text-sm uppercase tracking-wide">${stage.title}</h3>
+              <span class="text-xs text-gray-500 font-medium">${stageDeals.length} deals</span>
+            </div>
+          </div>
+          <div class="text-xs font-bold text-gray-600 bg-white/50 px-2 py-1 rounded shadow-sm">$${sum.toLocaleString()}</div>
+        </div>
+        <div class="p-2 flex-1 overflow-y-auto space-y-2 bg-gray-50/50" 
+             id="col-${stage.id}" 
+             ondrop="drop(event, '${stage.id}')" 
+             ondragover="allowDrop(event)">
+             <!-- Cards go here -->
+        </div>
+      `;
+
+      const colBody = col.querySelector(`#col-${stage.id}`);
+      stageDeals.forEach(deal => {
+        const card = document.createElement('div');
+        card.className = "bg-white p-3 rounded-lg border border-gray-200 shadow-sm hover:shadow-md transition-shadow cursor-grab active:cursor-grabbing group relative";
+        card.draggable = true;
+        card.id = `deal-${deal.id}`;
+        card.ondragstart = (e) => drag(e, deal.id);
+
+        card.innerHTML = `
+          <div class="flex justify-between items-start mb-1">
+            <span class="text-xs font-bold text-gray-400">#${deal.id}</span>
+            <button onclick="window.openDealModal({id: ${deal.id}, title: '${deal.title.replace(/'/g, "\\'")}', value: ${deal.value}, stage: '${deal.stage}'})" class="text-gray-300 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity"><i class="fas fa-pen"></i></button>
+          </div>
+          <h4 class="font-bold text-gray-800 text-sm mb-1 line-clamp-2">${deal.title}</h4>
+          <div class="flex justify-between items-center mt-2">
+            <span class="text-xs font-medium text-green-600 bg-green-50 px-2 py-0.5 rounded-full">$${deal.value.toLocaleString()}</span>
+            <span class="text-[10px] text-gray-400">${new Date(deal.updated_at).toLocaleDateString()}</span>
+          </div>
+        `;
+        colBody.appendChild(card);
+      });
+
+      board.appendChild(col);
+    });
+  }
+
+  // Kanban Drag & Drop Globals
+  window.allowDrop = function (ev) {
+    ev.preventDefault();
+    ev.currentTarget.classList.add('bg-blue-50'); // Highlight
+  };
+
+  // Remove highlight on leave (optional, can be tricky with child elements)
+  // Simplified for now.
+
+  window.drag = function (ev, dealId) {
+    ev.dataTransfer.setData("text/plain", dealId);
+    ev.dataTransfer.effectAllowed = "move";
+  };
+
+  window.drop = function (ev, newStage) {
+    ev.preventDefault();
+    ev.currentTarget.classList.remove('bg-blue-50');
+    const dealId = ev.dataTransfer.getData("text/plain");
+
+    // Optimistic UI Update (optional, or just reload)
+    // Let's call API then reload for simplicity and consistency
+    fetch(`/api/crm/deals/${dealId}`, {
+      method: 'PUT',
+      headers: authHeaders(),
+      body: JSON.stringify({ stage: newStage })
+    })
+      .then(res => res.json())
+      .then(res => {
+        if (res.success) {
+          loadDeals(); // Reload to re-sort/re-calculate totals
+        } else {
+          toast('Failed to move deal', 'error');
+        }
+      });
   }
 
   // ============================================================

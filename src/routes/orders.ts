@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import type { Bindings } from '../types'
+import { generateReportForOrder } from './reports'
 
 export const ordersRoutes = new Hono<{ Bindings: Bindings }>()
 
@@ -215,6 +216,17 @@ ordersRoutes.post('/:id/pay', async (c) => {
       INSERT INTO user_activity_log (company_id, action, details)
       VALUES (1, 'payment_received', ?)
     `).bind(`Payment of $${order.price} for order ${order.order_number}`).run()
+
+    // TRIGGER REPORT GENERATION IMMEDIATELY
+    // This runs in the background (no await) so the UI returns quickly
+    c.executionCtx.waitUntil((async () => {
+      console.log(`[OrderPay] Triggering report generation for order ${id}`)
+      try {
+        await generateReportForOrder(id, c.env)
+      } catch (e: any) {
+        console.error(`[OrderPay] Failed to generate report for order ${id}:`, e)
+      }
+    })())
 
     return c.json({
       success: true,

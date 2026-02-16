@@ -61,6 +61,9 @@ export type Bindings = {
   ADMIN_BOOTSTRAP_EMAIL: string
   ADMIN_BOOTSTRAP_PASSWORD: string
   ADMIN_BOOTSTRAP_NAME: string
+
+  // Antigravity KV Store - Dynamic configuration
+  ANTIGRAVITY_DATA: KVNamespace
 }
 
 // ============================================================
@@ -450,7 +453,7 @@ export interface RoofReport {
 // ============================================================
 export function degreesToCardinal(deg: number): string {
   const dirs = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE',
-                'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
+    'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
   const index = Math.round(((deg % 360) + 360) % 360 / 22.5) % 16
   return dirs[index]
 }
@@ -564,10 +567,14 @@ export function computeMaterialEstimate(
     pitchVariation
   )
 
-  // Base waste: 10% for simple, up to 15% for complex, plus valley waste
-  const baseWaste = complexityClass === 'simple' ? 10 :
-    complexityClass === 'moderate' ? 12 :
-    complexityClass === 'complex' ? 14 : 15
+  // PHASE 3: THE POLISH (Data Output)
+  // Dynamic Waste Factor: Base 10% + 5% for every valley detected
+  const valleyCount = valleyEdges.length
+  let baseWaste = 10
+  baseWaste += valleyCount * 5
+
+  // Cap max waste at reasonable logic if needed, but per prompt: "Base 10% + 5% for every valley"
+  // Note: Complexity class mainly for display now, waste calculation is explicit
 
   // Net area = true surface area
   const netArea = trueAreaSqft
@@ -798,11 +805,11 @@ export function computeRASYieldAnalysis(
 
     // Yield rates vary by pitch/recovery class
     const binderOilRate = recoveryClass === 'binder_oil' ? 0.32 :
-                          recoveryClass === 'mixed' ? 0.28 : 0.25
+      recoveryClass === 'mixed' ? 0.28 : 0.25
     const granuleRate = recoveryClass === 'granule' ? 0.40 :
-                        recoveryClass === 'mixed' ? 0.36 : 0.33
+      recoveryClass === 'mixed' ? 0.36 : 0.33
     const fiberRate = recoveryClass === 'binder_oil' ? 0.08 :
-                      recoveryClass === 'mixed' ? 0.07 : 0.06
+      recoveryClass === 'mixed' ? 0.07 : 0.06
 
     // Binder oil: ~8 lbs/gallon
     const binderOilLbs = segWeight * binderOilRate

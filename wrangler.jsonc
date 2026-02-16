@@ -3,12 +3,20 @@
   "name": "roofing-measurement-tool",
   "compatibility_date": "2026-02-09",
   "pages_build_output_dir": "./dist",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "ANTIGRAVITY_DATA",
+      "id": "c81e541903b14f3d9749c9e60004a968"
+    }
+  ],
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "roofing-production",
-      "database_id": "e64c0cf3-43fa-4f41-ac75-ed12694a26c5"
+      "database_id": "cc016af1-9291-456a-8b19-2a2bd69ceb7e"
     }
   ]
 }

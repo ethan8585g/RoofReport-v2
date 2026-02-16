@@ -13,6 +13,8 @@ import { invoiceRoutes } from './routes/invoices'
 import { stripeRoutes } from './routes/stripe'
 import { crmRoutes } from './routes/crm'
 import { propertyImageryRoutes } from './routes/property-imagery'
+import { gmailRoutes } from './routes/gmail'
+import { edgeDataRoutes } from './routes/edge-data'
 import type { Bindings } from './types'
 
 const app = new Hono<{ Bindings: Bindings }>()
@@ -33,6 +35,8 @@ app.route('/api/invoices', invoiceRoutes)
 app.route('/api/stripe', stripeRoutes)
 app.route('/api/crm', crmRoutes)
 app.route('/api/property-imagery', propertyImageryRoutes)
+app.route('/api/gmail', gmailRoutes)
+app.route('/api/edge', edgeDataRoutes)
 
 // Health check
 app.get('/api/health', (c) => {
@@ -61,8 +65,8 @@ app.get('/api/health', (c) => {
     },
     vertex_ai: {
       mode: c.env.GCP_SERVICE_ACCOUNT_KEY ? 'service_account_auto' :
-            c.env.GOOGLE_CLOUD_ACCESS_TOKEN ? 'vertex_ai_platform' :
-            (c.env.GOOGLE_VERTEX_API_KEY ? 'gemini_rest_api' : 'not_configured'),
+        c.env.GOOGLE_CLOUD_ACCESS_TOKEN ? 'vertex_ai_platform' :
+          (c.env.GOOGLE_VERTEX_API_KEY ? 'gemini_rest_api' : 'not_configured'),
       project: c.env.GOOGLE_CLOUD_PROJECT || getProjectId(c.env.GCP_SERVICE_ACCOUNT_KEY || '') || null,
       location: c.env.GOOGLE_CLOUD_LOCATION || 'us-central1',
       service_account: getServiceAccountEmail(c.env.GCP_SERVICE_ACCOUNT_KEY || '') || null
@@ -294,7 +298,7 @@ function getMainPageHTML(mapsApiKey: string) {
       }
     </script>
     <script src="https://maps.googleapis.com/maps/api/js?key=${mapsApiKey}&libraries=places&callback=onGoogleMapsReady" async defer></script>`
-    : '<!-- Google Maps: No API key configured. -->'
+    : '<script>console.error("Critical: GOOGLE_MAPS_API_KEY is missing on the server.");</script>'
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -1184,7 +1188,16 @@ function getPricingPageHTML() {
 // ============================================================
 function getCustomerOrderPageHTML(mapsApiKey: string) {
   const mapsScript = mapsApiKey
-    ? '<script src="https://maps.googleapis.com/maps/api/js?key=' + mapsApiKey + '&libraries=places" async defer></script>'
+    ? `<script>
+      var googleMapsReady = false;
+      function onGoogleMapsReady() {
+        googleMapsReady = true;
+        if (typeof initOrderMap === 'function') {
+          initOrderMap();
+        }
+      }
+    </script>
+    <script src="https://maps.googleapis.com/maps/api/js?key=${mapsApiKey}&libraries=places&callback=onGoogleMapsReady" async defer></script>`
     : ''
 
   return `<!DOCTYPE html>
@@ -1219,7 +1232,7 @@ function getCustomerOrderPageHTML(mapsApiKey: string) {
       if (!c) { window.location.href = '/customer/login'; return; }
     })();
   </script>
-  <script src="/static/customer-order.js"></script>
+  <script src="/static/customer-order.js?v=2.2"></script>
 </body>
 </html>`
 }
