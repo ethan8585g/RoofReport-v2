@@ -375,13 +375,16 @@ function buildDataLayersReport(orderId: any, order: any, dlResult: any, dlSegmen
       satellite_url: dlResult.satelliteUrl,
       satellite_overhead_url: dlResult.satelliteOverheadUrl,
       satellite_context_url: dlResult.satelliteContextUrl,
+      satellite_detail_url: `https://maps.googleapis.com/maps/api/staticmap?center=${dlResult.latitude},${dlResult.longitude}&zoom=19&size=640x640&scale=2&maptype=satellite&key=${mapsApiKey}`,
+      satellite_full_url: `https://maps.googleapis.com/maps/api/staticmap?center=${dlResult.latitude},${dlResult.longitude}&zoom=18&size=640x640&scale=2&maptype=satellite&key=${mapsApiKey}`,
+      satellite_neighbourhood_url: `https://maps.googleapis.com/maps/api/staticmap?center=${dlResult.latitude},${dlResult.longitude}&zoom=17&size=640x640&scale=2&maptype=satellite&key=${mapsApiKey}`,
       dsm_url: dlResult.dsmUrl,
       mask_url: dlResult.maskUrl,
       flux_url: null,
-      north_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${dlResult.latitude},${dlResult.longitude}&heading=0&pitch=10&fov=60&key=${mapsApiKey}`,
-      south_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${dlResult.latitude},${dlResult.longitude}&heading=180&pitch=10&fov=60&key=${mapsApiKey}`,
-      east_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${dlResult.latitude},${dlResult.longitude}&heading=90&pitch=10&fov=60&key=${mapsApiKey}`,
-      west_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${dlResult.latitude},${dlResult.longitude}&heading=270&pitch=10&fov=60&key=${mapsApiKey}`,
+      north_url: null,
+      south_url: null,
+      east_url: null,
+      west_url: null,
     },
     quality: {
       imagery_quality: dlResult.imageryQuality as any,
@@ -1439,18 +1442,20 @@ async function callGoogleSolarAPI(
       // SCALE=2 is critical for high-DPI displays
       satellite_url: `https://maps.googleapis.com/maps/api/staticmap?center=${centerLat},${centerLng}&zoom=21&size=640x640&scale=2&maptype=satellite&key=${imageKey}`,
       satellite_overhead_url: `https://maps.googleapis.com/maps/api/staticmap?center=${centerLat},${centerLng}&zoom=21&size=640x640&scale=2&maptype=satellite&key=${imageKey}`,
-      // Context view slightly zoomed out
+      // Zoom levels for context (Residential property scale)
       satellite_context_url: `https://maps.googleapis.com/maps/api/staticmap?center=${centerLat},${centerLng}&zoom=19&size=640x640&scale=2&maptype=satellite&key=${imageKey}`,
+      satellite_detail_url: `https://maps.googleapis.com/maps/api/staticmap?center=${centerLat},${centerLng}&zoom=19&size=640x640&scale=2&maptype=satellite&key=${imageKey}`,
+      satellite_full_url: `https://maps.googleapis.com/maps/api/staticmap?center=${centerLat},${centerLng}&zoom=18&size=640x640&scale=2&maptype=satellite&key=${imageKey}`,
+      satellite_neighbourhood_url: `https://maps.googleapis.com/maps/api/staticmap?center=${centerLat},${centerLng}&zoom=17&size=640x640&scale=2&maptype=satellite&key=${imageKey}`,
+
       dsm_url: null,
       mask_url: null,
       flux_url: null,
-      // Street View Improvements:
-      // Pitch: 10 (was 45) -> Looks closer to horizontal, captures house facade/roof height without causing "sky-only" view
-      // FOV: 60 (was 80) -> Zooms in slightly to frame the house better
-      north_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${centerLat},${centerLng}&heading=0&pitch=10&fov=60&key=${imageKey}`,
-      south_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${centerLat},${centerLng}&heading=180&pitch=10&fov=60&key=${imageKey}`,
-      east_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${centerLat},${centerLng}&heading=90&pitch=10&fov=60&key=${imageKey}`,
-      west_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${centerLat},${centerLng}&heading=270&pitch=10&fov=60&key=${imageKey}`,
+      // Street View Deprecated in v2.1
+      north_url: null,
+      south_url: null,
+      east_url: null,
+      west_url: null,
     },
     quality: {
       imagery_quality: imageryQuality as any,
@@ -1559,32 +1564,31 @@ function generateMockRoofReport(order: any, apiKey?: string): RoofReport {
     max_sunshine_hours: Math.round(edmontonSunHours * 10) / 10,
     num_panels_possible: panelCount,
     yearly_energy_kwh: Math.round(panelCount * 400),
-    imagery: {
-      satellite_url: lat && lng
-        ? `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=21&size=640x640&scale=2&maptype=satellite${apiKey ? `&key=${apiKey}` : ''}`
-        : null,
-      satellite_overhead_url: lat && lng
-        ? `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=21&size=640x640&scale=2&maptype=satellite${apiKey ? `&key=${apiKey}` : ''}`
-        : null,
-      satellite_context_url: lat && lng
-        ? `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=19&size=640x640&scale=2&maptype=satellite${apiKey ? `&key=${apiKey}` : ''}`
-        : null,
-      dsm_url: null,
-      mask_url: null,
-      flux_url: null,
-      north_url: lat && lng && apiKey
-        ? `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${lat},${lng}&heading=0&pitch=10&fov=60&key=${apiKey}`
-        : null,
-      south_url: lat && lng && apiKey
-        ? `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${lat},${lng}&heading=180&pitch=10&fov=60&key=${apiKey}`
-        : null,
-      east_url: lat && lng && apiKey
-        ? `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${lat},${lng}&heading=90&pitch=10&fov=60&key=${apiKey}`
-        : null,
-      west_url: lat && lng && apiKey
-        ? `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${lat},${lng}&heading=270&pitch=10&fov=60&key=${apiKey}`
-        : null,
-    },
+    satellite_url: lat && lng
+      ? `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=21&size=640x640&scale=2&maptype=satellite${apiKey ? `&key=${apiKey}` : ''}`
+      : null,
+    satellite_overhead_url: lat && lng
+      ? `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=21&size=640x640&scale=2&maptype=satellite${apiKey ? `&key=${apiKey}` : ''}`
+      : null,
+    satellite_context_url: lat && lng
+      ? `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=19&size=640x640&scale=2&maptype=satellite${apiKey ? `&key=${apiKey}` : ''}`
+      : null,
+    satellite_detail_url: lat && lng
+      ? `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=19&size=640x640&scale=2&maptype=satellite${apiKey ? `&key=${apiKey}` : ''}`
+      : null,
+    satellite_full_url: lat && lng
+      ? `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=18&size=640x640&scale=2&maptype=satellite${apiKey ? `&key=${apiKey}` : ''}`
+      : null,
+    satellite_neighbourhood_url: lat && lng
+      ? `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=17&size=640x640&scale=2&maptype=satellite${apiKey ? `&key=${apiKey}` : ''}`
+      : null,
+    dsm_url: null,
+    mask_url: null,
+    flux_url: null,
+    north_url: null,
+    south_url: null,
+    east_url: null,
+    west_url: null,
     quality: {
       imagery_quality: 'BASE',
       field_verification_recommended: true,
@@ -1773,14 +1777,15 @@ function generateProfessionalReportHTML(report: RoofReport): string {
   const satelliteUrl = report.imagery?.satellite_url || ''
   // Primary overhead satellite image — zoom 21, scale=2 for max clarity
   const overheadUrl = report.imagery?.satellite_overhead_url || satelliteUrl
-  // Wider context view
   const contextUrl = report.imagery?.satellite_context_url || (satelliteUrl ? satelliteUrl.replace(/zoom=\d+/, 'zoom=19') : '')
   // Max zoom close-up (zoom+1 from overhead, capped at 22)
   const closeupUrl = overheadUrl ? overheadUrl.replace(/zoom=(\d+)/, (m: string, z: string) => `zoom=${Math.min(parseInt(z) + 1, 22)}`) : ''
-  const northUrl = report.imagery?.north_url || ''
-  const southUrl = report.imagery?.south_url || ''
-  const eastUrl = report.imagery?.east_url || ''
-  const westUrl = report.imagery?.west_url || ''
+
+  // Satellite Grid URLs (Detail -> Full -> Neighbourhood)
+  const detailUrl = report.imagery?.satellite_detail_url || (satelliteUrl ? satelliteUrl.replace(/zoom=\d+/, 'zoom=19') : '')
+  const fullUrl = report.imagery?.satellite_full_url || (satelliteUrl ? satelliteUrl.replace(/zoom=\d+/, 'zoom=18') : '')
+  const neighUrl = report.imagery?.satellite_neighbourhood_url || (satelliteUrl ? satelliteUrl.replace(/zoom=\d+/, 'zoom=17') : '')
+  const wideUrl = report.imagery?.satellite_neighbourhood_url ? report.imagery.satellite_neighbourhood_url.replace(/zoom=\d+/, 'zoom=16') : (satelliteUrl ? satelliteUrl.replace(/zoom=\d+/, 'zoom=16') : '')
   // Facet colors for the roof diagram
   const facetColors = ['#FF6B8A', '#5B9BD5', '#70C070', '#FFB347', '#C084FC', '#F472B6', '#34D399', '#FBBF24', '#60A5FA', '#A78BFA', '#FB923C', '#4ADE80']
 
@@ -2010,23 +2015,27 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
       <div class="p1-aerial-label">${hasOverlay ? 'Measured Roof Diagram &mdash; All Lines in Feet &amp; Inches' : 'Overhead Satellite'} &mdash; Zoom ${report.metadata.provider === 'google_solar_datalayers' ? '21' : '20'} / Scale 2x</div>
     </div>
 
-    <!-- Right column: 4 directional views (N/E/S/W) at pitch 45 for roof angle view -->
+    <!-- Right column: 4 directional views replaced by Multi-Zoom Satellite Grid -->
     <div style="display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:5px">
+      <!-- Zoom 19: Detail -->
       <div class="p1-aerial-card" style="padding:4px">
-        ${northUrl ? `<img class="p1-sv-img" src="${northUrl}" alt="North" style="height:75px;width:100%;object-fit:cover;border-radius:4px" data-dir="N" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-sv-nodata" style="height:75px;font-size:9px">No imagery<br>available</div>` : '<div class="p1-sv-nodata" style="display:flex;height:75px;font-size:9px">N/A</div>'}
-        <div class="p1-aerial-label" style="font-size:7px;margin-top:2px">NORTH <span style="color:rgba(0,229,255,0.4);font-size:6px">0&deg;/10&deg;</span></div>
+        ${detailUrl ? `<img src="${detailUrl}" alt="Detail" style="height:75px;width:100%;object-fit:cover;border-radius:4px">` : ''}
+        <div class="p1-aerial-label" style="font-size:7px;margin-top:2px">DETAIL (19)</div>
       </div>
+      <!-- Zoom 18: Full -->
       <div class="p1-aerial-card" style="padding:4px">
-        ${eastUrl ? `<img class="p1-sv-img" src="${eastUrl}" alt="East" style="height:75px;width:100%;object-fit:cover;border-radius:4px" data-dir="E" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-sv-nodata" style="height:75px;font-size:9px">No imagery<br>available</div>` : '<div class="p1-sv-nodata" style="display:flex;height:75px;font-size:9px">N/A</div>'}
-        <div class="p1-aerial-label" style="font-size:7px;margin-top:2px">EAST <span style="color:rgba(0,229,255,0.4);font-size:6px">90&deg;/10&deg;</span></div>
+        ${fullUrl ? `<img src="${fullUrl}" alt="Full" style="height:75px;width:100%;object-fit:cover;border-radius:4px">` : ''}
+        <div class="p1-aerial-label" style="font-size:7px;margin-top:2px">FULL LOT (18)</div>
       </div>
+      <!-- Zoom 17: Neighbourhood -->
       <div class="p1-aerial-card" style="padding:4px">
-        ${southUrl ? `<img class="p1-sv-img" src="${southUrl}" alt="South" style="height:75px;width:100%;object-fit:cover;border-radius:4px" data-dir="S" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-sv-nodata" style="height:75px;font-size:9px">No imagery<br>available</div>` : '<div class="p1-sv-nodata" style="display:flex;height:75px;font-size:9px">N/A</div>'}
-        <div class="p1-aerial-label" style="font-size:7px;margin-top:2px">SOUTH <span style="color:rgba(0,229,255,0.4);font-size:6px">180&deg;/10&deg;</span></div>
+        ${neighUrl ? `<img src="${neighUrl}" alt="Neigh" style="height:75px;width:100%;object-fit:cover;border-radius:4px">` : ''}
+        <div class="p1-aerial-label" style="font-size:7px;margin-top:2px">CONTEXT (17)</div>
       </div>
+      <!-- Zoom 16: Wide -->
       <div class="p1-aerial-card" style="padding:4px">
-        ${westUrl ? `<img class="p1-sv-img" src="${westUrl}" alt="West" style="height:75px;width:100%;object-fit:cover;border-radius:4px" data-dir="W" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-sv-nodata" style="height:75px;font-size:9px">No imagery<br>available</div>` : '<div class="p1-sv-nodata" style="display:flex;height:75px;font-size:9px">N/A</div>'}
-        <div class="p1-aerial-label" style="font-size:7px;margin-top:2px">WEST <span style="color:rgba(0,229,255,0.4);font-size:6px">270&deg;/10&deg;</span></div>
+        ${wideUrl ? `<img src="${wideUrl}" alt="Wide" style="height:75px;width:100%;object-fit:cover;border-radius:4px">` : ''}
+        <div class="p1-aerial-label" style="font-size:7px;margin-top:2px">AREA (16)</div>
       </div>
     </div>
   </div>
@@ -2294,25 +2303,6 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
   </div>
 </div>
 
-<script>
-// Detect Google Street View "no imagery" placeholders (grey "Sorry" images)
-document.querySelectorAll('.p1-sv-img').forEach(function(img) {
-  img.addEventListener('load', function() {
-    try {
-      var c = document.createElement('canvas');
-      c.width = 4; c.height = 4;
-      var ctx = c.getContext('2d');
-      ctx.drawImage(img, 0, 0, 4, 4);
-      var px = ctx.getImageData(0, 0, 4, 4).data;
-      var grey = 0;
-      for (var i = 0; i < px.length; i += 4) {
-        if (px[i] > 200 && px[i+1] > 200 && px[i+2] > 190 && Math.abs(px[i]-px[i+1]) < 15) grey++;
-      }
-      if (grey >= 12) { img.style.display='none'; img.nextElementSibling.style.display='flex'; }
-    } catch(e) {}
-  });
-});
-</script>
 </body>
 </html>`
 }

@@ -404,11 +404,20 @@ export interface RoofReport {
     dsm_url: string | null
     mask_url: string | null
     flux_url: string | null
+
+    /** Zoom 19: Property Detail (Buildings, sheds, driveways) */
+    satellite_detail_url?: string | null
+    /** Zoom 18: Full Property (Lot boundaries, yards) */
+    satellite_full_url?: string | null
+    /** Zoom 17: Neighbourhood Context (Surrounding area) */
+    satellite_neighbourhood_url?: string | null
+
     // Directional roof views (Street View Static API with heading toward house)
-    north_url: string | null
-    south_url: string | null
-    east_url: string | null
-    west_url: string | null
+    // DEPRECATED in v2.1 in favor of multi-zoom satellite config
+    north_url?: string | null
+    south_url?: string | null
+    east_url?: string | null
+    west_url?: string | null
   }
 
   // ---- DATA QUALITY ----
