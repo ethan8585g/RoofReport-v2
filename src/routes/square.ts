@@ -3,7 +3,7 @@ import type { Bindings } from '../types'
 import { generateReportForOrder } from './reports'
 import { isDevAccount } from './customer-auth'
 
-export const stripeRoutes = new Hono<{ Bindings: Bindings }>()
+export const squareRoutes = new Hono<{ Bindings: Bindings }>()
 
 // ============================================================
 // GEOCODING HELPER — Convert address to lat/lng
@@ -42,100 +42,46 @@ async function triggerReportGeneration(orderId: number, env: Bindings): Promise<
 }
 
 // ============================================================
-// STRIPE API HELPER — All calls go through Stripe REST API
+// SQUARE API HELPER — All calls go through Square REST API
 // No SDK needed — Cloudflare Workers compatible
+// Sandbox: https://connect.squareupsandbox.com
+// Production: https://connect.squareup.com
 // ============================================================
 
-async function stripeRequest(secretKey: string, method: string, path: string, body?: any) {
-  const url = `https://api.stripe.com/v1${path}`
-  const headers: Record<string, string> = {
-    'Authorization': `Bearer ${secretKey}`,
-    'Content-Type': 'application/x-www-form-urlencoded',
+function getSquareBaseUrl(accessToken: string): string {
+  // Sandbox tokens start with "EAAA" (sandbox access tokens)
+  // Production tokens start with "EAAAECx" or similar longer prefixes
+  // Sandbox application IDs start with "sandbox-sq0idb-"
+  // Simple heuristic: if the token is a sandbox token, use sandbox URL
+  // The SQUARE_ENVIRONMENT env var takes precedence if set
+  // For now, using sandbox URL for the provided sandbox keys
+  if (accessToken && !accessToken.startsWith('EAAA')) {
+    return 'https://connect.squareup.com'
   }
+  return 'https://connect.squareupsandbox.com'
+}
 
-  let formBody = ''
-  if (body) {
-    formBody = encodeStripeParams(body)
+async function squareRequest(accessToken: string, method: string, path: string, body?: any) {
+  const baseUrl = getSquareBaseUrl(accessToken)
+  const url = `${baseUrl}${path}`
+  const headers: Record<string, string> = {
+    'Authorization': `Bearer ${accessToken}`,
+    'Content-Type': 'application/json',
+    'Square-Version': '2024-12-18',
   }
 
   const response = await fetch(url, {
     method,
     headers,
-    body: method !== 'GET' ? formBody : undefined,
+    body: body ? JSON.stringify(body) : undefined,
   })
 
   const data: any = await response.json()
   if (!response.ok) {
-    throw new Error(data.error?.message || `Stripe API error: ${response.status}`)
+    const errMsg = data.errors?.[0]?.detail || data.errors?.[0]?.code || `Square API error: ${response.status}`
+    throw new Error(errMsg)
   }
   return data
-}
-
-// Encode nested objects for Stripe's form-encoded format
-function encodeStripeParams(obj: any, prefix?: string): string {
-  const parts: string[] = []
-  for (const key of Object.keys(obj)) {
-    const fullKey = prefix ? `${prefix}[${key}]` : key
-    const value = obj[key]
-    if (value === null || value === undefined) continue
-    if (typeof value === 'object' && !Array.isArray(value)) {
-      parts.push(encodeStripeParams(value, fullKey))
-    } else if (Array.isArray(value)) {
-      value.forEach((item, i) => {
-        if (typeof item === 'object') {
-          parts.push(encodeStripeParams(item, `${fullKey}[${i}]`))
-        } else {
-          parts.push(`${encodeURIComponent(`${fullKey}[${i}]`)}=${encodeURIComponent(item)}`)
-        }
-      })
-    } else {
-      parts.push(`${encodeURIComponent(fullKey)}=${encodeURIComponent(value)}`)
-    }
-  }
-  return parts.filter(Boolean).join('&')
-}
-
-// ============================================================
-// STRIPE WEBHOOK SIGNATURE VERIFICATION (Web Crypto API)
-// ============================================================
-async function verifyStripeSignature(payload: string, sigHeader: string, secret: string): Promise<boolean> {
-  try {
-    // Parse signature header
-    const elements = sigHeader.split(',')
-    let timestamp = ''
-    const signatures: string[] = []
-    for (const el of elements) {
-      const [key, val] = el.trim().split('=')
-      if (key === 't') timestamp = val
-      if (key === 'v1') signatures.push(val)
-    }
-    if (!timestamp || signatures.length === 0) return false
-
-    // Reject if timestamp is too old (5 minute tolerance)
-    const tsNum = parseInt(timestamp)
-    if (Math.abs(Date.now() / 1000 - tsNum) > 300) {
-      console.warn('[Webhook] Timestamp outside tolerance window')
-      return false
-    }
-
-    // Compute expected signature: HMAC-SHA256(secret, timestamp.payload)
-    const signedPayload = `${timestamp}.${payload}`
-    const key = await crypto.subtle.importKey(
-      'raw',
-      new TextEncoder().encode(secret),
-      { name: 'HMAC', hash: 'SHA-256' },
-      false,
-      ['sign']
-    )
-    const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(signedPayload))
-    const expectedSig = Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, '0')).join('')
-
-    // Constant-time comparison
-    return signatures.some(s => s === expectedSig)
-  } catch (err: any) {
-    console.error('[Webhook] Signature verification error:', err.message)
-    return false
-  }
 }
 
 // ============================================================
@@ -154,7 +100,7 @@ async function getCustomerFromToken(db: D1Database, token: string | undefined): 
 // ============================================================
 // GET CREDIT PACKAGES — Public pricing info
 // ============================================================
-stripeRoutes.get('/packages', async (c) => {
+squareRoutes.get('/packages', async (c) => {
   try {
     const packages = await c.env.DB.prepare(
       'SELECT id, name, description, credits, price_cents, sort_order FROM credit_packages WHERE is_active = 1 ORDER BY sort_order'
@@ -168,7 +114,7 @@ stripeRoutes.get('/packages', async (c) => {
 // ============================================================
 // GET CUSTOMER BILLING STATUS
 // ============================================================
-stripeRoutes.get('/billing', async (c) => {
+squareRoutes.get('/billing', async (c) => {
   const token = c.req.header('Authorization')?.replace('Bearer ', '')
   const customer = await getCustomerFromToken(c.env.DB, token)
   if (!customer) return c.json({ error: 'Not authenticated' }, 401)
@@ -176,7 +122,7 @@ stripeRoutes.get('/billing', async (c) => {
   // Get payment history
   const payments = await c.env.DB.prepare(`
     SELECT sp.*, o.order_number, o.property_address 
-    FROM stripe_payments sp 
+    FROM square_payments sp 
     LEFT JOIN orders o ON o.id = sp.order_id
     WHERE sp.customer_id = ? 
     ORDER BY sp.created_at DESC LIMIT 20
@@ -201,7 +147,7 @@ stripeRoutes.get('/billing', async (c) => {
       paid_credits_remaining: isDev ? 999999 : paidRemaining,
       subscription_start: customer.subscription_start,
       subscription_end: customer.subscription_end,
-      stripe_customer_id: customer.stripe_customer_id || null,
+      square_customer_id: customer.square_customer_id || null,
       is_dev: isDev || undefined,
     },
     payments: payments.results
@@ -209,12 +155,13 @@ stripeRoutes.get('/billing', async (c) => {
 })
 
 // ============================================================
-// CREATE STRIPE CHECKOUT SESSION — Buy credits or one-time report
+// CREATE SQUARE CHECKOUT — Buy credits (payment link)
+// Uses Square Checkout API CreatePaymentLink for hosted checkout
 // ============================================================
-stripeRoutes.post('/checkout', async (c) => {
+squareRoutes.post('/checkout', async (c) => {
   try {
-    const stripeKey = c.env.STRIPE_SECRET_KEY
-    if (!stripeKey) return c.json({ error: 'Stripe is not configured. Contact admin.' }, 503)
+    const squareToken = c.env.SQUARE_ACCESS_TOKEN
+    if (!squareToken) return c.json({ error: 'Square payments are not configured. Contact admin.' }, 503)
 
     const token = c.req.header('Authorization')?.replace('Bearer ', '')
     const customer = await getCustomerFromToken(c.env.DB, token)
@@ -229,74 +176,53 @@ stripeRoutes.post('/checkout', async (c) => {
 
     if (!pkg) return c.json({ error: 'Package not found' }, 404)
 
-    // Ensure Stripe customer exists
-    let stripeCustomerId = customer.stripe_customer_id
-    if (!stripeCustomerId) {
-      const stripeCustomer = await stripeRequest(stripeKey, 'POST', '/customers', {
-        email: customer.email,
-        name: customer.name,
-        metadata: {
-          rc_customer_id: String(customer.customer_id),
-          company: customer.company_name || '',
-        }
-      })
-      stripeCustomerId = stripeCustomer.id
-      await c.env.DB.prepare(
-        'UPDATE customers SET stripe_customer_id = ?, updated_at = datetime("now") WHERE id = ?'
-      ).bind(stripeCustomerId, customer.customer_id).run()
-    }
-
     // Determine URLs
     const origin = new URL(c.req.url).origin
-    const successUrl = success_url || `${origin}/customer/dashboard?payment=success&session_id={CHECKOUT_SESSION_ID}`
+    const successUrl = success_url || `${origin}/customer/dashboard?payment=success`
     const cancelUrl = cancel_url || `${origin}/customer/dashboard?payment=cancelled`
 
-    // Create Checkout Session
-    const session = await stripeRequest(stripeKey, 'POST', '/checkout/sessions', {
-      customer: stripeCustomerId,
-      mode: 'payment',
-      payment_method_types: ['card'],
-      line_items: [{
-        price_data: {
-          currency: 'cad',
-          unit_amount: String(pkg.price_cents),
-          product_data: {
-            name: `${pkg.name} — Roof Report Credits`,
-            description: pkg.description,
-          }
+    // Generate idempotency key
+    const idempotencyKey = crypto.randomUUID()
+
+    // Create Square Payment Link (hosted checkout)
+    const linkData = await squareRequest(squareToken, 'POST', '/v2/online-checkout/payment-links', {
+      idempotency_key: idempotencyKey,
+      quick_pay: {
+        name: `${pkg.name} — Roof Report Credits`,
+        price_money: {
+          amount: pkg.price_cents, // Square uses smallest currency unit (cents)
+          currency: 'CAD',
         },
-        quantity: '1',
-      }],
-      success_url: successUrl,
-      cancel_url: cancelUrl,
-      metadata: {
-        rc_customer_id: String(customer.customer_id),
-        package_id: String(pkg.id),
-        credits: String(pkg.credits),
-        order_id: order_id ? String(order_id) : '',
+        location_id: c.env.SQUARE_LOCATION_ID,
       },
-      payment_intent_data: {
-        metadata: {
-          rc_customer_id: String(customer.customer_id),
-          package_id: String(pkg.id),
-          credits: String(pkg.credits),
-        }
-      }
+      checkout_options: {
+        redirect_url: successUrl,
+        ask_for_shipping_address: false,
+      },
+      pre_populated_data: {
+        buyer_email: customer.email || undefined,
+      },
     })
+
+    const paymentLink = linkData.payment_link
+    const checkoutUrl = paymentLink?.url || paymentLink?.long_url
 
     // Record the pending payment
     await c.env.DB.prepare(`
-      INSERT INTO stripe_payments (customer_id, stripe_checkout_session_id, amount, currency, status, payment_type, description, order_id)
-      VALUES (?, ?, ?, 'cad', 'pending', 'credit_pack', ?, ?)
+      INSERT INTO square_payments (customer_id, square_payment_link_id, square_order_id, amount, currency, status, payment_type, description, order_id)
+      VALUES (?, ?, ?, ?, 'cad', 'pending', 'credit_pack', ?, ?)
     `).bind(
-      customer.customer_id, session.id, pkg.price_cents,
+      customer.customer_id,
+      paymentLink?.id || null,
+      paymentLink?.order_id || null,
+      pkg.price_cents,
       `${pkg.name} (${pkg.credits} credits)`,
       order_id || null
     ).run()
 
     return c.json({
-      checkout_url: session.url,
-      session_id: session.id
+      checkout_url: checkoutUrl,
+      payment_link_id: paymentLink?.id,
     })
   } catch (err: any) {
     return c.json({ error: 'Checkout failed', details: err.message }, 500)
@@ -307,10 +233,10 @@ stripeRoutes.post('/checkout', async (c) => {
 // CREATE CHECKOUT FOR SINGLE REPORT (quick pay)
 // Customer places order + pays in one step
 // ============================================================
-stripeRoutes.post('/checkout/report', async (c) => {
+squareRoutes.post('/checkout/report', async (c) => {
   try {
-    const stripeKey = c.env.STRIPE_SECRET_KEY
-    if (!stripeKey) return c.json({ error: 'Stripe is not configured. Contact admin.' }, 503)
+    const squareToken = c.env.SQUARE_ACCESS_TOKEN
+    if (!squareToken) return c.json({ error: 'Square payments are not configured. Contact admin.' }, 503)
 
     const token = c.req.header('Authorization')?.replace('Bearer ', '')
     const customer = await getCustomerFromToken(c.env.DB, token)
@@ -327,65 +253,60 @@ stripeRoutes.post('/checkout/report', async (c) => {
     const priceCents = prices[tier] || 1000
     const tierLabels: Record<string, string> = { express: 'Express', standard: 'Standard' }
 
-    // Ensure Stripe customer
-    let stripeCustomerId = customer.stripe_customer_id
-    if (!stripeCustomerId) {
-      const sc = await stripeRequest(stripeKey, 'POST', '/customers', {
-        email: customer.email,
-        name: customer.name,
-        metadata: { rc_customer_id: String(customer.customer_id) }
-      })
-      stripeCustomerId = sc.id
-      await c.env.DB.prepare(
-        'UPDATE customers SET stripe_customer_id = ?, updated_at = datetime("now") WHERE id = ?'
-      ).bind(stripeCustomerId, customer.customer_id).run()
-    }
-
     const origin = new URL(c.req.url).origin
-    const successUrlFinal = success_url || `${origin}/customer/dashboard?payment=success&session_id={CHECKOUT_SESSION_ID}`
+    const successUrlFinal = success_url || `${origin}/customer/dashboard?payment=success`
     const cancelUrlFinal = cancel_url || `${origin}/customer/dashboard?payment=cancelled`
 
-    const session = await stripeRequest(stripeKey, 'POST', '/checkout/sessions', {
-      customer: stripeCustomerId,
-      mode: 'payment',
-      payment_method_types: ['card'],
-      line_items: [{
-        price_data: {
-          currency: 'cad',
-          unit_amount: String(priceCents),
-          product_data: {
-            name: `Roof Measurement Report — ${tierLabels[tier] || tier}`,
-            description: `Professional AI roof report for: ${property_address}`,
-          }
+    const idempotencyKey = crypto.randomUUID()
+
+    const linkData = await squareRequest(squareToken, 'POST', '/v2/online-checkout/payment-links', {
+      idempotency_key: idempotencyKey,
+      quick_pay: {
+        name: `Roof Measurement Report — ${tierLabels[tier] || tier}`,
+        price_money: {
+          amount: priceCents,
+          currency: 'CAD',
         },
-        quantity: '1',
-      }],
-      success_url: successUrlFinal,
-      cancel_url: cancelUrlFinal,
-      metadata: {
-        rc_customer_id: String(customer.customer_id),
+        location_id: c.env.SQUARE_LOCATION_ID,
+      },
+      checkout_options: {
+        redirect_url: successUrlFinal,
+        ask_for_shipping_address: false,
+      },
+      pre_populated_data: {
+        buyer_email: customer.email || undefined,
+      },
+    })
+
+    const paymentLink = linkData.payment_link
+    const checkoutUrl = paymentLink?.url || paymentLink?.long_url
+
+    // Store metadata locally since Square payment links don't have custom metadata
+    await c.env.DB.prepare(`
+      INSERT INTO square_payments (customer_id, square_payment_link_id, square_order_id, amount, currency, status, payment_type, description, metadata_json)
+      VALUES (?, ?, ?, ?, 'cad', 'pending', 'one_time_report', ?, ?)
+    `).bind(
+      customer.customer_id,
+      paymentLink?.id || null,
+      paymentLink?.order_id || null,
+      priceCents,
+      `${tierLabels[tier] || tier} report for: ${property_address}`,
+      JSON.stringify({
+        rc_customer_id: customer.customer_id,
         payment_type: 'one_time_report',
         service_tier: tier,
         property_address,
         property_city: property_city || '',
         property_province: property_province || '',
         property_postal_code: property_postal_code || '',
-        latitude: latitude ? String(latitude) : '',
-        longitude: longitude ? String(longitude) : '',
-      },
-      payment_intent_data: {
-        metadata: {
-          rc_customer_id: String(customer.customer_id),
-          payment_type: 'one_time_report',
-          service_tier: tier,
-          property_address,
-        }
-      }
-    })
+        latitude: latitude || null,
+        longitude: longitude || null,
+      })
+    ).run()
 
     return c.json({
-      checkout_url: session.url,
-      session_id: session.id
+      checkout_url: checkoutUrl,
+      payment_link_id: paymentLink?.id,
     })
   } catch (err: any) {
     return c.json({ error: 'Checkout failed', details: err.message }, 500)
@@ -396,7 +317,7 @@ stripeRoutes.post('/checkout/report', async (c) => {
 // USE CREDITS — Free trial first, then paid credits
 // New users get 3 free trial reports. After that, paid credits.
 // ============================================================
-stripeRoutes.post('/use-credit', async (c) => {
+squareRoutes.post('/use-credit', async (c) => {
   try {
     const token = c.req.header('Authorization')?.replace('Bearer ', '')
     const customer = await getCustomerFromToken(c.env.DB, token)
@@ -517,18 +438,12 @@ stripeRoutes.post('/use-credit', async (c) => {
 
     // ============================================================
     // AUTO-GENERATE REPORT — Trigger immediately after order creation
-    // This runs the full Solar API + report generation pipeline
-    // ============================================================
-    // GENERATE REPORT INLINE — direct function call, no HTTP self-fetch
-    // This ensures the report generates reliably on Cloudflare Workers
     // ============================================================
     try {
       const generatePromise = triggerReportGeneration(newOrderId, c.env)
       if ((c as any).executionCtx?.waitUntil) {
-        // Cloudflare Workers: use waitUntil to keep worker alive for background generation
         ;(c as any).executionCtx.waitUntil(generatePromise)
       } else {
-        // Local dev: await inline
         await generatePromise
       }
     } catch (e: any) {
@@ -569,30 +484,41 @@ stripeRoutes.post('/use-credit', async (c) => {
 })
 
 // ============================================================
-// STRIPE WEBHOOK — Process payment confirmations
-// Verifies Stripe-Signature header when STRIPE_WEBHOOK_SECRET is set
+// SQUARE WEBHOOK — Process payment confirmations
+// Square sends webhook notifications for payment.completed etc.
 // ============================================================
-stripeRoutes.post('/webhook', async (c) => {
+squareRoutes.post('/webhook', async (c) => {
   try {
     const rawBody = await c.req.text()
-    const webhookSecret = (c.env as any).STRIPE_WEBHOOK_SECRET
-    
-    // Verify Stripe webhook signature if secret is configured
-    if (webhookSecret) {
-      const sigHeader = c.req.header('Stripe-Signature')
+    const webhookSigKey = (c.env as any).SQUARE_WEBHOOK_SIGNATURE_KEY
+
+    // Verify Square webhook signature if key is configured
+    if (webhookSigKey) {
+      const sigHeader = c.req.header('x-square-hmacsha256-signature')
       if (!sigHeader) {
-        console.warn('[Webhook] Missing Stripe-Signature header')
-        return c.json({ error: 'Missing Stripe-Signature header' }, 400)
+        console.warn('[Square Webhook] Missing x-square-hmacsha256-signature header')
+        return c.json({ error: 'Missing signature header' }, 400)
       }
-      
-      const isValid = await verifyStripeSignature(rawBody, sigHeader, webhookSecret)
-      if (!isValid) {
-        console.warn('[Webhook] Invalid Stripe-Signature')
+
+      // Square webhook signature: HMAC-SHA256(webhookSigKey, webhookUrl + rawBody)
+      const notificationUrl = c.req.url
+      const payload = notificationUrl + rawBody
+      const key = await crypto.subtle.importKey(
+        'raw',
+        new TextEncoder().encode(webhookSigKey),
+        { name: 'HMAC', hash: 'SHA-256' },
+        false,
+        ['sign']
+      )
+      const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(payload))
+      const expectedSig = btoa(String.fromCharCode(...new Uint8Array(sig)))
+
+      if (expectedSig !== sigHeader) {
+        console.warn('[Square Webhook] Invalid signature')
         return c.json({ error: 'Invalid signature' }, 400)
       }
     }
-    
-    // Parse the event
+
     let event: any
     try {
       event = JSON.parse(rawBody)
@@ -600,10 +526,13 @@ stripeRoutes.post('/webhook', async (c) => {
       return c.json({ error: 'Invalid JSON' }, 400)
     }
 
+    const eventId = event.event_id || event.id || crypto.randomUUID()
+    const eventType = event.type || 'unknown'
+
     // Idempotency check
     const existing = await c.env.DB.prepare(
-      'SELECT id FROM stripe_webhook_events WHERE stripe_event_id = ?'
-    ).bind(event.id).first()
+      'SELECT id FROM square_webhook_events WHERE square_event_id = ?'
+    ).bind(eventId).first()
 
     if (existing) {
       return c.json({ received: true, duplicate: true })
@@ -611,207 +540,208 @@ stripeRoutes.post('/webhook', async (c) => {
 
     // Store event
     await c.env.DB.prepare(`
-      INSERT INTO stripe_webhook_events (stripe_event_id, event_type, payload)
+      INSERT INTO square_webhook_events (square_event_id, event_type, payload)
       VALUES (?, ?, ?)
-    `).bind(event.id, event.type, rawBody).run()
+    `).bind(eventId, eventType, rawBody).run()
 
     // Process based on event type
-    switch (event.type) {
-      case 'checkout.session.completed': {
-        const session = event.data.object
-        const meta = session.metadata || {}
-        const customerId = parseInt(meta.rc_customer_id)
+    switch (eventType) {
+      case 'payment.completed': {
+        const payment = event.data?.object?.payment
+        if (!payment) break
 
-        if (!customerId) break
+        const orderId = payment.order_id
+        if (!orderId) break
 
-        // Update payment record
-        await c.env.DB.prepare(`
-          UPDATE stripe_payments SET 
-            stripe_payment_intent_id = ?, status = 'succeeded', updated_at = datetime('now')
-          WHERE stripe_checkout_session_id = ?
-        `).bind(session.payment_intent, session.id).run()
+        // Look up our local payment record by Square order_id
+        const localPayment = await c.env.DB.prepare(
+          'SELECT * FROM square_payments WHERE square_order_id = ? AND status = ?'
+        ).bind(orderId, 'pending').first<any>()
 
-        if (meta.payment_type === 'one_time_report') {
-          // Single report purchase — create order automatically
-          const tier = meta.service_tier || 'standard'
-          const address = meta.property_address || 'Unknown address'
-          // Single report = $10 CAD flat
-          const price = 10
-
-          const d = new Date().toISOString().slice(0, 10).replace(/-/g, '')
-          const rand = Math.floor(Math.random() * 9999).toString().padStart(4, '0')
-          const orderNumber = `RM-${d}-${rand}`
-          // Instant delivery — report generates immediately
-          const estimatedDelivery = new Date(Date.now() + 30000).toISOString()
-
-          // Ensure master company exists
-          await c.env.DB.prepare(
-            "INSERT OR IGNORE INTO master_companies (id, company_name, contact_name, email) VALUES (1, 'Reuse Canada', 'Admin', 'reports@reusecanada.ca')"
-          ).run()
-
-          const custData = await c.env.DB.prepare('SELECT * FROM customers WHERE id = ?').bind(customerId).first<any>()
-
-          const orderResult = await c.env.DB.prepare(`
-            INSERT INTO orders (
-              order_number, master_company_id, customer_id,
-              property_address, property_city, property_province, property_postal_code,
-              latitude, longitude,
-              homeowner_name, homeowner_email,
-              requester_name, requester_email,
-              service_tier, price, status, payment_status, estimated_delivery,
-              notes
-            ) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'processing', 'paid', ?, ?)
-          `).bind(
-            orderNumber, customerId,
-            address, meta.property_city || null, meta.property_province || null, meta.property_postal_code || null,
-            meta.latitude ? parseFloat(meta.latitude) : null, meta.longitude ? parseFloat(meta.longitude) : null,
-            custData?.name || '', custData?.email || '',
-            custData?.name || '', custData?.email || '',
-            tier, price, estimatedDelivery,
-            `Paid via Stripe (${session.payment_intent})`
-          ).run()
-
-          const webhookOrderId = orderResult.meta.last_row_id as number
-
-          // Update stripe payment with order_id
-          await c.env.DB.prepare(
-            'UPDATE stripe_payments SET order_id = ? WHERE stripe_checkout_session_id = ?'
-          ).bind(webhookOrderId, session.id).run()
-
-          // Geocode address if not already geocoded
-          const mapsKey = c.env.GOOGLE_MAPS_API_KEY || c.env.GOOGLE_SOLAR_API_KEY
-          if (mapsKey && !meta.latitude) {
-            const fullAddr = [address, meta.property_city, meta.property_province, meta.property_postal_code]
-              .filter(Boolean).join(', ')
-            const geo = await geocodeAddress(fullAddr, mapsKey)
-            if (geo) {
-              await c.env.DB.prepare(
-                'UPDATE orders SET latitude = ?, longitude = ?, updated_at = datetime("now") WHERE id = ?'
-              ).bind(geo.lat, geo.lng, webhookOrderId).run()
-              console.log(`[Webhook] Geocoded "${fullAddr}" → ${geo.lat}, ${geo.lng}`)
-            }
-          }
-
-          // Create placeholder report
-          await c.env.DB.prepare(
-            "INSERT OR IGNORE INTO reports (order_id, status) VALUES (?, 'pending')"
-          ).bind(webhookOrderId).run()
-
-          // Auto-trigger report generation — direct function call
-          try {
-            const generatePromise = triggerReportGeneration(webhookOrderId, c.env)
-            if ((c as any).executionCtx?.waitUntil) {
-              ;(c as any).executionCtx.waitUntil(generatePromise)
-            } else {
-              await generatePromise
-            }
-          } catch (e: any) {
-            console.warn(`[Webhook] Auto-generate error (non-fatal): ${e.message}`)
-          }
-
+        if (localPayment) {
+          // Update payment to succeeded
           await c.env.DB.prepare(`
-            INSERT INTO user_activity_log (company_id, action, details)
-            VALUES (1, 'stripe_report_purchased', ?)
-          `).bind(`${custData?.email || 'Customer'} purchased report for ${address} via Stripe ($${price})`).run()
+            UPDATE square_payments SET 
+              square_payment_id = ?, status = 'succeeded', updated_at = datetime('now')
+            WHERE id = ?
+          `).bind(payment.id, localPayment.id).run()
 
-        } else {
-          // Credit pack purchase — add credits
-          const credits = parseInt(meta.credits) || 0
-          if (credits > 0) {
+          const customerId = localPayment.customer_id
+
+          if (localPayment.payment_type === 'one_time_report') {
+            // Parse stored metadata
+            let meta: any = {}
+            try { meta = JSON.parse(localPayment.metadata_json || '{}') } catch {}
+
+            const tier = meta.service_tier || 'standard'
+            const address = meta.property_address || 'Unknown address'
+            const reportPrice = 10
+
+            const d2 = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+            const rand2 = Math.floor(Math.random() * 9999).toString().padStart(4, '0')
+            const orderNumber = `RM-${d2}-${rand2}`
+            const estimatedDelivery = new Date(Date.now() + 30000).toISOString()
+
             await c.env.DB.prepare(
-              'UPDATE customers SET report_credits = report_credits + ?, subscription_plan = CASE WHEN subscription_plan = "free" THEN "credits" ELSE subscription_plan END, updated_at = datetime("now") WHERE id = ?'
-            ).bind(credits, customerId).run()
+              "INSERT OR IGNORE INTO master_companies (id, company_name, contact_name, email) VALUES (1, 'Reuse Canada', 'Admin', 'reports@reusecanada.ca')"
+            ).run()
+
+            const custData = await c.env.DB.prepare('SELECT * FROM customers WHERE id = ?').bind(customerId).first<any>()
+
+            const orderResult = await c.env.DB.prepare(`
+              INSERT INTO orders (
+                order_number, master_company_id, customer_id,
+                property_address, property_city, property_province, property_postal_code,
+                latitude, longitude,
+                homeowner_name, homeowner_email,
+                requester_name, requester_email,
+                service_tier, price, status, payment_status, estimated_delivery,
+                notes
+              ) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'processing', 'paid', ?, ?)
+            `).bind(
+              orderNumber, customerId,
+              address, meta.property_city || null, meta.property_province || null, meta.property_postal_code || null,
+              meta.latitude || null, meta.longitude || null,
+              custData?.name || '', custData?.email || '',
+              custData?.name || '', custData?.email || '',
+              tier, reportPrice, estimatedDelivery,
+              `Paid via Square (${payment.id})`
+            ).run()
+
+            const webhookOrderId = orderResult.meta.last_row_id as number
+
+            // Update square payment with order_id
+            await c.env.DB.prepare(
+              'UPDATE square_payments SET order_id = ? WHERE id = ?'
+            ).bind(webhookOrderId, localPayment.id).run()
+
+            // Geocode if needed
+            const mapsKey = c.env.GOOGLE_MAPS_API_KEY || c.env.GOOGLE_SOLAR_API_KEY
+            if (mapsKey && !meta.latitude) {
+              const fullAddr = [address, meta.property_city, meta.property_province, meta.property_postal_code]
+                .filter(Boolean).join(', ')
+              const geo = await geocodeAddress(fullAddr, mapsKey)
+              if (geo) {
+                await c.env.DB.prepare(
+                  'UPDATE orders SET latitude = ?, longitude = ?, updated_at = datetime("now") WHERE id = ?'
+                ).bind(geo.lat, geo.lng, webhookOrderId).run()
+              }
+            }
+
+            // Create placeholder report
+            await c.env.DB.prepare(
+              "INSERT OR IGNORE INTO reports (order_id, status) VALUES (?, 'pending')"
+            ).bind(webhookOrderId).run()
+
+            // Auto-trigger report generation
+            try {
+              const generatePromise = triggerReportGeneration(webhookOrderId, c.env)
+              if ((c as any).executionCtx?.waitUntil) {
+                ;(c as any).executionCtx.waitUntil(generatePromise)
+              } else {
+                await generatePromise
+              }
+            } catch (e: any) {
+              console.warn(`[Square Webhook] Auto-generate error (non-fatal): ${e.message}`)
+            }
 
             await c.env.DB.prepare(`
               INSERT INTO user_activity_log (company_id, action, details)
-              VALUES (1, 'credits_purchased', ?)
-            `).bind(`Customer #${customerId} purchased ${credits} credits via Stripe`).run()
+              VALUES (1, 'square_report_purchased', ?)
+            `).bind(`${custData?.email || 'Customer'} purchased report for ${address} via Square ($${reportPrice})`).run()
+
+          } else {
+            // Credit pack purchase — add credits
+            // Parse description to extract credits count
+            const descMatch = localPayment.description?.match(/\((\d+)\s+credits?\)/i)
+            const credits = descMatch ? parseInt(descMatch[1]) : 0
+
+            if (credits > 0) {
+              await c.env.DB.prepare(
+                'UPDATE customers SET report_credits = report_credits + ?, subscription_plan = CASE WHEN subscription_plan = "free" THEN "credits" ELSE subscription_plan END, updated_at = datetime("now") WHERE id = ?'
+              ).bind(credits, customerId).run()
+
+              await c.env.DB.prepare(`
+                INSERT INTO user_activity_log (company_id, action, details)
+                VALUES (1, 'credits_purchased', ?)
+              `).bind(`Customer #${customerId} purchased ${credits} credits via Square`).run()
+            }
           }
         }
 
         // Mark webhook as processed
         await c.env.DB.prepare(
-          'UPDATE stripe_webhook_events SET processed = 1 WHERE stripe_event_id = ?'
-        ).bind(event.id).run()
+          'UPDATE square_webhook_events SET processed = 1 WHERE square_event_id = ?'
+        ).bind(eventId).run()
         break
       }
 
-      case 'payment_intent.payment_failed': {
-        const pi = event.data.object
-        await c.env.DB.prepare(`
-          UPDATE stripe_payments SET status = 'failed', updated_at = datetime('now')
-          WHERE stripe_payment_intent_id = ?
-        `).bind(pi.id).run()
-        
+      case 'payment.failed': {
+        const payment = event.data?.object?.payment
+        if (payment?.order_id) {
+          await c.env.DB.prepare(`
+            UPDATE square_payments SET status = 'failed', updated_at = datetime('now')
+            WHERE square_order_id = ?
+          `).bind(payment.order_id).run()
+        }
+
         await c.env.DB.prepare(
-          'UPDATE stripe_webhook_events SET processed = 1 WHERE stripe_event_id = ?'
-        ).bind(event.id).run()
+          'UPDATE square_webhook_events SET processed = 1 WHERE square_event_id = ?'
+        ).bind(eventId).run()
         break
       }
 
-      case 'charge.refunded': {
-        const charge = event.data.object
-        await c.env.DB.prepare(`
-          UPDATE stripe_payments SET status = 'refunded', updated_at = datetime('now')
-          WHERE stripe_payment_intent_id = ?
-        `).bind(charge.payment_intent).run()
-        
+      case 'refund.completed':
+      case 'refund.updated': {
+        const refund = event.data?.object?.refund
+        if (refund?.payment_id) {
+          await c.env.DB.prepare(`
+            UPDATE square_payments SET status = 'refunded', updated_at = datetime('now')
+            WHERE square_payment_id = ?
+          `).bind(refund.payment_id).run()
+        }
+
         await c.env.DB.prepare(
-          'UPDATE stripe_webhook_events SET processed = 1 WHERE stripe_event_id = ?'
-        ).bind(event.id).run()
+          'UPDATE square_webhook_events SET processed = 1 WHERE square_event_id = ?'
+        ).bind(eventId).run()
         break
       }
     }
 
     return c.json({ received: true })
   } catch (err: any) {
-    console.error('Webhook error:', err)
+    console.error('Square webhook error:', err)
     return c.json({ error: 'Webhook processing failed' }, 500)
   }
 })
 
 // ============================================================
-// VERIFY CHECKOUT SESSION — After redirect back from Stripe
+// VERIFY PAYMENT — After redirect back from Square checkout
+// Polls Square Orders API to check payment status
 // ============================================================
-stripeRoutes.get('/verify-session/:sessionId', async (c) => {
+squareRoutes.get('/verify-payment/:paymentLinkId', async (c) => {
   try {
-    const stripeKey = c.env.STRIPE_SECRET_KEY
-    if (!stripeKey) return c.json({ error: 'Stripe not configured' }, 503)
+    const squareToken = c.env.SQUARE_ACCESS_TOKEN
+    if (!squareToken) return c.json({ error: 'Square not configured' }, 503)
 
     const token = c.req.header('Authorization')?.replace('Bearer ', '')
     const customer = await getCustomerFromToken(c.env.DB, token)
     if (!customer) return c.json({ error: 'Not authenticated' }, 401)
 
-    const sessionId = c.req.param('sessionId')
-    const session = await stripeRequest(stripeKey, 'GET', `/checkout/sessions/${sessionId}`)
+    const paymentLinkId = c.req.param('paymentLinkId')
 
-    if (session.payment_status === 'paid') {
-      // If webhook hasn't processed yet, do it now
-      const meta = session.metadata || {}
-      const credits = parseInt(meta.credits) || 0
+    // Look up local payment record
+    const localPayment = await c.env.DB.prepare(
+      'SELECT * FROM square_payments WHERE square_payment_link_id = ? AND customer_id = ?'
+    ).bind(paymentLinkId, customer.customer_id).first<any>()
 
-      if (credits > 0 && meta.rc_customer_id === String(customer.customer_id)) {
-        // Check if credits were already added
-        const payment = await c.env.DB.prepare(
-          'SELECT * FROM stripe_payments WHERE stripe_checkout_session_id = ? AND status = ?'
-        ).bind(sessionId, 'succeeded').first()
+    if (!localPayment) {
+      return c.json({ success: false, payment_status: 'not_found' })
+    }
 
-        if (!payment) {
-          // Webhook hasn't fired yet — process inline
-          await c.env.DB.prepare(
-            'UPDATE customers SET report_credits = report_credits + ?, subscription_plan = CASE WHEN subscription_plan = "free" THEN "credits" ELSE subscription_plan END, updated_at = datetime("now") WHERE id = ?'
-          ).bind(credits, customer.customer_id).run()
-
-          await c.env.DB.prepare(`
-            UPDATE stripe_payments SET status = 'succeeded', stripe_payment_intent_id = ?, updated_at = datetime('now')
-            WHERE stripe_checkout_session_id = ?
-          `).bind(session.payment_intent, sessionId).run()
-        }
-      }
-
-      // Get updated customer data
+    // If already succeeded, return current state
+    if (localPayment.status === 'succeeded') {
       const updatedCustomer = await c.env.DB.prepare('SELECT * FROM customers WHERE id = ?').bind(customer.customer_id).first<any>()
-
       return c.json({
         success: true,
         payment_status: 'paid',
@@ -820,19 +750,56 @@ stripeRoutes.get('/verify-session/:sessionId', async (c) => {
       })
     }
 
+    // Check Square order status if we have an order_id
+    if (localPayment.square_order_id) {
+      try {
+        const orderData = await squareRequest(squareToken, 'GET', `/v2/orders/${localPayment.square_order_id}`)
+        const order = orderData.order
+
+        if (order?.state === 'COMPLETED') {
+          // Payment completed — process inline if webhook hasn't fired
+          if (localPayment.payment_type === 'credit_pack') {
+            const descMatch = localPayment.description?.match(/\((\d+)\s+credits?\)/i)
+            const credits = descMatch ? parseInt(descMatch[1]) : 0
+
+            if (credits > 0) {
+              await c.env.DB.prepare(
+                'UPDATE customers SET report_credits = report_credits + ?, subscription_plan = CASE WHEN subscription_plan = "free" THEN "credits" ELSE subscription_plan END, updated_at = datetime("now") WHERE id = ?'
+              ).bind(credits, customer.customer_id).run()
+            }
+          }
+
+          await c.env.DB.prepare(`
+            UPDATE square_payments SET status = 'succeeded', updated_at = datetime('now')
+            WHERE id = ?
+          `).bind(localPayment.id).run()
+
+          const updatedCustomer = await c.env.DB.prepare('SELECT * FROM customers WHERE id = ?').bind(customer.customer_id).first<any>()
+          return c.json({
+            success: true,
+            payment_status: 'paid',
+            credits_remaining: (updatedCustomer?.report_credits || 0) - (updatedCustomer?.credits_used || 0),
+            credits_total: updatedCustomer?.report_credits || 0,
+          })
+        }
+      } catch (e: any) {
+        console.warn(`[Verify] Failed to check Square order: ${e.message}`)
+      }
+    }
+
     return c.json({
       success: false,
-      payment_status: session.payment_status,
+      payment_status: localPayment.status,
     })
   } catch (err: any) {
-    return c.json({ error: 'Failed to verify session', details: err.message }, 500)
+    return c.json({ error: 'Failed to verify payment', details: err.message }, 500)
   }
 })
 
 // ============================================================
 // ADMIN: Revenue & Payment Stats
 // ============================================================
-stripeRoutes.get('/admin/stats', async (c) => {
+squareRoutes.get('/admin/stats', async (c) => {
   try {
     const stats = await c.env.DB.prepare(`
       SELECT
@@ -845,13 +812,13 @@ stripeRoutes.get('/admin/stats', async (c) => {
         SUM(CASE WHEN status = 'succeeded' AND payment_type = 'one_time_report' THEN amount ELSE 0 END) as report_revenue_cents,
         SUM(CASE WHEN status = 'succeeded' AND payment_type = 'credit_pack' THEN amount ELSE 0 END) as credit_revenue_cents,
         SUM(CASE WHEN status = 'refunded' THEN amount ELSE 0 END) as refunded_cents
-      FROM stripe_payments
+      FROM square_payments
     `).first()
 
     const recentPayments = await c.env.DB.prepare(`
       SELECT sp.*, c.name as customer_name, c.email as customer_email, c.company_name as customer_company,
              o.order_number, o.property_address
-      FROM stripe_payments sp
+      FROM square_payments sp
       LEFT JOIN customers c ON c.id = sp.customer_id
       LEFT JOIN orders o ON o.id = sp.order_id
       ORDER BY sp.created_at DESC LIMIT 50
@@ -863,7 +830,7 @@ stripeRoutes.get('/admin/stats', async (c) => {
         strftime('%Y-%m', created_at) as month,
         COUNT(*) as transactions,
         SUM(CASE WHEN status = 'succeeded' THEN amount ELSE 0 END) as revenue_cents
-      FROM stripe_payments 
+      FROM square_payments 
       GROUP BY strftime('%Y-%m', created_at) 
       ORDER BY month DESC LIMIT 12
     `).all()
@@ -877,7 +844,7 @@ stripeRoutes.get('/admin/stats', async (c) => {
 // ============================================================
 // ADMIN: Customer credit management
 // ============================================================
-stripeRoutes.post('/admin/add-credits', async (c) => {
+squareRoutes.post('/admin/add-credits', async (c) => {
   try {
     const { customer_id, credits, reason } = await c.req.json()
     if (!customer_id || !credits) return c.json({ error: 'customer_id and credits required' }, 400)

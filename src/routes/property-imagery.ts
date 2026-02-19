@@ -54,10 +54,11 @@ propertyImageryRoutes.post('/generate', async (c) => {
   }
 
   // ── Step 2: Fetch 4 satellite images at different zoom levels ──
-  // Zoom levels chosen to show property structures (shops, sheds, equipment, outbuildings)
-  // Zoom 20 = close-up, Zoom 19 = property detail, Zoom 18 = property + yard, Zoom 17 = neighbourhood context
+  // Ultra-HD: 640x640 + scale=2 = 1280x1280 actual pixels (Google Maps Static API maximum)
+  // PNG format for lossless quality, no labels/overlays for clean satellite imagery
+  const noLabelStyle = '&style=feature:all|element:labels|visibility:off&style=feature:road|visibility:off'
   const imageConfigs = [
-    { zoom: 21, size: '640x640', label: 'Close-Up View (Zoom 21)', desc: 'Structures, equipment, rooftop detail' },
+    { zoom: 21, size: '640x640', label: 'Close-Up View (Zoom 21)', desc: 'Ultra-HD rooftop detail — shingle texture, structural features' },
     { zoom: 19, size: '640x640', label: 'Property Detail (Zoom 19)', desc: 'Buildings, sheds, outbuildings, driveways' },
     { zoom: 18, size: '640x640', label: 'Full Property (Zoom 18)', desc: 'Lot boundaries, garages, shops, yards' },
     { zoom: 17, size: '640x640', label: 'Neighbourhood Context (Zoom 17)', desc: 'Surrounding area, access roads, adjacent lots' },
@@ -67,7 +68,7 @@ propertyImageryRoutes.post('/generate', async (c) => {
 
   for (const cfg of imageConfigs) {
     try {
-      const imgUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=${cfg.zoom}&size=${cfg.size}&maptype=satellite&key=${mapsKey}`
+      const imgUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=${cfg.zoom}&size=${cfg.size}&scale=2&maptype=satellite&format=png${cfg.zoom >= 20 ? noLabelStyle : ''}&key=${mapsKey}`
       const imgResp = await fetch(imgUrl)
       if (!imgResp.ok) {
         console.warn(`[PropertyImagery] Failed to fetch zoom ${cfg.zoom}: HTTP ${imgResp.status}`)

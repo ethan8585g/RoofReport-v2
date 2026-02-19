@@ -175,7 +175,7 @@ adminRoutes.post('/init-db', async (c) => {
       CREATE TABLE IF NOT EXISTS payments (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         order_id INTEGER NOT NULL,
-        stripe_payment_intent_id TEXT, amount REAL NOT NULL, currency TEXT DEFAULT 'CAD',
+        square_payment_id TEXT, amount REAL NOT NULL, currency TEXT DEFAULT 'CAD',
         status TEXT DEFAULT 'pending', payment_method TEXT, receipt_url TEXT,
         created_at TEXT DEFAULT (datetime('now')),
         FOREIGN KEY (order_id) REFERENCES orders(id)
@@ -347,7 +347,7 @@ adminRoutes.post('/init-db', async (c) => {
     const customerCreditCols = [
       'report_credits INTEGER DEFAULT 0',
       'credits_used INTEGER DEFAULT 0',
-      'stripe_customer_id TEXT',
+      'square_customer_id TEXT',
       'subscription_plan TEXT DEFAULT \'free\'',
       'subscription_status TEXT',
       'subscription_start TEXT',
@@ -441,15 +441,16 @@ adminRoutes.post('/init-db', async (c) => {
       }
     } catch(e) {}
 
-    // Stripe tables
+    // Square payment tables
     await c.env.DB.prepare(`
-      CREATE TABLE IF NOT EXISTS stripe_payments (
+      CREATE TABLE IF NOT EXISTS square_payments (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         customer_id INTEGER, order_id INTEGER,
-        stripe_checkout_session_id TEXT, stripe_payment_intent_id TEXT,
+        square_payment_link_id TEXT, square_order_id TEXT,
+        square_payment_id TEXT,
         amount INTEGER DEFAULT 0, currency TEXT DEFAULT 'cad',
         status TEXT DEFAULT 'pending', payment_type TEXT,
-        description TEXT,
+        description TEXT, metadata_json TEXT,
         created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')),
         FOREIGN KEY (customer_id) REFERENCES customers(id),
         FOREIGN KEY (order_id) REFERENCES orders(id)
@@ -457,9 +458,9 @@ adminRoutes.post('/init-db', async (c) => {
     `).run()
 
     await c.env.DB.prepare(`
-      CREATE TABLE IF NOT EXISTS stripe_webhook_events (
+      CREATE TABLE IF NOT EXISTS square_webhook_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        stripe_event_id TEXT UNIQUE NOT NULL,
+        square_event_id TEXT UNIQUE NOT NULL,
         event_type TEXT, payload TEXT, processed INTEGER DEFAULT 0,
         created_at TEXT DEFAULT (datetime('now'))
       )
@@ -679,13 +680,13 @@ adminRoutes.get('/superadmin/sales', async (c) => {
       orderBy = "period DESC"
     }
 
-    // Individual credit pack purchases (from stripe_payments)
+    // Individual credit pack purchases (from square_payments)
     const salesByPeriod = await c.env.DB.prepare(`
       SELECT ${groupBy} as period,
         COUNT(*) as transactions,
         SUM(sp.amount) as total_cents,
         SUM(CASE WHEN sp.status = 'completed' THEN sp.amount ELSE 0 END) as paid_cents
-      FROM stripe_payments sp
+      FROM square_payments sp
       ${dateFilter}
       GROUP BY ${groupBy}
       ORDER BY ${orderBy}
@@ -712,7 +713,7 @@ adminRoutes.get('/superadmin/sales', async (c) => {
     // Recent individual transactions
     const recentSales = await c.env.DB.prepare(`
       SELECT sp.*, c.name as customer_name, c.email as customer_email, c.company_name
-      FROM stripe_payments sp
+      FROM square_payments sp
       LEFT JOIN customers c ON sp.customer_id = c.id
       ORDER BY sp.created_at DESC
       LIMIT 50
@@ -724,7 +725,7 @@ adminRoutes.get('/superadmin/sales', async (c) => {
         COUNT(*) as total_transactions,
         SUM(amount) as total_cents,
         SUM(CASE WHEN status = 'completed' THEN amount ELSE 0 END) as paid_cents
-      FROM stripe_payments
+      FROM square_payments
     `).first()
 
     const orderTotals = await c.env.DB.prepare(`

@@ -224,26 +224,26 @@ function renderApiKeysSection() {
       getUrl: 'https://console.cloud.google.com/apis/library/maps-backend.googleapis.com'
     },
     {
-      envVar: 'STRIPE_SECRET_KEY',
-      label: 'Stripe Secret Key',
-      desc: 'Server-side only. Used for creating payment intents and processing charges. NEVER exposed to frontend.',
+      envVar: 'SQUARE_ACCESS_TOKEN',
+      label: 'Square Access Token',
+      desc: 'Server-side only. Used for creating payment links and processing charges via Square. NEVER exposed to frontend.',
       icon: 'fa-lock',
       color: 'purple',
-      configured: env.STRIPE_SECRET_KEY,
-      setupCmd: 'npx wrangler pages secret put STRIPE_SECRET_KEY',
+      configured: env.SQUARE_ACCESS_TOKEN,
+      setupCmd: 'npx wrangler pages secret put SQUARE_ACCESS_TOKEN',
       localFile: '.dev.vars',
-      getUrl: 'https://dashboard.stripe.com/apikeys'
+      getUrl: 'https://developer.squareup.com/apps'
     },
     {
-      envVar: 'STRIPE_PUBLISHABLE_KEY',
-      label: 'Stripe Publishable Key',
-      desc: 'Safe for frontend use. Used by Stripe.js to tokenize card details (never touches your server).',
+      envVar: 'SQUARE_APPLICATION_ID',
+      label: 'Square Application ID',
+      desc: 'Safe for frontend use. Identifies your Square application for checkout flows.',
       icon: 'fa-credit-card',
       color: 'purple',
-      configured: env.STRIPE_PUBLISHABLE_KEY,
-      setupCmd: 'npx wrangler pages secret put STRIPE_PUBLISHABLE_KEY',
+      configured: env.SQUARE_APPLICATION_ID,
+      setupCmd: 'npx wrangler pages secret put SQUARE_APPLICATION_ID',
       localFile: '.dev.vars',
-      getUrl: 'https://dashboard.stripe.com/apikeys'
+      getUrl: 'https://developer.squareup.com/apps'
     }
   ];
 
@@ -264,7 +264,7 @@ function renderApiKeysSection() {
         </h4>
         <ul class="mt-2 text-xs text-brand-700 space-y-1">
           <li><i class="fas fa-check mr-1"></i> API keys live in environment variables, not in code or database</li>
-          <li><i class="fas fa-check mr-1"></i> Secret keys (Solar API, Stripe Secret) are server-side only</li>
+          <li><i class="fas fa-check mr-1"></i> Secret keys (Solar API, Square Access Token) are server-side only</li>
           <li><i class="fas fa-check mr-1"></i> Google Maps key is injected server-side into the HTML (referrer-restricted)</li>
           <li><i class="fas fa-check mr-1"></i> Frontend JavaScript never has access to secret keys</li>
           <li><i class="fas fa-check mr-1"></i> For production, use <code class="bg-brand-100 px-1 rounded">wrangler pages secret put</code></li>

@@ -712,9 +712,11 @@ export async function executeRoofOrder(
 
   // Primary overhead satellite image (640x640 viewport, scale=2 for 1280x1280 actual pixels)
   // Max zoom for roof isolation: zoom 21 (High Res)
-  const satelliteOverheadUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=21&size=640x640&scale=2&maptype=satellite&key=${geocodeKey}`
+  // PNG format for lossless quality, labels removed for clean imagery
+  const noLabelStyle = '&style=feature:all|element:labels|visibility:off&style=feature:road|visibility:off'
+  const satelliteOverheadUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=21&size=640x640&scale=2&maptype=satellite&format=png${noLabelStyle}&key=${geocodeKey}`
   // Wider context view
-  const satelliteContextUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=19&size=640x640&scale=2&maptype=satellite&key=${geocodeKey}`
+  const satelliteContextUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=19&size=640x640&scale=2&maptype=satellite&format=png&style=feature:all|element:labels|visibility:off&key=${geocodeKey}`
   // Legacy compatible URL (rectangular, used as fallback)
   const satelliteUrl = satelliteOverheadUrl
 

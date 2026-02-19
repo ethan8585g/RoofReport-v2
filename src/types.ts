@@ -33,9 +33,10 @@ export type Bindings = {
   GOOGLE_CLOUD_ACCESS_TOKEN: string // OAuth2 token from 'gcloud auth print-access-token'
   GCP_SERVICE_ACCOUNT_KEY: string   // Full JSON of GCP service account key file (auto-generates access tokens)
 
-  // Stripe - stored as Cloudflare secrets, accessed server-side only
-  STRIPE_SECRET_KEY: string
-  STRIPE_PUBLISHABLE_KEY: string  // This one is safe for frontend (it's "publishable")
+  // Square - stored as Cloudflare secrets, accessed server-side only
+  SQUARE_ACCESS_TOKEN: string      // Square API access token (sandbox or production)
+  SQUARE_APPLICATION_ID: string    // Square application ID (safe for frontend)
+  SQUARE_LOCATION_ID: string       // Square location ID for checkout
 
   // Email delivery
   GMAIL_SENDER_EMAIL: string // The Google Workspace user email to impersonate when sending via Gmail API
@@ -53,8 +54,8 @@ export type Bindings = {
   // Uses the same OAuth 2.0 Client ID as Gmail OAuth2 (or a separate one)
   GOOGLE_OAUTH_CLIENT_ID: string
 
-  // Stripe Webhook Secret — verifies webhook signatures
-  STRIPE_WEBHOOK_SECRET: string
+  // Square Webhook Signature Key — verifies webhook signatures
+  SQUARE_WEBHOOK_SIGNATURE_KEY: string
 
   // Admin Bootstrap — Used ONLY for initial admin account creation
   // Set these env vars, then remove after first login
@@ -412,8 +413,9 @@ export interface RoofReport {
     /** Zoom 17: Neighbourhood Context (Surrounding area) */
     satellite_neighbourhood_url?: string | null
 
-    // Directional roof views (Street View Static API with heading toward house)
-    // DEPRECATED in v2.1 in favor of multi-zoom satellite config
+    // Directional roof views — Ultra-HD satellite overhead views
+    // Offset center lat/lng by ~22m for cardinal direction perspectives
+    // 1280x1280 actual pixels (640x640 + scale=2), PNG format, no labels
     north_url?: string | null
     south_url?: string | null
     east_url?: string | null

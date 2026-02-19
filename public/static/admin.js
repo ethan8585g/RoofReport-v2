@@ -436,7 +436,7 @@ function renderEarnings() {
               <td class="px-4 py-2 text-xs font-mono text-blue-600">${p.order_number||'-'}</td>
               <td class="px-4 py-2 text-xs text-gray-600">${p.property_address||'-'}</td>
               <td class="px-4 py-2 text-right font-bold">${$$(p.amount)}</td>
-              <td class="px-4 py-2 text-xs text-gray-500 capitalize">${p.payment_method||'stripe'}</td>
+              <td class="px-4 py-2 text-xs text-gray-500 capitalize">${p.payment_method||'square'}</td>
               <td class="px-4 py-2">${statusBadge(p.status)}</td>
             </tr>`).join('')}
             ${payments.length === 0 ? '<tr><td colspan="6" class="px-4 py-8 text-center text-gray-400">No payments recorded</td></tr>' : ''}
