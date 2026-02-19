@@ -60,15 +60,17 @@ ordersRoutes.post('/', async (c) => {
         latitude, longitude,
         homeowner_name, homeowner_phone, homeowner_email,
         requester_name, requester_company, requester_email, requester_phone,
-        service_tier, price, status, payment_status, estimated_delivery, notes
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'unpaid', ?, ?)
+        service_tier, price, status, payment_status, estimated_delivery, notes,
+      verified_lat, verified_lng
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'unpaid', ?, ?, ?, ?)
     `).bind(
       orderNumber, masterCompanyId, customer_company_id || null,
       property_address, property_city || null, property_province || null, property_postal_code || null,
       latitude || null, longitude || null,
       homeowner_name, homeowner_phone || null, homeowner_email || null,
       requester_name, requester_company || null, requester_email || null, requester_phone || null,
-      service_tier, price, estimatedDelivery, notes || null
+      service_tier, price, estimatedDelivery, notes || null,
+      latitude || null, longitude || null // Store verified coordinates (same as lat/lng for now as frontend sends selected pin)
     ).run()
 
     // Log the activity

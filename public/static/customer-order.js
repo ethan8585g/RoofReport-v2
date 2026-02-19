@@ -290,7 +290,7 @@ function renderOrderPage() {
               <input type="checkbox" id="confirmLocation" class="w-5 h-5 text-brand-600 border-gray-300 rounded focus:ring-brand-500 cursor-pointer">
             </div>
             <label for="confirmLocation" class="text-sm text-gray-700 font-medium cursor-pointer select-none">
-              I have verified that the <span class="text-red-600 font-bold">RED PIN</span> is on the roof structure. <span class="text-gray-500 font-normal">(Required to proceed)</span>
+              I verify that the <span class="text-red-600 font-bold">RED PIN</span> is centered on the correct roof structure. <span class="text-gray-500 font-normal">(Required)</span>
             </label>
           </div>
 
