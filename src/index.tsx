@@ -1232,7 +1232,7 @@ function getCustomerOrderPageHTML(mapsApiKey: string) {
       if (!c) { window.location.href = '/customer/login'; return; }
     })();
   </script>
-  <script src="/static/customer-order.js?v=2.2"></script>
+  <script src="/static/customer-order.js?v=2.3"></script>
 </body>
 </html>`
 }
