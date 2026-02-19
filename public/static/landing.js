@@ -552,7 +552,7 @@ function renderFAQ() {
     { q: 'How accurate are the measurements?', a: 'Google Solar API data is sourced from high-resolution aerial and satellite imagery with LiDAR-calibrated 3D models. For buildings with HIGH quality imagery, accuracy is typically within 2-5% of manual measurements. We display the confidence score and imagery quality on every report.' },
     { q: 'What areas do you cover?', a: "Currently available for most Canadian addresses where Google has Solar API coverage. Urban areas in Alberta, BC, Ontario, and Quebec have the best coverage. If we can't find Solar API data for your address, we'll use our AI vision engine as a fallback." },
     { q: 'Can I use this for insurance claims?', a: 'Our reports provide professional-grade measurements suitable for preliminary estimates and contractor quotes. For formal insurance claims, we recommend our reports as a starting reference alongside a physical inspection. The data comes from Google — a trusted, auditable source.' },
-    { q: 'What payment methods do you accept?', a: 'We accept all major credit cards (Visa, Mastercard, Amex) and debit cards through our secure Stripe payment processor. All transactions are encrypted and PCI-compliant.' },
+    { q: 'What payment methods do you accept?', a: 'We accept all major credit cards (Visa, Mastercard, Amex), debit cards, Google Pay, Apple Pay, and Cash App Pay through our secure Square payment terminal. All transactions are encrypted and PCI-compliant.' },
     { q: 'Do you offer volume discounts?', a: 'Yes! Registered B2B customer companies get priority processing and volume pricing. Contact us to set up a business account with custom rates and monthly invoicing.' },
   ];
 

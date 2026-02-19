@@ -132,8 +132,8 @@ async function loadOrderData() {
   orderState.loading = true;
   try {
     const [billingRes, pkgRes] = await Promise.all([
-      fetch('/api/stripe/billing', { headers: authHeaders() }),
-      fetch('/api/stripe/packages')
+      fetch('/api/square/billing', { headers: authHeaders() }),
+      fetch('/api/square/packages')
     ]);
     if (billingRes.ok) {
       const bd = await billingRes.json();
@@ -320,19 +320,19 @@ function renderOrderPage() {
               <button onclick="useCredit()" id="creditBtn" class="flex-1 py-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition-all hover:scale-[1.02] shadow-lg text-lg">
                 <i class="fas fa-gift mr-2"></i>Use Free Trial Report (${freeTrialRemaining} left)
               </button>
-              <button onclick="payWithStripe()" id="stripeBtn" class="py-4 px-6 bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold rounded-xl transition-all text-sm">
-                <i class="fab fa-stripe mr-1"></i>Pay $${selectedTierInfo.price} instead
+              <button onclick="payWithSquare()" id="squareBtn" class="py-4 px-6 bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold rounded-xl transition-all text-sm">
+                <i class="fas fa-credit-card mr-1"></i>Pay $${selectedTierInfo.price} instead
               </button>
             ` : paidCredits > 0 ? `
               <button onclick="useCredit()" id="creditBtn" class="flex-1 py-4 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl transition-all hover:scale-[1.02] shadow-lg text-lg">
                 <i class="fas fa-coins mr-2"></i>Use Paid Credit (${paidCredits} left)
               </button>
-              <button onclick="payWithStripe()" id="stripeBtn" class="py-4 px-6 bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold rounded-xl transition-all text-sm">
-                <i class="fab fa-stripe mr-1"></i>Pay $${selectedTierInfo.price} instead
+              <button onclick="payWithSquare()" id="squareBtn" class="py-4 px-6 bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold rounded-xl transition-all text-sm">
+                <i class="fas fa-credit-card mr-1"></i>Pay $${selectedTierInfo.price} instead
               </button>
             ` : `
-              <button onclick="payWithStripe()" id="stripeBtn" class="flex-1 py-4 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-xl transition-all hover:scale-[1.02] shadow-lg text-lg">
-                <i class="fab fa-stripe mr-2"></i>Pay $${selectedTierInfo.price} with Stripe
+              <button onclick="payWithSquare()" id="squareBtn" class="flex-1 py-4 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-xl transition-all hover:scale-[1.02] shadow-lg text-lg">
+                <i class="fas fa-credit-card mr-2"></i>Pay $${selectedTierInfo.price} with Square
               </button>
             `}
           </div>
@@ -422,7 +422,7 @@ async function useCredit() {
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Processing...'; }
 
   try {
-    const res = await fetch('/api/stripe/use-credit', {
+    const res = await fetch('/api/square/use-credit', {
       method: 'POST',
       headers: authHeaders(),
       body: JSON.stringify({
@@ -449,13 +449,13 @@ async function useCredit() {
   }
 }
 
-async function payWithStripe() {
+async function payWithSquare() {
   if (!validate()) return;
-  const btn = document.getElementById('stripeBtn');
-  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Redirecting to Stripe...'; }
+  const btn = document.getElementById('squareBtn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Redirecting to Square checkout...'; }
 
   try {
-    const res = await fetch('/api/stripe/checkout/report', {
+    const res = await fetch('/api/square/checkout/report', {
       method: 'POST',
       headers: authHeaders(),
       body: JSON.stringify({
@@ -473,17 +473,17 @@ async function payWithStripe() {
       window.location.href = data.checkout_url;
     } else {
       showMsg('error', '<i class="fas fa-exclamation-triangle mr-1"></i>' + (data.error || 'Checkout failed'));
-      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fab fa-stripe mr-2"></i>Pay with Stripe'; }
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-credit-card mr-2"></i>Pay with Square'; }
     }
   } catch (e) {
     showMsg('error', '<i class="fas fa-exclamation-triangle mr-1"></i>Network error. Please try again.');
-    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fab fa-stripe mr-2"></i>Pay with Stripe'; }
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-credit-card mr-2"></i>Pay with Square'; }
   }
 }
 
 async function buyPackage(pkgId) {
   try {
-    const res = await fetch('/api/stripe/checkout', {
+    const res = await fetch('/api/square/checkout', {
       method: 'POST',
       headers: authHeaders(),
       body: JSON.stringify({ package_id: pkgId })

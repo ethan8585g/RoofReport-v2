@@ -7,7 +7,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (!root) return;
 
   try {
-    const res = await fetch('/api/stripe/packages');
+    const res = await fetch('/api/square/packages');
     const data = await res.json();
     const packages = data.packages || [];
     renderPricing(root, packages);

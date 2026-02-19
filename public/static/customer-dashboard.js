@@ -11,8 +11,8 @@ function authHeaders() { return { 'Authorization': 'Bearer ' + getToken(), 'Cont
 document.addEventListener('DOMContentLoaded', async function() {
   var params = new URLSearchParams(window.location.search);
   if (params.get('payment') === 'success') {
-    var sid = params.get('session_id');
-    if (sid) { try { await fetch('/api/stripe/verify-session/' + sid, { headers: authHeaders() }); } catch(e) {} }
+    var sid = params.get('payment_link_id');
+    if (sid) { try { await fetch('/api/square/verify-payment/' + sid, { headers: authHeaders() }); } catch(e) {} }
     window.history.replaceState({}, '', '/customer/dashboard');
   }
   await loadDashData();
@@ -25,7 +25,7 @@ async function loadDashData() {
     var [profileRes, ordersRes, billingRes, crmCustRes, crmInvRes, crmPropRes, crmJobRes] = await Promise.all([
       fetch('/api/customer/me', { headers: authHeaders() }),
       fetch('/api/customer/orders', { headers: authHeaders() }),
-      fetch('/api/stripe/billing', { headers: authHeaders() }),
+      fetch('/api/square/billing', { headers: authHeaders() }),
       fetch('/api/crm/customers', { headers: authHeaders() }).catch(function() { return { ok: false }; }),
       fetch('/api/crm/invoices', { headers: authHeaders() }).catch(function() { return { ok: false }; }),
       fetch('/api/crm/proposals', { headers: authHeaders() }).catch(function() { return { ok: false }; }),
@@ -131,7 +131,7 @@ function renderDashboard() {
           '</div>' +
           '<div class="flex gap-3 flex-shrink-0">' +
             '<a href="/pricing" class="px-6 py-3 bg-amber-500 hover:bg-amber-400 text-gray-900 font-black rounded-xl shadow-lg transition-all hover:scale-105 text-sm"><i class="fas fa-tags mr-2"></i>View Credit Packs</a>' +
-            '<a href="/customer/order" class="px-6 py-3 bg-white/10 hover:bg-white/20 text-white font-semibold rounded-xl transition-all text-sm border border-white/20"><i class="fab fa-stripe mr-2"></i>Pay Per Report</a>' +
+            '<a href="/customer/order" class="px-6 py-3 bg-white/10 hover:bg-white/20 text-white font-semibold rounded-xl transition-all text-sm border border-white/20"><i class="fas fa-credit-card mr-2"></i>Pay Per Report</a>' +
           '</div>' +
         '</div>' +
       '</div>' : '') +
