@@ -6,6 +6,11 @@
   "compatibility_flags": [
     "nodejs_compat"
   ],
+  "pages_build_config": {
+    "build_command": "npm run build",
+    "destination_dir": "dist",
+    "root_dir": "/"
+  },
   "kv_namespaces": [
     {
       "binding": "ANTIGRAVITY_DATA",
