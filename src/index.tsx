@@ -1409,7 +1409,7 @@ function getCrmSubPageHTML(module: string, title: string, icon: string) {
       window.location.href = '/customer/login';
     }
   </script>
-  <script src="/static/crm-module.js"></script>
+  <script src="/static/crm-module.js?v=1.1"></script>
 </body>
 </html>`
 }
