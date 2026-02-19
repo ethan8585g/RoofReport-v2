@@ -3,10 +3,7 @@ compatibility_date = "2026-02-09"
 compatibility_flags = ["nodejs_compat"]
 pages_build_output_dir = "./dist"
 
-[pages_build_config]
-build_command = "npm run build"
-destination_dir = "dist"
-root_dir = "/"
+
 
 [[kv_namespaces]]
 binding = "ANTIGRAVITY_DATA"
