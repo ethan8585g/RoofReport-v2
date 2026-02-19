@@ -1198,7 +1198,14 @@ function getCustomerOrderPageHTML(mapsApiKey: string) {
       }
     </script>
     <script src="https://maps.googleapis.com/maps/api/js?key=${mapsApiKey}&libraries=places&callback=onGoogleMapsReady" async defer></script>`
-    : ''
+    : `<script>
+        document.addEventListener('DOMContentLoaded', function() {
+          var errDiv = document.createElement('div');
+          errDiv.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#feb2b2;color:#9b2c2c;padding:10px;text-align:center;z-index:9999;font-weight:bold;';
+          errDiv.textContent = 'SYSTEM ERROR: GOOGLE_MAPS_API_KEY is missing in environment variables.';
+          document.body.appendChild(errDiv);
+        });
+       </script>`
 
   return `<!DOCTYPE html>
 <html lang="en">
