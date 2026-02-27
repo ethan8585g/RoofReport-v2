@@ -396,16 +396,29 @@ export interface RoofReport {
     satellite_url: string | null
     /** 640x640 square overhead satellite image for roof measurement (smart zoom based on building size) */
     satellite_overhead_url: string | null
-    /** 640x640 wider context satellite image (zoom-1) */
+    /** 640x640 wider context satellite image (zoom-2 from overhead) */
     satellite_context_url: string | null
     dsm_url: string | null
     mask_url: string | null
     flux_url: string | null
-    // Directional roof views (Street View Static API with heading toward house)
+
+    // Directional aerial satellite views — offset from center to show each side of roof
     north_url: string | null
     south_url: string | null
     east_url: string | null
     west_url: string | null
+
+    // Quadrant close-ups — max zoom (22) at NW/NE/SW/SE corners for shingle detail
+    closeup_nw_url: string | null
+    closeup_ne_url: string | null
+    closeup_sw_url: string | null
+    closeup_se_url: string | null
+
+    // Street View — single front-facing reference for curb appeal / front elevation
+    street_view_url: string | null
+
+    // Medium-zoom bridge view (between overhead and context)
+    satellite_medium_url: string | null
   }
 
   // ---- DATA QUALITY ----

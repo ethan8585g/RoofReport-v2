@@ -22,6 +22,73 @@ import {
 } from '../services/solar-datalayers'
 import { analyzeRoofGeometry } from '../services/gemini'
 
+// ============================================================
+// ENHANCED IMAGERY HELPER — Generates all satellite + directional URLs
+// Uses offset coordinates for directional aerial views instead of Street View
+// Produces 14 distinct images per report for comprehensive roof coverage
+// ============================================================
+function generateEnhancedImagery(lat: number, lng: number, apiKey: string, footprintSqft: number = 1500) {
+  // Calculate zoom based on roof size
+  const footprintM2 = footprintSqft / 10.7639
+  // Larger roofs need lower zoom to fit. Small residential at zoom 21, medium at 20, large commercial at 19
+  const roofZoom = footprintM2 > 1000 ? 19 : footprintM2 > 500 ? 20 : 21
+  const contextZoom = roofZoom - 3    // Wide neighborhood context (e.g. zoom 18)
+  const mediumZoom = roofZoom - 1     // Bridge between overhead and context
+  const closeupZoom = Math.min(roofZoom + 1, 22)  // Max Google Maps zoom is 22
+  
+  // Directional offset distance — larger than before so images actually show different angles.
+  // At lat ~53° N (Edmonton): 1° lat ≈ 111.3 km, 1° lng ≈ 67 km
+  // We want ~50-60m offset so the center shifts noticeably off the roof
+  const latDegPerMeter = 1 / 111320
+  const lngDegPerMeter = 1 / (111320 * Math.cos(lat * Math.PI / 180))
+  
+  const dirOffsetMeters = 50   // 50m offset for directional views
+  const offsetLat = dirOffsetMeters * latDegPerMeter
+  const offsetLng = dirOffsetMeters * lngDegPerMeter
+  
+  // Quadrant close-up offset (~15m from center for corner detail)
+  const quadOffsetMeters = 15
+  const quadLat = quadOffsetMeters * latDegPerMeter
+  const quadLng = quadOffsetMeters * lngDegPerMeter
+  
+  const base = `https://maps.googleapis.com/maps/api/staticmap`
+  const sv = `https://maps.googleapis.com/maps/api/streetview`
+  
+  return {
+    // ── PRIMARY: Dead-center overhead (zoom 21, 640×640 viewport, scale=2 → 1280×1280 px) ──
+    satellite_url: `${base}?center=${lat},${lng}&zoom=${roofZoom}&size=640x640&scale=2&maptype=satellite&key=${apiKey}`,
+    satellite_overhead_url: `${base}?center=${lat},${lng}&zoom=${roofZoom}&size=640x640&scale=2&maptype=satellite&key=${apiKey}`,
+    
+    // ── MEDIUM: Bridge between overhead and context (zoom-1) ──
+    satellite_medium_url: `${base}?center=${lat},${lng}&zoom=${mediumZoom}&size=640x640&scale=2&maptype=satellite&key=${apiKey}`,
+    
+    // ── CONTEXT: Wide neighborhood view (zoom-3 from overhead) ──
+    satellite_context_url: `${base}?center=${lat},${lng}&zoom=${contextZoom}&size=640x640&scale=2&maptype=satellite&key=${apiKey}`,
+    
+    // ── DSM/MASK/FLUX: Solar API data (set later) ──
+    dsm_url: '',
+    mask_url: '',
+    flux_url: null as string | null,
+    
+    // ── DIRECTIONAL AERIAL: Satellite images offset 50m from center in each direction ──
+    // Center shifted so the roof appears toward the opposite edge of the image,
+    // effectively giving a "looking from the north" etc. perspective
+    north_url: `${base}?center=${lat + offsetLat},${lng}&zoom=${roofZoom}&size=640x400&scale=2&maptype=satellite&key=${apiKey}`,
+    south_url: `${base}?center=${lat - offsetLat},${lng}&zoom=${roofZoom}&size=640x400&scale=2&maptype=satellite&key=${apiKey}`,
+    east_url: `${base}?center=${lat},${lng + offsetLng}&zoom=${roofZoom}&size=640x400&scale=2&maptype=satellite&key=${apiKey}`,
+    west_url: `${base}?center=${lat},${lng - offsetLng}&zoom=${roofZoom}&size=640x400&scale=2&maptype=satellite&key=${apiKey}`,
+    
+    // ── CLOSE-UP QUADRANTS: Max zoom (22) at 4 corners — shows shingle detail ──
+    closeup_nw_url: `${base}?center=${lat + quadLat},${lng - quadLng}&zoom=${closeupZoom}&size=400x400&scale=2&maptype=satellite&key=${apiKey}`,
+    closeup_ne_url: `${base}?center=${lat + quadLat},${lng + quadLng}&zoom=${closeupZoom}&size=400x400&scale=2&maptype=satellite&key=${apiKey}`,
+    closeup_sw_url: `${base}?center=${lat - quadLat},${lng - quadLng}&zoom=${closeupZoom}&size=400x400&scale=2&maptype=satellite&key=${apiKey}`,
+    closeup_se_url: `${base}?center=${lat - quadLat},${lng + quadLng}&zoom=${closeupZoom}&size=400x400&scale=2&maptype=satellite&key=${apiKey}`,
+    
+    // ── STREET VIEW: Front curb-appeal reference (heading=0 for north-facing default, pitch=15° slight upward tilt) ──
+    street_view_url: `${sv}?size=640x480&scale=2&location=${lat},${lng}&heading=0&pitch=15&fov=90&key=${apiKey}`,
+  }
+}
+
 export const reportsRoutes = new Hono<{ Bindings: Bindings }>()
 
 // ============================================================
@@ -341,16 +408,9 @@ function buildDataLayersReport(orderId: any, order: any, dlResult: any, dlSegmen
     num_panels_possible: 0,
     yearly_energy_kwh: 0,
     imagery: {
-      satellite_url: dlResult.satelliteUrl,
-      satellite_overhead_url: dlResult.satelliteOverheadUrl,
-      satellite_context_url: dlResult.satelliteContextUrl,
+      ...generateEnhancedImagery(dlResult.latitude, dlResult.longitude, mapsApiKey, dlResult.area.flatAreaSqft),
       dsm_url: dlResult.dsmUrl,
       mask_url: dlResult.maskUrl,
-      flux_url: null,
-      north_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${dlResult.latitude},${dlResult.longitude}&heading=0&pitch=45&fov=80&key=${mapsApiKey}`,
-      south_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${dlResult.latitude},${dlResult.longitude}&heading=180&pitch=45&fov=80&key=${mapsApiKey}`,
-      east_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${dlResult.latitude},${dlResult.longitude}&heading=90&pitch=45&fov=80&key=${mapsApiKey}`,
-      west_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${dlResult.latitude},${dlResult.longitude}&heading=270&pitch=45&fov=80&key=${mapsApiKey}`,
     },
     quality: {
       imagery_quality: dlResult.imageryQuality as any,
@@ -510,16 +570,9 @@ reportsRoutes.post('/:orderId/generate-enhanced', async (c) => {
       num_panels_possible: 0,
       yearly_energy_kwh: 0,
       imagery: {
-        satellite_url: dlAnalysis.satelliteUrl,
-        satellite_overhead_url: dlAnalysis.satelliteOverheadUrl,
-        satellite_context_url: dlAnalysis.satelliteContextUrl,
+        ...generateEnhancedImagery(dlAnalysis.latitude, dlAnalysis.longitude, mapsApiKey, totalFootprintSqft),
         dsm_url: dlAnalysis.dsmUrl,
         mask_url: dlAnalysis.maskUrl,
-        flux_url: null,
-        north_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${dlAnalysis.latitude},${dlAnalysis.longitude}&heading=0&pitch=45&fov=80&key=${mapsApiKey}`,
-        south_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${dlAnalysis.latitude},${dlAnalysis.longitude}&heading=180&pitch=45&fov=80&key=${mapsApiKey}`,
-        east_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${dlAnalysis.latitude},${dlAnalysis.longitude}&heading=90&pitch=45&fov=80&key=${mapsApiKey}`,
-        west_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${dlAnalysis.latitude},${dlAnalysis.longitude}&heading=270&pitch=45&fov=80&key=${mapsApiKey}`,
       },
       quality: {
         imagery_quality: dlAnalysis.imageryQuality as any,
@@ -1489,19 +1542,9 @@ async function callGoogleSolarAPI(
     num_panels_possible: maxPanels,
     yearly_energy_kwh: Math.round(yearlyEnergy),
     imagery: {
-      // Max zoom for roof isolation: zoom 21 for residential, 20 for large commercial (>500m²)
-      // scale=2 for high-res (1280x1280 actual pixels on 640x640 viewport)
-      satellite_url: `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=${totalFootprintSqm > 500 ? 20 : 21}&size=640x640&scale=2&maptype=satellite&key=${imageKey}`,
-      satellite_overhead_url: `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=${totalFootprintSqm > 500 ? 20 : 21}&size=640x640&scale=2&maptype=satellite&key=${imageKey}`,
-      satellite_context_url: `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=${totalFootprintSqm > 500 ? 18 : 19}&size=640x640&scale=2&maptype=satellite&key=${imageKey}`,
+      ...generateEnhancedImagery(lat, lng, imageKey, totalFootprintSqft),
       dsm_url: null,
       mask_url: null,
-      flux_url: null,
-      // Street View at pitch 45° for roof-angled perspective, scale=2 for clarity
-      north_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${lat},${lng}&heading=0&pitch=45&fov=80&key=${imageKey}`,
-      south_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${lat},${lng}&heading=180&pitch=45&fov=80&key=${imageKey}`,
-      east_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${lat},${lng}&heading=90&pitch=45&fov=80&key=${imageKey}`,
-      west_url: `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${lat},${lng}&heading=270&pitch=45&fov=80&key=${imageKey}`,
     },
     quality: {
       imagery_quality: imageryQuality as any,
@@ -1610,32 +1653,30 @@ function generateMockRoofReport(order: any, apiKey?: string): RoofReport {
     max_sunshine_hours: Math.round(edmontonSunHours * 10) / 10,
     num_panels_possible: panelCount,
     yearly_energy_kwh: Math.round(panelCount * 400),
-    imagery: {
-      satellite_url: lat && lng
-        ? `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=21&size=640x640&scale=2&maptype=satellite${apiKey ? `&key=${apiKey}` : ''}`
-        : null,
-      satellite_overhead_url: lat && lng
-        ? `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=21&size=640x640&scale=2&maptype=satellite${apiKey ? `&key=${apiKey}` : ''}`
-        : null,
-      satellite_context_url: lat && lng
-        ? `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=19&size=640x640&scale=2&maptype=satellite${apiKey ? `&key=${apiKey}` : ''}`
-        : null,
-      dsm_url: null,
-      mask_url: null,
-      flux_url: null,
-      north_url: lat && lng && apiKey
-        ? `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${lat},${lng}&heading=0&pitch=45&fov=80&key=${apiKey}`
-        : null,
-      south_url: lat && lng && apiKey
-        ? `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${lat},${lng}&heading=180&pitch=45&fov=80&key=${apiKey}`
-        : null,
-      east_url: lat && lng && apiKey
-        ? `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${lat},${lng}&heading=90&pitch=45&fov=80&key=${apiKey}`
-        : null,
-      west_url: lat && lng && apiKey
-        ? `https://maps.googleapis.com/maps/api/streetview?size=600x400&scale=2&location=${lat},${lng}&heading=270&pitch=45&fov=80&key=${apiKey}`
-        : null,
-    },
+    imagery: lat && lng && apiKey
+      ? {
+          ...generateEnhancedImagery(lat, lng, apiKey, Math.round(totalFootprintSqft)),
+          dsm_url: null,
+          mask_url: null,
+        }
+      : {
+          satellite_url: null,
+          satellite_overhead_url: null,
+          satellite_medium_url: null,
+          satellite_context_url: null,
+          dsm_url: null,
+          mask_url: null,
+          flux_url: null,
+          north_url: null,
+          south_url: null,
+          east_url: null,
+          west_url: null,
+          closeup_nw_url: null,
+          closeup_ne_url: null,
+          closeup_sw_url: null,
+          closeup_se_url: null,
+          street_view_url: null,
+        },
     quality: {
       imagery_quality: 'BASE',
       field_verification_recommended: true,
@@ -1832,14 +1873,24 @@ function generateProfessionalReportHTML(report: RoofReport): string {
   const satelliteUrl = report.imagery?.satellite_url || ''
   // Primary overhead satellite image — zoom 21, scale=2 for max clarity
   const overheadUrl = report.imagery?.satellite_overhead_url || satelliteUrl
-  // Wider context view
-  const contextUrl = report.imagery?.satellite_context_url || (satelliteUrl ? satelliteUrl.replace(/zoom=\d+/, 'zoom=19') : '')
+  // Medium bridge view (zoom-1 from overhead)
+  const mediumUrl = report.imagery?.satellite_medium_url || (satelliteUrl ? satelliteUrl.replace(/zoom=\d+/, (m: string) => { const z = parseInt(m.replace('zoom=','')); return `zoom=${z-1}` }) : '')
+  // Wider context view (zoom-3 from overhead)
+  const contextUrl = report.imagery?.satellite_context_url || (satelliteUrl ? satelliteUrl.replace(/zoom=\d+/, 'zoom=18') : '')
   // Max zoom close-up (zoom+1 from overhead, capped at 22)
   const closeupUrl = overheadUrl ? overheadUrl.replace(/zoom=(\d+)/, (m: string, z: string) => `zoom=${Math.min(parseInt(z) + 1, 22)}`) : ''
+  // Directional aerial satellite views (offset 50m from center)
   const northUrl = report.imagery?.north_url || ''
   const southUrl = report.imagery?.south_url || ''
   const eastUrl = report.imagery?.east_url || ''
   const westUrl = report.imagery?.west_url || ''
+  // Close-up quadrant URLs (max zoom for shingle detail)
+  const closeupNwUrl = report.imagery?.closeup_nw_url || ''
+  const closeupNeUrl = report.imagery?.closeup_ne_url || ''
+  const closeupSwUrl = report.imagery?.closeup_sw_url || ''
+  const closeupSeUrl = report.imagery?.closeup_se_url || ''
+  // Street view reference — front elevation curb appeal
+  const streetViewUrl = report.imagery?.street_view_url || ''
   // Facet colors for the roof diagram
   const facetColors = ['#FF6B8A','#5B9BD5','#70C070','#FFB347','#C084FC','#F472B6','#34D399','#FBBF24','#60A5FA','#A78BFA','#FB923C','#4ADE80']
 
@@ -1983,8 +2034,9 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
 
 /* Print */
 @media print{
-  .p1,.p2,.p3{page-break-after:always;min-height:auto}
+  .p1,.p2,.p3,.p4{page-break-after:always;min-height:auto}
   .p1{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .p4{-webkit-print-color-adjust:exact;print-color-adjust:exact}
   body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 }
 </style>
@@ -2034,23 +2086,23 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
       <div class="p1-aerial-label">${hasOverlay ? 'Measured Roof Diagram &mdash; All Lines in Feet &amp; Inches' : 'Overhead Satellite'} &mdash; Zoom ${report.metadata.provider === 'google_solar_datalayers' ? '21' : '20'} / Scale 2x</div>
     </div>
 
-    <!-- Right column: 4 directional views (N/E/S/W) at pitch 45 for roof angle view -->
+    <!-- Right column: 4 directional aerial views (satellite offset N/E/S/W) -->
     <div style="display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:5px">
       <div class="p1-aerial-card" style="padding:4px">
-        ${northUrl ? `<img class="p1-sv-img" src="${northUrl}" alt="North" style="height:75px;width:100%;object-fit:cover;border-radius:4px" data-dir="N" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-sv-nodata" style="height:75px;font-size:9px">No imagery<br>available</div>` : '<div class="p1-sv-nodata" style="display:flex;height:75px;font-size:9px">N/A</div>'}
-        <div class="p1-aerial-label" style="font-size:7px;margin-top:2px">NORTH <span style="color:rgba(0,229,255,0.4);font-size:6px">0&deg;/45&deg;</span></div>
+        ${northUrl ? `<img src="${northUrl}" alt="North View" style="height:75px;width:100%;object-fit:cover;border-radius:4px" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-sv-nodata" style="height:75px;font-size:9px">No imagery<br>available</div>` : '<div class="p1-sv-nodata" style="display:flex;height:75px;font-size:9px">N/A</div>'}
+        <div class="p1-aerial-label" style="font-size:7px;margin-top:2px">NORTH <span style="color:rgba(0,229,255,0.4);font-size:6px">0&deg;</span></div>
       </div>
       <div class="p1-aerial-card" style="padding:4px">
-        ${eastUrl ? `<img class="p1-sv-img" src="${eastUrl}" alt="East" style="height:75px;width:100%;object-fit:cover;border-radius:4px" data-dir="E" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-sv-nodata" style="height:75px;font-size:9px">No imagery<br>available</div>` : '<div class="p1-sv-nodata" style="display:flex;height:75px;font-size:9px">N/A</div>'}
-        <div class="p1-aerial-label" style="font-size:7px;margin-top:2px">EAST <span style="color:rgba(0,229,255,0.4);font-size:6px">90&deg;/45&deg;</span></div>
+        ${eastUrl ? `<img src="${eastUrl}" alt="East View" style="height:75px;width:100%;object-fit:cover;border-radius:4px" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-sv-nodata" style="height:75px;font-size:9px">No imagery<br>available</div>` : '<div class="p1-sv-nodata" style="display:flex;height:75px;font-size:9px">N/A</div>'}
+        <div class="p1-aerial-label" style="font-size:7px;margin-top:2px">EAST <span style="color:rgba(0,229,255,0.4);font-size:6px">90&deg;</span></div>
       </div>
       <div class="p1-aerial-card" style="padding:4px">
-        ${southUrl ? `<img class="p1-sv-img" src="${southUrl}" alt="South" style="height:75px;width:100%;object-fit:cover;border-radius:4px" data-dir="S" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-sv-nodata" style="height:75px;font-size:9px">No imagery<br>available</div>` : '<div class="p1-sv-nodata" style="display:flex;height:75px;font-size:9px">N/A</div>'}
-        <div class="p1-aerial-label" style="font-size:7px;margin-top:2px">SOUTH <span style="color:rgba(0,229,255,0.4);font-size:6px">180&deg;/45&deg;</span></div>
+        ${southUrl ? `<img src="${southUrl}" alt="South View" style="height:75px;width:100%;object-fit:cover;border-radius:4px" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-sv-nodata" style="height:75px;font-size:9px">No imagery<br>available</div>` : '<div class="p1-sv-nodata" style="display:flex;height:75px;font-size:9px">N/A</div>'}
+        <div class="p1-aerial-label" style="font-size:7px;margin-top:2px">SOUTH <span style="color:rgba(0,229,255,0.4);font-size:6px">180&deg;</span></div>
       </div>
       <div class="p1-aerial-card" style="padding:4px">
-        ${westUrl ? `<img class="p1-sv-img" src="${westUrl}" alt="West" style="height:75px;width:100%;object-fit:cover;border-radius:4px" data-dir="W" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-sv-nodata" style="height:75px;font-size:9px">No imagery<br>available</div>` : '<div class="p1-sv-nodata" style="display:flex;height:75px;font-size:9px">N/A</div>'}
-        <div class="p1-aerial-label" style="font-size:7px;margin-top:2px">WEST <span style="color:rgba(0,229,255,0.4);font-size:6px">270&deg;/45&deg;</span></div>
+        ${westUrl ? `<img src="${westUrl}" alt="West View" style="height:75px;width:100%;object-fit:cover;border-radius:4px" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-sv-nodata" style="height:75px;font-size:9px">No imagery<br>available</div>` : '<div class="p1-sv-nodata" style="display:flex;height:75px;font-size:9px">N/A</div>'}
+        <div class="p1-aerial-label" style="font-size:7px;margin-top:2px">WEST <span style="color:rgba(0,229,255,0.4);font-size:6px">270&deg;</span></div>
       </div>
     </div>
   </div>
@@ -2126,15 +2178,19 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
     </div>
   </div>
 
-  <!-- Context + Close-up satellite views -->
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">
+  <!-- Context + Medium + Close-up satellite views -->
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;margin-bottom:6px">
     <div class="p1-aerial-card">
-      ${contextUrl ? `<img src="${contextUrl}" alt="Context" style="height:85px;width:100%;object-fit:cover;border-radius:4px" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-aerial-placeholder" style="display:none;height:85px">CONTEXT</div>` : '<div class="p1-aerial-placeholder" style="height:85px">CONTEXT</div>'}
-      <div class="p1-aerial-label">Property Context (Zoom ${report.metadata.provider === 'google_solar_datalayers' ? '19' : '18'})</div>
+      ${contextUrl ? `<img src="${contextUrl}" alt="Context" style="height:72px;width:100%;object-fit:cover;border-radius:4px" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-aerial-placeholder" style="display:none;height:72px">CONTEXT</div>` : '<div class="p1-aerial-placeholder" style="height:72px">CONTEXT</div>'}
+      <div class="p1-aerial-label" style="font-size:7px">Neighborhood</div>
     </div>
     <div class="p1-aerial-card">
-      ${closeupUrl ? `<img src="${closeupUrl}" alt="Close-up" style="height:85px;width:100%;object-fit:cover;border-radius:4px" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-aerial-placeholder" style="display:none;height:85px">CLOSE-UP</div>` : '<div class="p1-aerial-placeholder" style="height:85px">CLOSE-UP</div>'}
-      <div class="p1-aerial-label">Roof Close-Up (Max Zoom 22)</div>
+      ${mediumUrl ? `<img src="${mediumUrl}" alt="Medium" style="height:72px;width:100%;object-fit:cover;border-radius:4px" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-aerial-placeholder" style="display:none;height:72px">MEDIUM</div>` : '<div class="p1-aerial-placeholder" style="height:72px">MEDIUM</div>'}
+      <div class="p1-aerial-label" style="font-size:7px">Property</div>
+    </div>
+    <div class="p1-aerial-card">
+      ${closeupUrl ? `<img src="${closeupUrl}" alt="Close-up" style="height:72px;width:100%;object-fit:cover;border-radius:4px" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-aerial-placeholder" style="display:none;height:72px">CLOSE-UP</div>` : '<div class="p1-aerial-placeholder" style="height:72px">CLOSE-UP</div>'}
+      <div class="p1-aerial-label" style="font-size:7px">Max Detail (Z22)</div>
     </div>
   </div>
 
@@ -2315,6 +2371,141 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
 
   <div style="text-align:center;margin-top:10px;color:#5A7A96;font-size:7px">
     &copy; ${new Date().getFullYear()} Reuse Canada | Antigravity Gemini Professional Roof Measurement Reports | ${reportNum} | v${report.report_version || '3.0'}
+  </div>
+</div>
+
+<!-- ==================== PAGE 4: COMPLETE IMAGERY GALLERY ==================== -->
+<div class="page p4" style="background:linear-gradient(180deg,#F5F7FA 0%,#E8ECF1 100%);min-height:11in;max-width:8.5in;margin:0 auto;padding:24px 28px;font-family:'Inter',system-ui,sans-serif">
+  <!-- Header -->
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;background:linear-gradient(135deg,#1B2838,#2D4A63);color:#fff;padding:16px 20px;border-radius:10px;margin-bottom:14px">
+    <div>
+      <div style="font-size:20px;font-weight:900;text-transform:uppercase;letter-spacing:1px">IMAGERY GALLERY</div>
+      <div style="font-size:10px;color:#8ECAE6;margin-top:2px">Complete Satellite &amp; Street View Coverage &mdash; ${quality.imagery_quality || 'BASE'} Quality</div>
+    </div>
+    <div style="text-align:right;font-size:10px;color:#B0C4D8">
+      <div><b>${fullAddress}</b></div>
+      <div>${reportNum} &bull; ${reportDate}</div>
+      <div style="margin-top:2px;color:#8ECAE6">${prop.latitude?.toFixed(6) || ''}, ${prop.longitude?.toFixed(6) || ''}</div>
+    </div>
+  </div>
+
+  <!-- Row 1: Street View (front elevation) + Overhead with overlay -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+    <div style="background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.08)">
+      <div style="padding:8px 12px 4px;font-size:9px;font-weight:700;color:#1B2838;text-transform:uppercase;letter-spacing:1px">FRONT ELEVATION &mdash; STREET VIEW</div>
+      ${streetViewUrl
+        ? `<img src="${streetViewUrl}" alt="Street View" style="width:100%;height:180px;object-fit:cover" onerror="this.outerHTML='<div style=\\'width:100%;height:180px;display:flex;align-items:center;justify-content:center;background:#f0f4f8;color:#94a3b8;font-size:12px\\'>Street View not available for this location</div>'">`
+        : '<div style="width:100%;height:180px;display:flex;align-items:center;justify-content:center;background:#f0f4f8;color:#94a3b8;font-size:12px">Street View not available</div>'
+      }
+      <div style="padding:4px 12px 6px;font-size:8px;color:#64748b">Google Street View &bull; Front-facing curb appeal reference &bull; Scale 2x</div>
+    </div>
+    <div style="background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.08)">
+      <div style="padding:8px 12px 4px;font-size:9px;font-weight:700;color:#1B2838;text-transform:uppercase;letter-spacing:1px">OVERHEAD SATELLITE &mdash; MEASUREMENT VIEW</div>
+      <div style="position:relative">
+        ${overheadUrl ? `<img src="${overheadUrl}" alt="Overhead" style="width:100%;height:180px;object-fit:cover">` : '<div style="width:100%;height:180px;background:#e5e7eb;display:flex;align-items:center;justify-content:center;color:#9ca3af">No satellite imagery</div>'}
+        ${hasOverlay ? `<svg viewBox="0 0 640 640" xmlns="http://www.w3.org/2000/svg" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none">${overlaySVG}</svg>` : ''}
+      </div>
+      <div style="padding:4px 12px 6px;font-size:8px;color:#64748b">Zoom ${report.metadata.provider === 'google_solar_datalayers' ? '21' : '20'} &bull; 1280&times;1280px &bull; ${hasOverlay ? 'AI Overlay Active' : 'No AI Overlay'}</div>
+    </div>
+  </div>
+
+  <!-- Row 2: 4 Directional Aerial Views (offset satellite) -->
+  <div style="padding:6px 0 4px;font-size:9px;font-weight:700;color:#1B2838;text-transform:uppercase;letter-spacing:1.5px">DIRECTIONAL AERIAL VIEWS &mdash; 50m Offset from Roof Center</div>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px">
+    <div style="background:#fff;border-radius:6px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06)">
+      ${northUrl ? `<img src="${northUrl}" alt="North" style="width:100%;height:100px;object-fit:cover">` : '<div style="height:100px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:10px">N/A</div>'}
+      <div style="padding:4px 6px;font-size:8px;font-weight:700;color:#1B2838;text-align:center">NORTH <span style="color:#94a3b8;font-weight:400">0&deg;</span></div>
+    </div>
+    <div style="background:#fff;border-radius:6px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06)">
+      ${eastUrl ? `<img src="${eastUrl}" alt="East" style="width:100%;height:100px;object-fit:cover">` : '<div style="height:100px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:10px">N/A</div>'}
+      <div style="padding:4px 6px;font-size:8px;font-weight:700;color:#1B2838;text-align:center">EAST <span style="color:#94a3b8;font-weight:400">90&deg;</span></div>
+    </div>
+    <div style="background:#fff;border-radius:6px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06)">
+      ${southUrl ? `<img src="${southUrl}" alt="South" style="width:100%;height:100px;object-fit:cover">` : '<div style="height:100px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:10px">N/A</div>'}
+      <div style="padding:4px 6px;font-size:8px;font-weight:700;color:#1B2838;text-align:center">SOUTH <span style="color:#94a3b8;font-weight:400">180&deg;</span></div>
+    </div>
+    <div style="background:#fff;border-radius:6px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06)">
+      ${westUrl ? `<img src="${westUrl}" alt="West" style="width:100%;height:100px;object-fit:cover">` : '<div style="height:100px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:10px">N/A</div>'}
+      <div style="padding:4px 6px;font-size:8px;font-weight:700;color:#1B2838;text-align:center">WEST <span style="color:#94a3b8;font-weight:400">270&deg;</span></div>
+    </div>
+  </div>
+
+  <!-- Row 3: 4 Close-up Quadrant Views (max zoom) -->
+  <div style="padding:6px 0 4px;font-size:9px;font-weight:700;color:#1B2838;text-transform:uppercase;letter-spacing:1.5px">ROOF DETAIL QUADRANTS &mdash; Maximum Zoom (Z22)</div>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px">
+    <div style="background:#fff;border-radius:6px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06)">
+      ${closeupNwUrl ? `<img src="${closeupNwUrl}" alt="NW Detail" style="width:100%;height:100px;object-fit:cover">` : '<div style="height:100px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:10px">N/A</div>'}
+      <div style="padding:4px 6px;font-size:8px;font-weight:700;color:#1B2838;text-align:center">NW QUADRANT</div>
+    </div>
+    <div style="background:#fff;border-radius:6px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06)">
+      ${closeupNeUrl ? `<img src="${closeupNeUrl}" alt="NE Detail" style="width:100%;height:100px;object-fit:cover">` : '<div style="height:100px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:10px">N/A</div>'}
+      <div style="padding:4px 6px;font-size:8px;font-weight:700;color:#1B2838;text-align:center">NE QUADRANT</div>
+    </div>
+    <div style="background:#fff;border-radius:6px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06)">
+      ${closeupSwUrl ? `<img src="${closeupSwUrl}" alt="SW Detail" style="width:100%;height:100px;object-fit:cover">` : '<div style="height:100px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:10px">N/A</div>'}
+      <div style="padding:4px 6px;font-size:8px;font-weight:700;color:#1B2838;text-align:center">SW QUADRANT</div>
+    </div>
+    <div style="background:#fff;border-radius:6px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06)">
+      ${closeupSeUrl ? `<img src="${closeupSeUrl}" alt="SE Detail" style="width:100%;height:100px;object-fit:cover">` : '<div style="height:100px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:10px">N/A</div>'}
+      <div style="padding:4px 6px;font-size:8px;font-weight:700;color:#1B2838;text-align:center">SE QUADRANT</div>
+    </div>
+  </div>
+
+  <!-- Row 4: Multi-zoom comparison strip -->
+  <div style="padding:6px 0 4px;font-size:9px;font-weight:700;color:#1B2838;text-transform:uppercase;letter-spacing:1.5px">ZOOM PROGRESSION &mdash; Context → Property → Roof → Detail</div>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:10px">
+    <div style="background:#fff;border-radius:6px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06)">
+      ${contextUrl ? `<img src="${contextUrl}" alt="Context" style="width:100%;height:95px;object-fit:cover">` : '<div style="height:95px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:10px">N/A</div>'}
+      <div style="padding:3px 6px;font-size:7px;color:#64748b;text-align:center">Neighborhood</div>
+    </div>
+    <div style="background:#fff;border-radius:6px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06)">
+      ${mediumUrl ? `<img src="${mediumUrl}" alt="Medium" style="width:100%;height:95px;object-fit:cover">` : '<div style="height:95px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:10px">N/A</div>'}
+      <div style="padding:3px 6px;font-size:7px;color:#64748b;text-align:center">Property View</div>
+    </div>
+    <div style="background:#fff;border-radius:6px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06)">
+      ${overheadUrl ? `<img src="${overheadUrl}" alt="Overhead" style="width:100%;height:95px;object-fit:cover">` : '<div style="height:95px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:10px">N/A</div>'}
+      <div style="padding:3px 6px;font-size:7px;color:#64748b;text-align:center">Roof Overhead</div>
+    </div>
+    <div style="background:#fff;border-radius:6px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06)">
+      ${closeupUrl ? `<img src="${closeupUrl}" alt="Detail" style="width:100%;height:95px;object-fit:cover">` : '<div style="height:95px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:10px">N/A</div>'}
+      <div style="padding:3px 6px;font-size:7px;color:#64748b;text-align:center">Max Detail (Z22)</div>
+    </div>
+  </div>
+
+  <!-- Imagery metadata summary -->
+  <div style="background:#fff;border-radius:8px;padding:14px 18px;box-shadow:0 1px 3px rgba(0,0,0,0.05)">
+    <div style="font-size:10px;font-weight:800;color:#1B2838;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;padding-bottom:4px;border-bottom:2px solid #e5e7eb">IMAGERY METADATA</div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;font-size:10px">
+      <div>
+        <div style="color:#64748b;font-size:8px;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:2px">Provider</div>
+        <div style="font-weight:700;color:#1B2838">${providerLabel}</div>
+      </div>
+      <div>
+        <div style="color:#64748b;font-size:8px;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:2px">Imagery Quality</div>
+        <div style="font-weight:700;color:#1B2838">${quality.imagery_quality || 'BASE'}</div>
+      </div>
+      <div>
+        <div style="color:#64748b;font-size:8px;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:2px">Imagery Date</div>
+        <div style="font-weight:700;color:#1B2838">${quality.imagery_date || 'Unknown'}</div>
+      </div>
+      <div>
+        <div style="color:#64748b;font-size:8px;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:2px">Confidence</div>
+        <div style="font-weight:700;color:${confidenceColor}">${quality.confidence_score}%</div>
+      </div>
+      <div>
+        <div style="color:#64748b;font-size:8px;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:2px">Image Count</div>
+        <div style="font-weight:700;color:#1B2838">14 images (4 zoom levels)</div>
+      </div>
+      <div>
+        <div style="color:#64748b;font-size:8px;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:2px">Coordinates</div>
+        <div style="font-weight:700;color:#1B2838">${prop.latitude?.toFixed(6) || 'N/A'}, ${prop.longitude?.toFixed(6) || 'N/A'}</div>
+      </div>
+    </div>
+    ${quality.field_verification_recommended ? '<div style="margin-top:8px;padding:6px 10px;background:#FFF7ED;border:1px solid #FDBA74;border-radius:5px;font-size:9px;color:#9A3412"><b>⚠ Field Verification Recommended</b> &mdash; Imagery quality below HIGH. On-site measurement verification advised for critical projects.</div>' : ''}
+  </div>
+
+  <div style="text-align:center;margin-top:10px;color:#94a3b8;font-size:7px">
+    &copy; ${new Date().getFullYear()} Reuse Canada | Antigravity Gemini | ${reportNum} | v${report.report_version || '3.0'} | All imagery &copy; Google
   </div>
 </div>
 

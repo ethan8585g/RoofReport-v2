@@ -126,8 +126,10 @@ export interface DataLayersAnalysis {
   satelliteUrl: string
   /** High-res overhead satellite URL (640x640 square, optimal zoom for roof measurement) */
   satelliteOverheadUrl: string
-  /** Wider context satellite URL (zoom-1, 640x640) */
+  /** Wider context satellite URL (zoom-3, 640x640) */
   satelliteContextUrl: string
+  /** Medium-zoom bridge view (zoom-1, 640x640) */
+  satelliteMediumUrl: string
   // Performance
   durationMs: number
   provider: string
@@ -707,13 +709,16 @@ export async function executeRoofOrder(
   // Max zoom for building isolation: zoom 21 for residential (<500m²), zoom 20 for large commercial
   // scale=2 for high-res output (1280x1280 actual pixels)
   const footprintM2 = areaCalc.flatAreaSqft / 10.7639
-  const roofZoom = footprintM2 > 500 ? 20 : 21
-  const contextZoom = roofZoom - 2
+  const roofZoom = footprintM2 > 1000 ? 19 : footprintM2 > 500 ? 20 : 21
+  const contextZoom = roofZoom - 3
+  const mediumZoom = roofZoom - 1
 
   // Primary overhead satellite image (640x640 viewport, scale=2 for 1280x1280 actual pixels)
   const satelliteOverheadUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=${roofZoom}&size=640x640&scale=2&maptype=satellite&key=${geocodeKey}`
   // Wider context view
   const satelliteContextUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=${contextZoom}&size=640x640&scale=2&maptype=satellite&key=${geocodeKey}`
+  // Medium bridge view
+  const satelliteMediumUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=${mediumZoom}&size=640x640&scale=2&maptype=satellite&key=${geocodeKey}`
   // Legacy compatible URL (rectangular, used as fallback)
   const satelliteUrl = satelliteOverheadUrl
 
@@ -740,6 +745,7 @@ export async function executeRoofOrder(
     satelliteUrl,
     satelliteOverheadUrl,
     satelliteContextUrl,
+    satelliteMediumUrl,
     durationMs,
     provider: 'google_solar_datalayers'
   }
