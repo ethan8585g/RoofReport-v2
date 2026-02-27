@@ -13,7 +13,7 @@
 // The system tries Vertex AI first (production), falls back to Gemini REST (development).
 // ============================================================
 
-import type { AIMeasurementAnalysis, AIReportData } from '../types'
+import type { AIMeasurementAnalysis, AIReportData, PerimeterPoint } from '../types'
 import { getAccessToken, getProjectId } from './gcp-auth'
 
 // ============================================================
@@ -151,11 +151,11 @@ async function callGemini(opts: GeminiCallOptions): Promise<any> {
 
 // ============================================================
 // AI Roof Geometry Analysis — Gemini Vision
-// Enhanced prompt from Vertex Engine (roofstack-ai-2)
+// Enhanced prompt for precise roof perimeter tracing
 // Analyzes satellite imagery to extract:
-// - Facets (roof planes with pitch/azimuth)
-// - Lines (ridges, hips, valleys, eaves, rakes)
-// - Obstructions (chimneys, vents, skylights, HVAC)
+// - Perimeter polygon (outer boundary of the TARGET roof)
+// - Internal lines (ridges, hips, valleys)
+// - Obstructions (chimneys, vents, skylights)
 // ============================================================
 export async function analyzeRoofGeometry(
   satelliteImageUrl: string,
@@ -186,37 +186,76 @@ export async function analyzeRoofGeometry(
 
   const base64Image = await fetchImageAsBase64(satelliteImageUrl)
 
-  // Enhanced system prompt from Vertex Engine
-  const systemPrompt = `You are a Professional Geospatial AI specialized in Roof Geometry Extraction.
-Your goal is to analyze high-resolution aerial/satellite imagery and perform precise instance segmentation of roof structures.
+  // =============================================================================
+  // ENHANCED GEMINI PROMPT v3 — Precise roof perimeter tracing
+  // 
+  // Key improvements over v2:
+  // 1. Focus instruction: "the building whose roof is dead-center in the image"
+  // 2. Pixel coordinates 0–640 (matches the 640x640 satellite image exactly)
+  // 3. Perimeter polygon requested FIRST — the primary deliverable
+  // 4. Each perimeter edge is labelled (EAVE / RAKE / HIP / RIDGE)
+  // 5. Explicit guidance: trace every jog, bump, wing, and garage — not a rectangle
+  // 6. Internal structural lines are secondary (ridge, hip, valley)
+  // =============================================================================
+  const systemPrompt = `You are a precision roof measurement AI used by professional roofing contractors.
+Your ONLY task is to trace the EXACT roof outline of the one building whose roof is DEAD CENTER in this 640×640 pixel overhead satellite image.
 
-Your Task:
-1. Identify Facets: Outline every individual roof plane (facet). Each facet is a flat section of the roof.
-2. Identify Lines: Map all structural lines:
-   - RIDGE: The top horizontal line where two roof planes meet
-   - HIP: Sloped outer edges where two roof planes meet at an angle
-   - VALLEY: Sloped inner edges where two roof planes create a V shape
-   - EAVE: The lower horizontal edges of the roof (drip edge)
-   - RAKE: The sloped edges at gable ends
-3. Identify Obstructions: Locate chimneys, skylights, vents, and HVAC units on the roof.
-4. Calculate Attributes: Estimate the Pitch (in X/12 format like "6/12") and Azimuth (compass degrees) for each facet based on visual shadowing and perspective.
+==== COORDINATE SYSTEM ====
+• The image is exactly 640 × 640 pixels.
+• (0, 0) is the TOP-LEFT corner; (640, 640) is the BOTTOM-RIGHT corner.
+• All coordinates you return MUST be integers in the range 0–640.
 
-Output Constraints:
-- Return ONLY a valid JSON object matching the exact schema below.
-- Coordinates should be normalized (0-1000) based on the 640x640 image boundaries.
-- Be thorough — identify ALL visible facets, lines, and obstructions.
-- For residential homes, expect 2-8 facets typically.
-- Assign meaningful IDs like "f1", "f2" etc.
-- Pitch should be in "X/12" format (e.g., "6/12", "8/12")
-- Azimuth should be a string of compass degrees (e.g., "180", "270")`
+==== STEP 1 — OUTER PERIMETER (most important) ====
+Trace the COMPLETE outer boundary of the center building's roof.
+• Walk around the roof outline CLOCKWISE, starting from the top-left-most corner.
+• Place a vertex at EVERY corner, jog, bump, offset, wing junction, or direction change.
+  – Typical Alberta house: L-shape, T-shape, or rectangular + attached garage. The perimeter
+    must follow the ENTIRE structure including every bump-out, garage wing, front porch overhang.
+• Do NOT simplify to a rectangle. If the roof has 10 corners, return 10 points.
+• For each vertex, label "edge_to_next" — the type of the edge FROM this point TO the next:
+  – EAVE: a lower roof edge (horizontal-ish, where gutters go, typically the longest edges along the base of the roof plane)
+  – RAKE: a sloped gable edge that follows the roof pitch upward to the peak (diagonal, found on gable ends)
+  – HIP: a diagonal edge where two sloped planes meet (runs from ridge end down to a corner, NOT along the gutter line)
+  – RIDGE: a peak line along the very top where two slopes meet (only if part of the outer perimeter, which is rare)
 
-  const userPrompt = `Analyze this satellite/aerial roof image and extract complete roof geometry.
+==== STEP 2 — INTERNAL STRUCTURAL LINES ====
+Identify the major internal lines visible on the roof:
+• RIDGE: the topmost horizontal peak line where two slope planes meet.
+• HIP: lines running diagonally from the end of a ridge down to a perimeter corner.
+• VALLEY: inward-angled lines where two roof planes slope toward each other (often at wing junctions).
 
-Return JSON: {
-  "facets": [{ "id": "f1", "points": [{"x": 10, "y": 10}, ...], "pitch": "6/12", "azimuth": "180" }],
-  "lines": [{ "type": "RIDGE", "start": {"x":0,"y":0}, "end": {"x":10,"y":10} }],
-  "obstructions": [{ "type": "CHIMNEY", "boundingBox": { "min": {"x":0,"y":0}, "max": {"x":10,"y":10} } }]
+==== STEP 3 — ROOF FACETS ====
+Each roof plane/face visible from above is a facet.
+• Outline each facet as a polygon (its corners in pixel coords).
+• Estimate pitch as rise/run (e.g. "6/12") and compass azimuth in degrees.
+
+==== STEP 4 — OBSTRUCTIONS ====
+Mark visible obstructions: CHIMNEY, VENT, SKYLIGHT, HVAC (bounding box in pixels).
+
+==== CRITICAL RULES ====
+1. ONLY the CENTER building's roof. Ignore all neighbors, trees, driveways, fences.
+2. The perimeter must be TIGHT to the actual visible roof edge — not offset outward into the yard.
+3. If the building has an attached garage, covered porch, or bump-out, the perimeter INCLUDES those.
+4. Use INTEGERS for coordinates (no decimals).
+5. The perimeter array must form a CLOSED polygon (last point connects back to first).
+
+==== REQUIRED JSON OUTPUT ====
+{
+  "perimeter": [
+    {"x": <int 0-640>, "y": <int 0-640>, "edge_to_next": "EAVE"|"RAKE"|"HIP"|"RIDGE"}
+  ],
+  "facets": [
+    {"id": "f1", "points": [{"x": <int>, "y": <int>}, ...], "pitch": "6/12", "azimuth": "180"}
+  ],
+  "lines": [
+    {"type": "RIDGE"|"HIP"|"VALLEY", "start": {"x": <int>, "y": <int>}, "end": {"x": <int>, "y": <int>}}
+  ],
+  "obstructions": [
+    {"type": "CHIMNEY"|"VENT"|"SKYLIGHT"|"HVAC", "boundingBox": {"min": {"x": <int>, "y": <int>}, "max": {"x": <int>, "y": <int>}}}
+  ]
 }`
+
+  const userPrompt = `Analyze this 640×640 pixel overhead satellite image. The building in the DEAD CENTER of the image is the target. Trace its COMPLETE roof perimeter (every corner, wing, bump-out, garage) as a tight polygon in pixel coordinates. Then identify internal roof lines (ridges, hips, valleys), facets, and obstructions. Return ONLY the JSON.`
 
   const text = await callGemini({
     apiKey: env.apiKey,
@@ -244,14 +283,35 @@ Return JSON: {
     }
   })
 
-  console.log(`[Gemini] Raw response (first 500 chars): ${text.substring(0, 500)}`)
-  const analysis = JSON.parse(text) as AIMeasurementAnalysis
-  console.log(`[Gemini] Parsed: ${analysis.facets?.length || 0} facets, ${analysis.lines?.length || 0} lines, ${analysis.obstructions?.length || 0} obstructions`)
+  console.log(`[Gemini] Raw response (first 800 chars): ${text.substring(0, 800)}`)
+  const raw = JSON.parse(text) as any
 
-  // Validate basic structure
+  // Normalize: Gemini may return coordinates in 0-1000 if it ignores our instruction.
+  // Detect and rescale to 0-640 if needed.
+  const needsRescale = detectCoordScale(raw)
+  if (needsRescale) {
+    console.log('[Gemini] Detected 0-1000 coordinate scale — rescaling to 0-640')
+    rescaleAnalysis(raw, 640 / 1000)
+  }
+
+  const analysis = raw as AIMeasurementAnalysis
+
+  // Validate and ensure perimeter exists
+  if (!analysis.perimeter) analysis.perimeter = []
   if (!analysis.facets) analysis.facets = []
   if (!analysis.lines) analysis.lines = []
   if (!analysis.obstructions) analysis.obstructions = []
+
+  // If Gemini returned facets but no perimeter, derive perimeter from facet edges
+  if (analysis.perimeter.length === 0 && analysis.facets.length > 0) {
+    analysis.perimeter = derivePerimeterFromFacets(analysis.facets)
+    console.log(`[Gemini] Derived perimeter (${analysis.perimeter.length} points) from ${analysis.facets.length} facets`)
+  }
+
+  // Clamp all coordinates to 0-640
+  clampCoordinates(analysis)
+
+  console.log(`[Gemini] Final: ${analysis.perimeter.length} perimeter pts, ${analysis.facets.length} facets, ${analysis.lines.length} lines, ${analysis.obstructions.length} obstructions`)
 
   return analysis
 }
@@ -356,4 +416,141 @@ export async function quickMeasure(
   if (!analysis) throw new Error('AI analysis returned empty result')
 
   return { analysis, satelliteUrl }
+}
+
+// ============================================================
+// HELPER: Detect if Gemini returned 0-1000 coords instead of 0-640
+// ============================================================
+function detectCoordScale(raw: any): boolean {
+  const pts: number[] = []
+  if (raw.perimeter) {
+    for (const p of raw.perimeter) {
+      pts.push(p.x, p.y)
+    }
+  }
+  if (raw.facets) {
+    for (const f of raw.facets) {
+      if (f.points) {
+        for (const p of f.points) {
+          pts.push(p.x, p.y)
+        }
+      }
+    }
+  }
+  if (raw.lines) {
+    for (const l of raw.lines) {
+      pts.push(l.start.x, l.start.y, l.end.x, l.end.y)
+    }
+  }
+  if (pts.length === 0) return false
+  const maxCoord = Math.max(...pts)
+  // If any coordinate exceeds 700, Gemini likely used 0-1000 scale
+  return maxCoord > 700
+}
+
+// ============================================================
+// HELPER: Rescale all coordinates by a factor
+// ============================================================
+function rescaleAnalysis(raw: any, factor: number): void {
+  const scale = (p: any) => { p.x = Math.round(p.x * factor); p.y = Math.round(p.y * factor) }
+  if (raw.perimeter) raw.perimeter.forEach(scale)
+  if (raw.facets) raw.facets.forEach((f: any) => { if (f.points) f.points.forEach(scale) })
+  if (raw.lines) raw.lines.forEach((l: any) => { scale(l.start); scale(l.end) })
+  if (raw.obstructions) raw.obstructions.forEach((o: any) => { scale(o.boundingBox.min); scale(o.boundingBox.max) })
+}
+
+// ============================================================
+// HELPER: Clamp all coordinates to 0-640
+// ============================================================
+function clampCoordinates(analysis: AIMeasurementAnalysis): void {
+  const clamp = (v: number) => Math.max(0, Math.min(640, Math.round(v)))
+  const clampPt = (p: any) => { p.x = clamp(p.x); p.y = clamp(p.y) }
+  if (analysis.perimeter) analysis.perimeter.forEach(clampPt)
+  if (analysis.facets) analysis.facets.forEach(f => { if (f.points) f.points.forEach(clampPt) })
+  if (analysis.lines) analysis.lines.forEach(l => { clampPt(l.start); clampPt(l.end) })
+  if (analysis.obstructions) analysis.obstructions.forEach(o => { clampPt(o.boundingBox.min); clampPt(o.boundingBox.max) })
+}
+
+// ============================================================
+// HELPER: Derive perimeter from facets when Gemini doesn't return one
+// Uses outer-edge detection: edges that belong to only ONE facet
+// ============================================================
+function derivePerimeterFromFacets(facets: AIMeasurementAnalysis['facets']): PerimeterPoint[] {
+  // Build edge map
+  const edgeKey = (a: { x: number; y: number }, b: { x: number; y: number }) => {
+    const minX = Math.min(a.x, b.x), minY = Math.min(a.y, b.y)
+    const maxX = Math.max(a.x, b.x), maxY = Math.max(a.y, b.y)
+    return `${minX},${minY}-${maxX},${maxY}`
+  }
+
+  const edgeMap: Record<string, { start: { x: number; y: number }; end: { x: number; y: number }; count: number }> = {}
+
+  for (const facet of facets) {
+    if (!facet.points || facet.points.length < 3) continue
+    for (let j = 0; j < facet.points.length; j++) {
+      const a = facet.points[j]
+      const b = facet.points[(j + 1) % facet.points.length]
+      const key = edgeKey(a, b)
+      if (!edgeMap[key]) {
+        edgeMap[key] = { start: { ...a }, end: { ...b }, count: 0 }
+      }
+      edgeMap[key].count++
+    }
+  }
+
+  // Outer edges = count === 1
+  const outerEdges = Object.values(edgeMap).filter(e => e.count === 1)
+  if (outerEdges.length === 0) return []
+
+  // Chain outer edges into a polygon
+  const chain: PerimeterPoint[] = []
+  const used = new Set<number>()
+  
+  // Start with first edge
+  let current = outerEdges[0]
+  chain.push({
+    x: Math.round(current.start.x),
+    y: Math.round(current.start.y),
+    edge_to_next: classifyEdge(current.start, current.end)
+  })
+  used.add(0)
+
+  for (let iter = 0; iter < outerEdges.length; iter++) {
+    const lastPt = chain.length > 0 ? { x: chain[chain.length - 1].x, y: chain[chain.length - 1].y } : current.start
+    const target = pointsClose(lastPt, current.start) ? current.end : current.start
+    
+    // Find next edge that connects to target
+    let found = false
+    for (let i = 0; i < outerEdges.length; i++) {
+      if (used.has(i)) continue
+      const e = outerEdges[i]
+      if (pointsClose(target, e.start) || pointsClose(target, e.end)) {
+        chain.push({
+          x: Math.round(target.x),
+          y: Math.round(target.y),
+          edge_to_next: classifyEdge(target, pointsClose(target, e.start) ? e.end : e.start)
+        })
+        current = e
+        used.add(i)
+        found = true
+        break
+      }
+    }
+    if (!found) break
+  }
+
+  return chain
+}
+
+function pointsClose(a: { x: number; y: number }, b: { x: number; y: number }, threshold = 8): boolean {
+  return Math.abs(a.x - b.x) <= threshold && Math.abs(a.y - b.y) <= threshold
+}
+
+function classifyEdge(a: { x: number; y: number }, b: { x: number; y: number }): 'EAVE' | 'RAKE' | 'HIP' | 'RIDGE' {
+  const dx = Math.abs(b.x - a.x)
+  const dy = Math.abs(b.y - a.y)
+  // Mostly horizontal = EAVE, mostly vertical = RAKE, diagonal = HIP
+  if (dx > dy * 2) return 'EAVE'
+  if (dy > dx * 2) return 'RAKE'
+  return 'HIP'
 }

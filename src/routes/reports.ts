@@ -7,7 +7,7 @@ import {
 } from '../types'
 import type {
   RoofReport, RoofSegment, EdgeMeasurement, EdgeType, MaterialEstimate,
-  AIMeasurementAnalysis
+  AIMeasurementAnalysis, PerimeterPoint
 } from '../types'
 import { getAccessToken } from '../services/gcp-auth'
 import {
@@ -1899,6 +1899,9 @@ function generateProfessionalReportHTML(report: RoofReport): string {
   const hasOverlay = overlaySVG.length > 0
   const overlayLegend = hasOverlay ? generateOverlayLegend(es, (report.ai_geometry?.obstructions?.length || 0) > 0) : ''
 
+  // Generate perimeter side data for the measurements table
+  const perimeterData = generatePerimeterSideData(report.ai_geometry, es)
+
   // Computed values for enhanced dashboard
   const totalLinearFt = es.total_ridge_ft + es.total_hip_ft + es.total_valley_ft + es.total_eave_ft + es.total_rake_ft
   const areaMultiplierPct = ((report.area_multiplier - 1) * 100).toFixed(1)
@@ -2333,6 +2336,76 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
     </div>
   </div>
 
+  <!-- PERIMETER SIDE-BY-SIDE MEASUREMENTS TABLE -->
+  ${perimeterData.sides.length > 0 ? `
+  <div class="p3-box" style="grid-column:1/-1;margin-bottom:12px">
+    <div class="p3-box-title">ROOF PERIMETER &mdash; SIDE-BY-SIDE MEASUREMENTS (${perimeterData.sides.length} Sides)</div>
+    <table style="width:100%;border-collapse:collapse;font-size:10px">
+      <thead>
+        <tr style="border-bottom:2px solid #E0ECF5">
+          <th style="text-align:left;padding:4px 6px;color:#002F6C;font-weight:700">#</th>
+          <th style="text-align:left;padding:4px 6px;color:#002F6C;font-weight:700">Edge Type</th>
+          <th style="text-align:right;padding:4px 6px;color:#002F6C;font-weight:700">Length (ft &amp; in)</th>
+          <th style="text-align:right;padding:4px 6px;color:#002F6C;font-weight:700">Length (ft)</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${perimeterData.sides.map((side, i) => {
+          const edgeColorMap: Record<string, string> = { 'EAVE': '#FF9100', 'RAKE': '#D500F9', 'HIP': '#2979FF', 'RIDGE': '#FF1744' }
+          const color = edgeColorMap[side.type] || '#335C8A'
+          return `<tr style="border-bottom:1px solid #F0F4F8">
+            <td style="padding:3px 6px;color:#335C8A">${i + 1}</td>
+            <td style="padding:3px 6px"><span style="display:inline-block;width:10px;height:10px;background:${color};border-radius:2px;vertical-align:middle;margin-right:4px"></span><span style="color:${color};font-weight:600">${side.type}</span></td>
+            <td style="text-align:right;padding:3px 6px;font-weight:700;color:#002F6C">${side.ftInches}</td>
+            <td style="text-align:right;padding:3px 6px;color:#335C8A">${side.ft.toFixed(1)}</td>
+          </tr>`
+        }).join('')}
+      </tbody>
+      <tfoot>
+        <tr style="border-top:2px solid #002F6C;font-weight:800;color:#002F6C">
+          <td colspan="2" style="padding:5px 6px">TOTAL PERIMETER</td>
+          <td style="text-align:right;padding:5px 6px">${feetToFeetInches(perimeterData.totalFt)}</td>
+          <td style="text-align:right;padding:5px 6px">${perimeterData.totalFt.toFixed(1)} ft</td>
+        </tr>
+      </tfoot>
+    </table>
+    <!-- Perimeter breakdown by type -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid #E0ECF5">
+      <div style="text-align:center;padding:6px;background:#FFF3E0;border-radius:5px;border:1px solid #FFB74D">
+        <div style="font-size:7px;color:#E65100;font-weight:700;text-transform:uppercase;letter-spacing:0.5px">Eaves</div>
+        <div style="font-size:14px;font-weight:900;color:#E65100">${es.total_eave_ft}<span style="font-size:9px;color:#FF9800"> ft</span></div>
+      </div>
+      <div style="text-align:center;padding:6px;background:#F3E5F5;border-radius:5px;border:1px solid #CE93D8">
+        <div style="font-size:7px;color:#7B1FA2;font-weight:700;text-transform:uppercase;letter-spacing:0.5px">Rakes</div>
+        <div style="font-size:14px;font-weight:900;color:#7B1FA2">${es.total_rake_ft}<span style="font-size:9px;color:#AB47BC"> ft</span></div>
+      </div>
+      <div style="text-align:center;padding:6px;background:#FFEBEE;border-radius:5px;border:1px solid #EF9A9A">
+        <div style="font-size:7px;color:#C62828;font-weight:700;text-transform:uppercase;letter-spacing:0.5px">Ridge</div>
+        <div style="font-size:14px;font-weight:900;color:#C62828">${es.total_ridge_ft}<span style="font-size:9px;color:#E53935"> ft</span></div>
+      </div>
+      <div style="text-align:center;padding:6px;background:#E3F2FD;border-radius:5px;border:1px solid #90CAF9">
+        <div style="font-size:7px;color:#1565C0;font-weight:700;text-transform:uppercase;letter-spacing:0.5px">Hips</div>
+        <div style="font-size:14px;font-weight:900;color:#1565C0">${es.total_hip_ft}<span style="font-size:9px;color:#1E88E5"> ft</span></div>
+      </div>
+    </div>
+    <!-- Squares / Sq Ft summary row -->
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:6px">
+      <div style="text-align:center;padding:8px;background:#002F6C;border-radius:6px">
+        <div style="font-size:7px;color:#8ECAE6;font-weight:700;text-transform:uppercase;letter-spacing:0.5px">Square Footage</div>
+        <div style="font-size:16px;font-weight:900;color:#fff">${report.total_true_area_sqft.toLocaleString()}<span style="font-size:10px;color:#8ECAE6"> ft&sup2;</span></div>
+      </div>
+      <div style="text-align:center;padding:8px;background:#002F6C;border-radius:6px">
+        <div style="font-size:7px;color:#8ECAE6;font-weight:700;text-transform:uppercase;letter-spacing:0.5px">Net Squares</div>
+        <div style="font-size:16px;font-weight:900;color:#fff">${netSquares}</div>
+      </div>
+      <div style="text-align:center;padding:8px;background:linear-gradient(135deg,#0091EA,#002F6C);border-radius:6px">
+        <div style="font-size:7px;color:#B3E5FC;font-weight:700;text-transform:uppercase;letter-spacing:0.5px">Gross Squares (+${mat.waste_pct}%)</div>
+        <div style="font-size:16px;font-weight:900;color:#fff">${Math.round(grossSquares)}</div>
+      </div>
+    </div>
+  </div>
+  ` : ''}
+
   <!-- Roof Diagram (SVG) -->
   <div class="p3-diagram">
     <div class="p3-diagram-title">ROOF DIAGRAM &mdash; PLAN VIEW</div>
@@ -2533,6 +2606,67 @@ document.querySelectorAll('.p1-sv-img').forEach(function(img) {
 }
 
 // ============================================================
+// HELPER: Generate perimeter side data for HTML table
+// Distributes measured footage across AI-detected perimeter sides
+// ============================================================
+interface PerimeterSide {
+  type: string
+  ft: number
+  ftInches: string
+}
+function generatePerimeterSideData(
+  aiGeometry: AIMeasurementAnalysis | null | undefined,
+  edgeSummary: { total_ridge_ft: number; total_hip_ft: number; total_valley_ft: number; total_eave_ft: number; total_rake_ft: number }
+): { sides: PerimeterSide[]; totalFt: number } {
+  if (!aiGeometry?.perimeter || aiGeometry.perimeter.length < 3) {
+    return { sides: [], totalFt: 0 }
+  }
+
+  const perim = aiGeometry.perimeter
+  const n = perim.length
+
+  const measuredByType = smartEdgeFootage(edgeSummary)
+
+  // Compute pixel length per side
+  interface SideInfo { pxLen: number; type: string }
+  const sideInfos: SideInfo[] = []
+  for (let i = 0; i < n; i++) {
+    const p1 = perim[i]
+    const p2 = perim[(i + 1) % n]
+    const pxLen = Math.sqrt((p2.x - p1.x) ** 2 + (p2.y - p1.y) ** 2)
+    sideInfos.push({ pxLen, type: p1.edge_to_next || 'EAVE' })
+  }
+
+  // Group by type
+  const byType: Record<string, number[]> = {}
+  sideInfos.forEach((s, i) => {
+    if (!byType[s.type]) byType[s.type] = []
+    byType[s.type].push(i)
+  })
+
+  // Assign footage proportionally
+  const sideFt = new Array(n).fill(0)
+  for (const [type, indices] of Object.entries(byType)) {
+    const totalPxLen = indices.reduce((s, i) => s + sideInfos[i].pxLen, 0)
+    const totalFt = measuredByType[type] || 0
+    if (totalPxLen > 0 && totalFt > 0) {
+      indices.forEach(i => {
+        sideFt[i] = (sideInfos[i].pxLen / totalPxLen) * totalFt
+      })
+    }
+  }
+
+  const sides: PerimeterSide[] = sideInfos.map((s, i) => ({
+    type: s.type,
+    ft: Math.round(sideFt[i] * 10) / 10,
+    ftInches: feetToFeetInches(sideFt[i])
+  }))
+
+  const totalFt = Math.round(sides.reduce((s, side) => s + side.ft, 0) * 10) / 10
+  return { sides, totalFt }
+}
+
+// ============================================================
 // HELPER: Convert decimal feet to feet & inches string (e.g. 32.5 → "32' 6\"")
 // ============================================================
 function feetToFeetInches(ft: number): string {
@@ -2564,11 +2698,55 @@ function lineAngleDeg(x1: number, y1: number, x2: number, y2: number): number {
 }
 
 // ============================================================
-// Generate SVG overlay for satellite image — MEASURED ROOF DIAGRAM
-// Shows perimeter outline, internal corner-to-corner lines, 
-// length in feet & inches on each piece, and facet square footage.
-// Only overlays on the specific requested property roof.
-// Coordinates from Gemini Vision AI are normalized 0-1000, mapped to 640x640 viewBox.
+// HELPER: Smart edge footage redistribution
+// When Gemini labels a perimeter edge as RAKE but Solar API has 0 rake footage,
+// we redistribute from related types (HIP for RAKE, and vice versa).
+// This handles the common case where a hip roof has no gable/rake ends but
+// Gemini's vision labels diagonal perimeter edges as RAKE instead of HIP.
+// ============================================================
+function smartEdgeFootage(
+  edgeSummary: { total_ridge_ft: number; total_hip_ft: number; total_valley_ft: number; total_eave_ft: number; total_rake_ft: number }
+): Record<string, number> {
+  const result: Record<string, number> = {
+    'EAVE': edgeSummary.total_eave_ft,
+    'RAKE': edgeSummary.total_rake_ft,
+    'HIP': edgeSummary.total_hip_ft,
+    'RIDGE': edgeSummary.total_ridge_ft,
+    'VALLEY': edgeSummary.total_valley_ft,
+  }
+
+  // If RAKE has 0 footage but HIP has footage, assign HIP footage to RAKE as well
+  // (Gemini often labels hip-roof diagonal edges as RAKE)
+  if (result['RAKE'] === 0 && result['HIP'] > 0) {
+    result['RAKE'] = result['HIP']
+  }
+  // If HIP has 0 footage but RAKE has footage, assign RAKE footage to HIP
+  else if (result['HIP'] === 0 && result['RAKE'] > 0) {
+    result['HIP'] = result['RAKE']
+  }
+
+  // Total perimeter footage fallback: if both EAVE and RAKE/HIP are 0, use total linear
+  const totalPerim = result['EAVE'] + result['RAKE'] + result['HIP']
+  if (totalPerim === 0) {
+    const totalLinear = edgeSummary.total_eave_ft + edgeSummary.total_rake_ft + edgeSummary.total_hip_ft + edgeSummary.total_ridge_ft + edgeSummary.total_valley_ft
+    result['EAVE'] = totalLinear * 0.5
+    result['RAKE'] = totalLinear * 0.25
+    result['HIP'] = totalLinear * 0.25
+  }
+
+  return result
+}
+
+// ============================================================
+// Generate SVG overlay for satellite image — MEASURED ROOF DIAGRAM v3
+//
+// Major changes from v2:
+// 1. Uses the perimeter polygon directly from Gemini (not convex hull)
+// 2. Each perimeter side is drawn and labeled with ft/in measurement
+// 3. Perimeter sides are color-coded by edge type (EAVE/RAKE/HIP/RIDGE)
+// 4. Pixel coordinates are already 0-640 (no S scaling needed)
+// 5. Internal lines (ridge/hip/valley) rendered on top
+// 6. Facet areas labeled at centroid
 // ============================================================
 function generateSatelliteOverlaySVG(
   aiGeometry: AIMeasurementAnalysis | null | undefined,
@@ -2577,15 +2755,17 @@ function generateSatelliteOverlaySVG(
   edgeSummary: { total_ridge_ft: number; total_hip_ft: number; total_valley_ft: number; total_eave_ft: number; total_rake_ft: number },
   colors: string[]
 ): string {
-  if (!aiGeometry || !aiGeometry.facets || aiGeometry.facets.length === 0) {
-    return '' // No overlay — plain satellite image
-  }
+  if (!aiGeometry) return ''
+  
+  const hasPerimeter = aiGeometry.perimeter && aiGeometry.perimeter.length >= 3
+  const hasFacets = aiGeometry.facets && aiGeometry.facets.length > 0
 
-  const S = 640 / 1000 // Convert 0-1000 normalized coords to 640px viewBox
+  if (!hasPerimeter && !hasFacets) return ''
+
   let svg = ''
 
   // ====================================================================
-  // 0. DEFS — drop shadow filter + arrow markers
+  // 0. DEFS — filters, markers
   // ====================================================================
   svg += `<defs>
     <filter id="lblShadow" x="-4" y="-4" width="108%" height="108%">
@@ -2594,272 +2774,256 @@ function generateSatelliteOverlaySVG(
     <filter id="lineShadow" x="-2%" y="-2%" width="104%" height="104%">
       <feDropShadow dx="0" dy="0" stdDeviation="1.5" flood-color="#000" flood-opacity="0.5"/>
     </filter>
+    <filter id="perimGlow" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="0" stdDeviation="3" flood-color="#00E5FF" flood-opacity="0.6"/>
+    </filter>
   </defs>`
 
   // ====================================================================
-  // 1. COMPUTE THE OUTER PERIMETER — merge all facet points into a convex hull
-  //    This represents the roof's outside perimeter boundary
+  // COLOR MAP for edge types
   // ====================================================================
-  const allFacetPoints: { x: number; y: number }[] = []
-  aiGeometry.facets.forEach(facet => {
-    if (facet.points) {
-      facet.points.forEach(p => allFacetPoints.push({ x: p.x * S, y: p.y * S }))
-    }
-  })
-
-  // Compute convex hull for outer perimeter
-  function convexHull(pts: { x: number; y: number }[]): { x: number; y: number }[] {
-    if (pts.length < 3) return pts
-    const sorted = [...pts].sort((a, b) => a.x - b.x || a.y - b.y)
-    const cross = (O: { x: number; y: number }, A: { x: number; y: number }, B: { x: number; y: number }) =>
-      (A.x - O.x) * (B.y - O.y) - (A.y - O.y) * (B.x - O.x)
-    const lower: { x: number; y: number }[] = []
-    for (const p of sorted) {
-      while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop()
-      lower.push(p)
-    }
-    const upper: { x: number; y: number }[] = []
-    for (let i = sorted.length - 1; i >= 0; i--) {
-      const p = sorted[i]
-      while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop()
-      upper.push(p)
-    }
-    upper.pop(); lower.pop()
-    return lower.concat(upper)
+  const edgeColors: Record<string, string> = {
+    'RIDGE': '#FF1744',   // Bold red
+    'HIP':   '#2979FF',   // Blue
+    'VALLEY':'#00E676',   // Green
+    'EAVE':  '#FF9100',   // Orange
+    'RAKE':  '#D500F9',   // Purple
+  }
+  const edgeWidths: Record<string, number> = {
+    'RIDGE': 3.5, 'HIP': 3, 'VALLEY': 3, 'EAVE': 2.5, 'RAKE': 2.5,
   }
 
-  const hull = convexHull(allFacetPoints)
+  // ====================================================================
+  // 1. DRAW FACET FILLS — semi-transparent colored fills per section
+  // ====================================================================
+  if (hasFacets) {
+    aiGeometry.facets.forEach((facet, i) => {
+      if (!facet.points || facet.points.length < 3) return
+      const color = colors[i % colors.length]
+      const points = facet.points.map(p => `${p.x},${p.y}`).join(' ')
+      svg += `<polygon points="${points}" fill="${color}" fill-opacity="0.15" stroke="none"/>`
+    })
+  }
 
   // ====================================================================
-  // 1b. DERIVE STRUCTURAL LINES FROM FACET EDGES (when Gemini returns facets but no lines)
-  //     An edge shared by two facets = internal line (RIDGE/HIP/VALLEY)
-  //     An edge belonging to only one facet = perimeter (EAVE/RAKE)
+  // 2. DRAW PERIMETER — the primary feature
+  //    Each side is color-coded by edge type and labeled with measurement
   // ====================================================================
-  if ((!aiGeometry.lines || aiGeometry.lines.length === 0) && aiGeometry.facets.length > 0) {
-    // Build edge map: key = "x1,y1-x2,y2" (sorted), value = [facet indices]
-    const edgeKey = (a: { x: number; y: number }, b: { x: number; y: number }) => {
-      const k1 = `${Math.min(a.x, b.x)},${Math.min(a.y, b.y)}-${Math.max(a.x, b.x)},${Math.max(a.y, b.y)}`
-      return k1
+  const perimeterLabels: { x: number; y: number; angle: number; label: string; color: string; type: string }[] = []
+
+  if (hasPerimeter) {
+    const perim = aiGeometry.perimeter
+    const n = perim.length
+
+    // Calculate total measured footage grouped by edge type (from edgeSummary)
+    // Smart redistribution handles RAKE↔HIP mismatch
+    const measuredByType = smartEdgeFootage(edgeSummary)
+
+    // Compute pixel length per perimeter side, grouped by type
+    interface PerimSide { i: number; px1: number; py1: number; px2: number; py2: number; pxLen: number; type: string }
+    const sides: PerimSide[] = []
+    for (let i = 0; i < n; i++) {
+      const p1 = perim[i]
+      const p2 = perim[(i + 1) % n]
+      const pxLen = Math.sqrt((p2.x - p1.x) ** 2 + (p2.y - p1.y) ** 2)
+      sides.push({ i, px1: p1.x, py1: p1.y, px2: p2.x, py2: p2.y, pxLen, type: p1.edge_to_next || 'EAVE' })
     }
-    const edgeMap: Record<string, { start: { x: number; y: number }; end: { x: number; y: number }; facets: number[] }> = {}
 
-    aiGeometry.facets.forEach((facet, fi) => {
+    // Group sides by type for proportional distribution
+    const sidesByType: Record<string, PerimSide[]> = {}
+    sides.forEach(s => {
+      if (!sidesByType[s.type]) sidesByType[s.type] = []
+      sidesByType[s.type].push(s)
+    })
+
+    // Assign real footage to each side
+    const sideFt: number[] = new Array(n).fill(0)
+    for (const [type, typeSides] of Object.entries(sidesByType)) {
+      const totalPxLen = typeSides.reduce((s, sd) => s + sd.pxLen, 0)
+      const totalFt = measuredByType[type] || 0
+      if (totalPxLen > 0 && totalFt > 0) {
+        typeSides.forEach(sd => {
+          sideFt[sd.i] = (sd.pxLen / totalPxLen) * totalFt
+        })
+      }
+    }
+
+    // Draw the perimeter — fill first, then each side individually
+    const perimPoints = perim.map(p => `${p.x},${p.y}`).join(' ')
+    // Subtle fill for the full roof outline
+    svg += `<polygon points="${perimPoints}" fill="rgba(0,229,255,0.06)" stroke="none"/>`
+    // Thin white outline (background)
+    svg += `<polygon points="${perimPoints}" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="1.5" filter="url(#perimGlow)"/>`
+
+    // Draw each perimeter side with its edge-type color
+    for (let i = 0; i < n; i++) {
+      const s = sides[i]
+      const color = edgeColors[s.type] || '#00E5FF'
+      const width = edgeWidths[s.type] || 2.5
+
+      // Background shadow line
+      svg += `<line x1="${s.px1}" y1="${s.py1}" x2="${s.px2}" y2="${s.py2}" stroke="#000" stroke-width="${width + 2}" stroke-linecap="round" opacity="0.3" filter="url(#lineShadow)"/>`
+      // Main colored line
+      svg += `<line x1="${s.px1}" y1="${s.py1}" x2="${s.px2}" y2="${s.py2}" stroke="${color}" stroke-width="${width}" stroke-linecap="round" opacity="0.95"/>`
+      // Corner dots
+      svg += `<circle cx="${s.px1}" cy="${s.py1}" r="3.5" fill="${color}" stroke="#fff" stroke-width="1.2" opacity="0.95"/>`
+
+      // Label if we have footage
+      if (sideFt[i] > 0.5) {
+        const midX = (s.px1 + s.px2) / 2
+        const midY = (s.py1 + s.py2) / 2
+        const angle = lineAngleDeg(s.px1, s.py1, s.px2, s.py2)
+        perimeterLabels.push({
+          x: midX, y: midY, angle,
+          label: feetToFeetInches(sideFt[i]),
+          color, type: s.type
+        })
+      }
+    }
+    // Last corner dot
+    const last = perim[0]
+    svg += `<circle cx="${last.x}" cy="${last.y}" r="3.5" fill="${edgeColors[perim[n - 1].edge_to_next] || '#00E5FF'}" stroke="#fff" stroke-width="1.2" opacity="0.95"/>`
+  }
+
+  // ====================================================================
+  // 3. DRAW INTERNAL STRUCTURAL LINES (ridge, hip, valley)
+  //    These are separate from the perimeter — they cross the interior
+  // ====================================================================
+  // If no explicit lines but we have facets, derive internal lines from shared facet edges
+  if ((!aiGeometry.lines || aiGeometry.lines.length === 0) && hasFacets) {
+    const edgeKey = (a: { x: number; y: number }, b: { x: number; y: number }) => {
+      return `${Math.min(a.x, b.x)},${Math.min(a.y, b.y)}-${Math.max(a.x, b.x)},${Math.max(a.y, b.y)}`
+    }
+    const edgeMap: Record<string, { start: { x: number; y: number }; end: { x: number; y: number }; count: number }> = {}
+    aiGeometry.facets.forEach(facet => {
       if (!facet.points || facet.points.length < 3) return
       for (let j = 0; j < facet.points.length; j++) {
         const a = facet.points[j]
         const b = facet.points[(j + 1) % facet.points.length]
         const key = edgeKey(a, b)
-        if (!edgeMap[key]) {
-          edgeMap[key] = { start: a, end: b, facets: [] }
-        }
-        edgeMap[key].facets.push(fi)
+        if (!edgeMap[key]) edgeMap[key] = { start: a, end: b, count: 0 }
+        edgeMap[key].count++
       }
     })
-
-    // Classify derived edges
     const derivedLines: typeof aiGeometry.lines = []
     for (const [, edge] of Object.entries(edgeMap)) {
-      if (edge.facets.length >= 2) {
-        // Shared edge = internal (RIDGE for top horizontal, HIP for diagonal)
+      if (edge.count >= 2) {
         const dx = Math.abs(edge.end.x - edge.start.x)
         const dy = Math.abs(edge.end.y - edge.start.y)
-        const lineType = dy < dx * 0.3 ? 'RIDGE' : (dx < dy * 0.3 ? 'HIP' : 'HIP')
-        derivedLines.push({
-          type: lineType as any,
-          start: edge.start,
-          end: edge.end
-        })
-      } else {
-        // Single-facet edge = perimeter (EAVE for roughly horizontal, RAKE for roughly vertical)
-        const dx = Math.abs(edge.end.x - edge.start.x)
-        const dy = Math.abs(edge.end.y - edge.start.y)
-        const lineType = dx > dy ? 'EAVE' : 'RAKE'
-        derivedLines.push({
-          type: lineType as any,
-          start: edge.start,
-          end: edge.end
-        })
+        const lineType = dy < dx * 0.3 ? 'RIDGE' : 'HIP'
+        derivedLines.push({ type: lineType as any, start: edge.start, end: edge.end })
       }
     }
-
-    // Assign derived lines back
     aiGeometry.lines = derivedLines
-    console.log(`[SVG Overlay] Derived ${derivedLines.length} lines from ${aiGeometry.facets.length} facet edges`)
   }
 
-  // ====================================================================
-  // 2. DRAW PERIMETER — bold outer boundary (only on the roof, NOT surrounding land)
-  // ====================================================================
-  if (hull.length >= 3) {
-    const perimeterPoints = hull.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')
-    // Bold white perimeter with cyan glow
-    svg += `<polygon points="${perimeterPoints}" fill="none" stroke="#00E5FF" stroke-width="3" stroke-opacity="0.9" filter="url(#lineShadow)"/>`
-    svg += `<polygon points="${perimeterPoints}" fill="none" stroke="#fff" stroke-width="1.2" stroke-opacity="0.5" stroke-dasharray="none"/>`
-  }
-
-  // ====================================================================
-  // 3. DRAW FACET FILLS — light semi-transparent colored fills per facet section
-  // ====================================================================
-  aiGeometry.facets.forEach((facet, i) => {
-    if (!facet.points || facet.points.length < 3) return
-    const color = colors[i % colors.length]
-    const points = facet.points.map(p => `${(p.x * S).toFixed(1)},${(p.y * S).toFixed(1)}`).join(' ')
-    svg += `<polygon points="${points}" fill="${color}" fill-opacity="0.18" stroke="none"/>`
-  })
-
-  // ====================================================================
-  // 4. MATCH AI LINES TO MEASURED EDGES — distribute real footage onto AI line positions
-  //    Group AI lines by type, group edges by type, distribute proportionally by pixel length
-  // ====================================================================
-  const lineColors: Record<string, string> = {
-    'RIDGE': '#FF1744',  // Bold red
-    'HIP': '#2979FF',    // Blue
-    'VALLEY': '#00E676', // Green
-    'EAVE': '#FF9100',   // Orange
-    'RAKE': '#D500F9',   // Purple
-  }
-  const lineWidths: Record<string, number> = {
-    'RIDGE': 3.5,
-    'HIP': 3,
-    'VALLEY': 3,
-    'EAVE': 2.5,
-    'RAKE': 2.5,
-  }
-
-  // Group AI lines by type
-  const aiLinesByType: Record<string, typeof aiGeometry.lines> = {}
-  aiGeometry.lines.forEach(l => {
-    if (!aiLinesByType[l.type]) aiLinesByType[l.type] = []
-    aiLinesByType[l.type].push(l)
-  })
-
-  // Group measured edges by type (uppercase mapping)
-  const edgesByType: Record<string, EdgeMeasurement[]> = {}
-  edges.forEach(e => {
-    const key = e.edge_type.toUpperCase()
-    if (!edgesByType[key]) edgesByType[key] = []
-    edgesByType[key].push(e)
-  })
-
-  // For each AI line, compute its pixel length, then distribute the total measured footage
-  // proportionally across all lines of that type based on pixel length ratio
-  const lineLabels: { x: number; y: number; angle: number; label: string; color: string; type: string }[] = []
-
-  for (const [type, aiLines] of Object.entries(aiLinesByType)) {
-    const color = lineColors[type] || '#FFFFFF'
-    const width = lineWidths[type] || 2
-
-    // Total pixel length for this type
-    const pixLengths = aiLines.map(l => {
-      const px1 = l.start.x * S, py1 = l.start.y * S
-      const px2 = l.end.x * S, py2 = l.end.y * S
-      return pixelDistance(px1, py1, px2, py2)
+  // Group internal lines by type and distribute measured footage
+  const internalLineLabels: typeof perimeterLabels = []
+  if (aiGeometry.lines && aiGeometry.lines.length > 0) {
+    const linesByType: Record<string, typeof aiGeometry.lines> = {}
+    aiGeometry.lines.forEach(l => {
+      if (!linesByType[l.type]) linesByType[l.type] = []
+      linesByType[l.type].push(l)
     })
-    const totalPxLen = pixLengths.reduce((a, b) => a + b, 0)
 
-    // Total measured footage for this edge type
-    const measuredEdges = edgesByType[type] || []
-    const totalMeasuredFt = measuredEdges.reduce((s, e) => s + e.true_length_ft, 0)
+    // Internal edge types only (not EAVE/RAKE which are perimeter)
+    const internalMeasured: Record<string, number> = {
+      'RIDGE': edgeSummary.total_ridge_ft,
+      'HIP': edgeSummary.total_hip_ft,
+      'VALLEY': edgeSummary.total_valley_ft,
+    }
 
-    aiLines.forEach((line, idx) => {
-      const px1 = line.start.x * S, py1 = line.start.y * S
-      const px2 = line.end.x * S, py2 = line.end.y * S
+    for (const [type, lines] of Object.entries(linesByType)) {
+      // Skip EAVE/RAKE in internal lines — those are on the perimeter
+      if (type === 'EAVE' || type === 'RAKE') continue
 
-      // ---- Draw the line ----
+      const color = edgeColors[type] || '#FFFFFF'
+      const width = edgeWidths[type] || 2
       const dashAttr = type === 'VALLEY' ? ' stroke-dasharray="8,4"' : ''
-      // Outer glow line for contrast
-      svg += `<line x1="${px1.toFixed(1)}" y1="${py1.toFixed(1)}" x2="${px2.toFixed(1)}" y2="${py2.toFixed(1)}" stroke="#000" stroke-width="${width + 2}" stroke-linecap="round" opacity="0.3" filter="url(#lineShadow)"/>`
-      // Main colored line
-      svg += `<line x1="${px1.toFixed(1)}" y1="${py1.toFixed(1)}" x2="${px2.toFixed(1)}" y2="${py2.toFixed(1)}" stroke="${color}" stroke-width="${width}"${dashAttr} stroke-linecap="round" opacity="0.95"/>`
 
-      // ---- Draw endpoint dots (corner markers) ----
-      svg += `<circle cx="${px1.toFixed(1)}" cy="${py1.toFixed(1)}" r="3" fill="${color}" stroke="#fff" stroke-width="1" opacity="0.9"/>`
-      svg += `<circle cx="${px2.toFixed(1)}" cy="${py2.toFixed(1)}" r="3" fill="${color}" stroke="#fff" stroke-width="1" opacity="0.9"/>`
+      const pixLens = lines.map(l => Math.sqrt((l.end.x - l.start.x) ** 2 + (l.end.y - l.start.y) ** 2))
+      const totalPxLen = pixLens.reduce((a, b) => a + b, 0)
+      const totalFt = internalMeasured[type] || 0
 
-      // ---- Calculate measurement for this line ----
-      let lineFt = 0
-      if (totalPxLen > 0 && totalMeasuredFt > 0) {
-        // Distribute proportionally by pixel length
-        lineFt = (pixLengths[idx] / totalPxLen) * totalMeasuredFt
-      } else if (measuredEdges[idx]) {
-        lineFt = measuredEdges[idx].true_length_ft
-      }
+      lines.forEach((line, idx) => {
+        const { x: x1, y: y1 } = line.start
+        const { x: x2, y: y2 } = line.end
 
-      if (lineFt > 0) {
-        const midX = (px1 + px2) / 2
-        const midY = (px1 + py2) / 2  // intentional: slight offset for readability
-        const trueMidY = (py1 + py2) / 2
-        const angle = lineAngleDeg(px1, py1, px2, py2)
-        const label = feetToFeetInches(lineFt)
+        // Shadow
+        svg += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#000" stroke-width="${width + 2}" stroke-linecap="round" opacity="0.3" filter="url(#lineShadow)"/>`
+        // Main line
+        svg += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${color}" stroke-width="${width}"${dashAttr} stroke-linecap="round" opacity="0.95"/>`
+        // Endpoints
+        svg += `<circle cx="${x1}" cy="${y1}" r="3" fill="${color}" stroke="#fff" stroke-width="1" opacity="0.9"/>`
+        svg += `<circle cx="${x2}" cy="${y2}" r="3" fill="${color}" stroke="#fff" stroke-width="1" opacity="0.9"/>`
 
-        lineLabels.push({
-          x: (px1 + px2) / 2,
-          y: trueMidY,
-          angle,
-          label,
-          color,
-          type
-        })
-      }
-    })
+        // Label
+        let lineFt = 0
+        if (totalPxLen > 0 && totalFt > 0) {
+          lineFt = (pixLens[idx] / totalPxLen) * totalFt
+        }
+        if (lineFt > 0.5) {
+          const midX = (x1 + x2) / 2
+          const midY = (y1 + y2) / 2
+          const angle = lineAngleDeg(x1, y1, x2, y2)
+          internalLineLabels.push({ x: midX, y: midY, angle, label: feetToFeetInches(lineFt), color, type })
+        }
+      })
+    }
   }
 
   // ====================================================================
-  // 5. DRAW MEASUREMENT LABELS ON EACH LINE — feet & inches in a pill background
+  // 4. DRAW MEASUREMENT LABELS — perimeter + internal lines
   // ====================================================================
-  lineLabels.forEach(({ x, y, angle, label, color, type }) => {
-    const labelLen = label.length
-    const pillW = Math.max(labelLen * 6.5 + 10, 42)
-    const pillH = 16
-    // Offset the label slightly ABOVE the line so it doesn't cover the line itself
-    const offsetY = -10
+  const allLabels = [...perimeterLabels, ...internalLineLabels]
+  allLabels.forEach(({ x, y, angle, label, color }) => {
+    const pillW = Math.max(label.length * 7 + 12, 46)
+    const pillH = 17
+    const offsetY = -11
 
     svg += `<g transform="translate(${x.toFixed(1)},${y.toFixed(1)}) rotate(${angle.toFixed(1)})">`
-    // Background pill
-    svg += `<rect x="${(-pillW / 2).toFixed(1)}" y="${(offsetY - pillH / 2).toFixed(1)}" width="${pillW.toFixed(1)}" height="${pillH}" rx="3" fill="rgba(0,0,0,0.82)" stroke="${color}" stroke-width="0.8"/>`
-    // Measurement text
+    svg += `<rect x="${(-pillW / 2).toFixed(1)}" y="${(offsetY - pillH / 2).toFixed(1)}" width="${pillW.toFixed(1)}" height="${pillH}" rx="3" fill="rgba(0,0,0,0.85)" stroke="${color}" stroke-width="0.8"/>`
     svg += `<text x="0" y="${(offsetY + 4).toFixed(1)}" text-anchor="middle" font-size="10" font-weight="800" fill="#fff" font-family="Inter,system-ui,sans-serif" letter-spacing="0.3">${label}</text>`
     svg += `</g>`
   })
 
   // ====================================================================
-  // 6. DRAW FACET SQUARE FOOTAGE LABELS — centered on each roof section
+  // 5. DRAW FACET AREA LABELS — centered on each roof section
   // ====================================================================
-  aiGeometry.facets.forEach((facet, i) => {
-    if (!facet.points || facet.points.length < 3) return
-    const seg = segments[i] || segments[0]
-    if (!seg) return
+  if (hasFacets) {
+    aiGeometry.facets.forEach((facet, i) => {
+      if (!facet.points || facet.points.length < 3) return
+      const seg = segments[i] || segments[0]
+      if (!seg) return
 
-    const color = colors[i % colors.length]
+      const color = colors[i % colors.length]
+      const cx = facet.points.reduce((s, p) => s + p.x, 0) / facet.points.length
+      const cy = facet.points.reduce((s, p) => s + p.y, 0) / facet.points.length
 
-    // Centroid of facet polygon
-    const cx = facet.points.reduce((s, p) => s + p.x, 0) / facet.points.length * S
-    const cy = facet.points.reduce((s, p) => s + p.y, 0) / facet.points.length * S
+      const areaText = `${seg.true_area_sqft.toLocaleString()} ft²`
+      const pillW = Math.max(areaText.length * 7 + 14, 80)
+      const pillH = 30
 
-    // Area label pill
-    const areaText = `${seg.true_area_sqft.toLocaleString()} sq ft`
-    const pillW = Math.max(areaText.length * 6.5 + 14, 80)
-    const pillH = 30
-
-    svg += `<rect x="${(cx - pillW / 2).toFixed(1)}" y="${(cy - pillH / 2).toFixed(1)}" width="${pillW.toFixed(1)}" height="${pillH}" rx="5" fill="rgba(0,0,0,0.78)" stroke="${color}" stroke-width="1.2"/>`
-    // Area in large bold white text
-    svg += `<text x="${cx.toFixed(1)}" y="${(cy - 1).toFixed(1)}" text-anchor="middle" font-size="12" font-weight="900" fill="#fff" font-family="Inter,system-ui,sans-serif">${seg.true_area_sqft.toLocaleString()} ft²</text>`
-    // Pitch below in accent color
-    svg += `<text x="${cx.toFixed(1)}" y="${(cy + 12).toFixed(1)}" text-anchor="middle" font-size="9" font-weight="600" fill="${color}" font-family="Inter,system-ui,sans-serif">${seg.pitch_ratio}</text>`
-  })
+      svg += `<rect x="${(cx - pillW / 2).toFixed(1)}" y="${(cy - pillH / 2).toFixed(1)}" width="${pillW.toFixed(1)}" height="${pillH}" rx="5" fill="rgba(0,0,0,0.8)" stroke="${color}" stroke-width="1.2"/>`
+      svg += `<text x="${cx.toFixed(1)}" y="${(cy - 1).toFixed(1)}" text-anchor="middle" font-size="12" font-weight="900" fill="#fff" font-family="Inter,system-ui,sans-serif">${seg.true_area_sqft.toLocaleString()} ft²</text>`
+      svg += `<text x="${cx.toFixed(1)}" y="${(cy + 12).toFixed(1)}" text-anchor="middle" font-size="9" font-weight="600" fill="${color}" font-family="Inter,system-ui,sans-serif">${seg.pitch_ratio}</text>`
+    })
+  }
 
   // ====================================================================
-  // 7. DRAW OBSTRUCTION MARKERS — chimney, vent, skylight, HVAC
+  // 6. DRAW OBSTRUCTION MARKERS
   // ====================================================================
-  aiGeometry.obstructions.forEach((obs) => {
-    const cx = (obs.boundingBox.min.x + obs.boundingBox.max.x) / 2 * S
-    const cy = (obs.boundingBox.min.y + obs.boundingBox.max.y) / 2 * S
-    const w = (obs.boundingBox.max.x - obs.boundingBox.min.x) * S
-    const h = (obs.boundingBox.max.y - obs.boundingBox.min.y) * S
+  if (aiGeometry.obstructions) {
+    aiGeometry.obstructions.forEach((obs) => {
+      const cx = (obs.boundingBox.min.x + obs.boundingBox.max.x) / 2
+      const cy = (obs.boundingBox.min.y + obs.boundingBox.max.y) / 2
+      const w = Math.abs(obs.boundingBox.max.x - obs.boundingBox.min.x)
+      const h = Math.abs(obs.boundingBox.max.y - obs.boundingBox.min.y)
 
-    svg += `<rect x="${(cx - w / 2).toFixed(1)}" y="${(cy - h / 2).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="none" stroke="#FFD600" stroke-width="2" stroke-dasharray="4,2" rx="3"/>`
-    svg += `<text x="${cx.toFixed(1)}" y="${(cy + 3).toFixed(1)}" text-anchor="middle" font-size="8" font-weight="700" fill="#FFD600" font-family="Inter,system-ui,sans-serif">${obs.type}</text>`
-  })
+      svg += `<rect x="${(cx - w / 2).toFixed(1)}" y="${(cy - h / 2).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="none" stroke="#FFD600" stroke-width="2" stroke-dasharray="4,2" rx="3"/>`
+      svg += `<text x="${cx.toFixed(1)}" y="${(cy + 3).toFixed(1)}" text-anchor="middle" font-size="8" font-weight="700" fill="#FFD600" font-family="Inter,system-ui,sans-serif">${obs.type}</text>`
+    })
+  }
 
   return svg
 }

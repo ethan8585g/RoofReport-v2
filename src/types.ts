@@ -67,10 +67,10 @@ export type Bindings = {
 // AI MEASUREMENT ENGINE TYPES — Gemini Vision roof geometry
 // ============================================================
 
-/** A point in normalized coordinates (0-1000 based on image boundaries) */
+/** A point in pixel coordinates on the 640x640 satellite image */
 export interface MeasurementPoint {
-  x: number  // 0-1000
-  y: number  // 0-1000
+  x: number  // 0-640 pixel coordinate
+  y: number  // 0-640 pixel coordinate
 }
 
 /** A roof facet (plane) detected by AI vision analysis */
@@ -97,8 +97,18 @@ export interface AIObstruction {
   }
 }
 
+/** A perimeter vertex — forms the closed outer boundary of the roof */
+export interface PerimeterPoint {
+  x: number  // 0-640 pixel coordinate
+  y: number  // 0-640 pixel coordinate
+  /** Edge type from THIS point to the NEXT point in the array */
+  edge_to_next: 'EAVE' | 'RAKE' | 'HIP' | 'RIDGE'
+}
+
 /** Complete AI measurement analysis result */
 export interface AIMeasurementAnalysis {
+  /** Outer perimeter polygon of the roof — closed, clockwise, with edge labels per side */
+  perimeter: PerimeterPoint[]
   facets: AIRoofFacet[]
   lines: AIRoofLine[]
   obstructions: AIObstruction[]
