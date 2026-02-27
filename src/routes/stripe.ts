@@ -487,20 +487,26 @@ stripeRoutes.post('/use-credit', async (c) => {
     const newOrderId = result.meta.last_row_id as number
 
     // ============================================================
-    // GEOCODE ADDRESS — Convert to lat/lng for Solar API
+    // COORDINATES — Use provided lat/lng or fallback to geocoding
     // ============================================================
     const mapsKey = c.env.GOOGLE_MAPS_API_KEY || c.env.GOOGLE_SOLAR_API_KEY
-    let geocodedLat: number | null = null
-    let geocodedLng: number | null = null
+    let geocodedLat: number | null = latitude ? parseFloat(latitude) : null
+    let geocodedLng: number | null = longitude ? parseFloat(longitude) : null
 
-    if (mapsKey) {
+    // If lat/lng provided directly, use them (skip geocoding)
+    if (geocodedLat && geocodedLng && !isNaN(geocodedLat) && !isNaN(geocodedLng)) {
+      console.log(`[Use-Credit] Using provided coordinates: ${geocodedLat}, ${geocodedLng}`)
+      await c.env.DB.prepare(
+        'UPDATE orders SET latitude = ?, longitude = ?, updated_at = datetime("now") WHERE id = ?'
+      ).bind(geocodedLat, geocodedLng, newOrderId).run()
+    } else if (mapsKey && property_address) {
+      // Fallback: geocode from address
       const fullAddress = [property_address, property_city, property_province, property_postal_code]
         .filter(Boolean).join(', ')
       const geo = await geocodeAddress(fullAddress, mapsKey)
       if (geo) {
         geocodedLat = geo.lat
         geocodedLng = geo.lng
-        // Update order with coordinates
         await c.env.DB.prepare(
           'UPDATE orders SET latitude = ?, longitude = ?, updated_at = datetime("now") WHERE id = ?'
         ).bind(geocodedLat, geocodedLng, newOrderId).run()
