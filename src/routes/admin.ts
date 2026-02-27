@@ -475,16 +475,16 @@ adminRoutes.post('/init-db', async (c) => {
       )
     `).run()
 
-    // Seed default credit packages — Pricing: Single=$10, 5=$7/ea, 10=$6/ea, 25=$5.50/ea, 50=$5/ea, 100=$4.75/ea
+    // Seed default credit packages — Pricing: Single=$10, 10=$9/ea, 25=$8/ea, 50=$7/ea, 100=$6/ea
+    // Subscription: $49.99/month for CRM & business tools access
     await c.env.DB.prepare(`DELETE FROM credit_packages`).run()
     await c.env.DB.prepare(`
       INSERT INTO credit_packages (id, name, description, credits, price_cents, sort_order)
       VALUES
-        (1, '5 Pack', '5 reports — $7.00/ea — Save 30%', 5, 3500, 1),
-        (2, '10 Pack', '10 reports — $6.00/ea — Save 40%', 10, 6000, 2),
-        (3, '25 Pack', '25 reports — $5.50/ea — Save 45%', 25, 13750, 3),
-        (4, '50 Pack', '50 reports — $5.00/ea — Save 50%', 50, 25000, 4),
-        (5, '100 Pack', '100 reports — best value — $4.75/ea — Save 52%', 100, 47500, 5)
+        (1, '10 Pack', '10 reports — $9.00/ea — Save 10%', 10, 9000, 1),
+        (2, '25 Pack', '25 reports — $8.00/ea — Save 20%', 25, 20000, 2),
+        (3, '50 Pack', '50 reports — $7.00/ea — Save 30%', 50, 35000, 3),
+        (4, '100 Pack', '100 reports — best value — $6.00/ea — Save 40%', 100, 60000, 4)
     `).run()
 
     // Customer portal indexes

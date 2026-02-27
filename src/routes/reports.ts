@@ -2679,6 +2679,46 @@ function feetToFeetInches(ft: number): string {
 }
 
 // ============================================================
+// HELPER: Convert lat/lng to pixel coordinates on a Google Maps Static image
+// Uses Web Mercator projection (EPSG:3857):
+//   Step 1: lat/lng → world coordinates (256×256 tile at zoom 0)
+//   Step 2: world → pixel at the given zoom level
+//   Step 3: pixel → image coordinates centered on the map
+//
+// This enables precise overlay of Solar API data points (lat/lng)
+// onto the 640×640 satellite image in the HTML report.
+// ============================================================
+function latLngToPixels(
+  lat: number, lng: number,
+  centerLat: number, centerLng: number,
+  zoom: number,
+  imgWidth: number = 640, imgHeight: number = 640
+): { x: number; y: number } {
+  // Step 1: Convert to world coordinates on a 256-pixel base tile
+  const toWorld = (latDeg: number, lngDeg: number) => {
+    const latRad = (latDeg * Math.PI) / 180
+    return {
+      wx: ((lngDeg + 180) / 360) * 256,
+      wy: (0.5 - Math.log(Math.tan(Math.PI / 4 + latRad / 2)) / (2 * Math.PI)) * 256
+    }
+  }
+
+  // Step 2: Scale world to pixel at zoom level
+  const scale = Math.pow(2, zoom)
+  const center = toWorld(centerLat, centerLng)
+  const point = toWorld(lat, lng)
+
+  const centerPx = { x: center.wx * scale, y: center.wy * scale }
+  const pointPx = { x: point.wx * scale, y: point.wy * scale }
+
+  // Step 3: Map to image coordinates (center of image = center of map)
+  return {
+    x: imgWidth / 2 + (pointPx.x - centerPx.x),
+    y: imgHeight / 2 + (pointPx.y - centerPx.y)
+  }
+}
+
+// ============================================================
 // HELPER: Calculate the pixel distance of an AI line on the 640px canvas
 // ============================================================
 function pixelDistance(x1: number, y1: number, x2: number, y2: number): number {
