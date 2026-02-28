@@ -422,6 +422,7 @@ function buildDataLayersReport(orderId: any, order: any, dlResult: any, dlSegmen
       ...generateEnhancedImagery(dlResult.latitude, dlResult.longitude, mapsApiKey, dlResult.area.flatAreaSqft),
       dsm_url: dlResult.dsmUrl,
       mask_url: dlResult.maskUrl,
+      rgb_aerial_url: dlResult.rgbAerialDataUrl || '',
     },
     quality: {
       imagery_quality: dlResult.imageryQuality as any,
@@ -1882,8 +1883,15 @@ function generateProfessionalReportHTML(report: RoofReport): string {
   const nailLbs = Math.ceil(grossSquares * 1.5)
   const cementTubes = Math.max(2, Math.ceil(grossSquares / 15))
   const satelliteUrl = report.imagery?.satellite_url || ''
-  // Primary overhead satellite image — zoomed out to show full roof + context
+  // Solar API RGB aerial image — dramatically higher resolution than Static Maps
+  // This is actual aerial photography at 0.1-0.5m/pixel from Google's data collection
+  const rgbAerialUrl = (report.imagery as any)?.rgb_aerial_url || ''
+  // Primary overhead: ALWAYS use Static Maps for AI overlay alignment
+  // The AI overlay SVG coordinates are traced on the Static Maps image, so the
+  // background must match. RGB aerial has a different projection/crop.
   const overheadUrl = report.imagery?.satellite_overhead_url || satelliteUrl
+  // Whether we have the high-res aerial (used for separate aerial reference image)
+  const hasRgbAerial = rgbAerialUrl.length > 0
   // Medium bridge view (zoom-1 from overhead)
   const mediumUrl = report.imagery?.satellite_medium_url || (satelliteUrl ? satelliteUrl.replace(/zoom=\d+/, (m: string) => { const z = parseInt(m.replace('zoom=','')); return `zoom=${z-1}` }) : '')
   // Wider context view (zoom-3 from overhead)
@@ -2107,10 +2115,20 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
         <div class="p1-sat-container" style="height:280px">
           ${overheadUrl ? `<img src="${overheadUrl}" alt="Overhead Satellite" style="width:100%;height:280px;object-fit:cover" onerror="this.style.display='none'">` : '<div class="p5-img-placeholder" style="height:280px">Satellite imagery loading...</div>'}
           ${hasOverlay ? `<svg viewBox="0 0 640 640" xmlns="http://www.w3.org/2000/svg" style="position:absolute;top:0;left:0;width:100%;height:280px;pointer-events:none">${overlaySVG}</svg>` : ''}
-          <div class="p1-sat-label">${hasOverlay ? 'MEASURED ROOF OVERLAY' : 'OVERHEAD SATELLITE'} &mdash; Full Roof View</div>
+          <div class="p1-sat-label">${hasOverlay ? 'MEASURED ROOF OVERLAY' : hasRgbAerial ? 'HIGH-RES AERIAL IMAGE' : 'OVERHEAD SATELLITE'} &mdash; Full Roof View</div>
         </div>
         <!-- Overlay legend -->
         ${overlayLegend ? `<div style="margin-top:6px">${overlayLegend}</div>` : ''}
+        ${hasRgbAerial ? `
+        <!-- High-res RGB aerial image from Google Solar API -->
+        <div style="margin-top:8px;border:2px solid #0ea5e9;border-radius:6px;overflow:hidden;position:relative">
+          <img src="${rgbAerialUrl}" alt="High-Resolution Aerial" style="width:100%;height:200px;object-fit:cover;display:block" onerror="this.parentElement.style.display='none'">
+          <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,0.7));padding:6px 10px 4px;color:#fff;font-size:9px;font-weight:600;letter-spacing:0.5px">
+            <span style="background:#0ea5e9;padding:1px 6px;border-radius:2px;font-size:8px;margin-right:6px">SOLAR API</span>
+            HIGH-RESOLUTION AERIAL IMAGERY &mdash; ${report.metadata?.building_insights_quality || 'HIGH'} Quality
+          </div>
+        </div>
+        ` : ''}
       </div>
       <!-- Squares callout -->
       <div>
@@ -2515,17 +2533,31 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
         <div class="p5-img-sub">Google Street View &bull; Front-facing curb appeal reference</div>
       </div>
       <div class="p5-img-card">
-        <div class="p5-img-label">Overhead Satellite &mdash; Measurement View</div>
+        <div class="p5-img-label">Satellite Overlay &mdash; Measurement View</div>
         <div style="position:relative">
           ${overheadUrl ? `<img src="${overheadUrl}" alt="Overhead" style="height:180px">` : '<div class="p5-img-placeholder" style="height:180px">No satellite imagery</div>'}
           ${hasOverlay ? `<svg viewBox="0 0 640 640" xmlns="http://www.w3.org/2000/svg" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none">${overlaySVG}</svg>` : ''}
         </div>
-        <div class="p5-img-sub">Full Roof View &bull; 1280&times;1280px &bull; ${hasOverlay ? 'AI Overlay Active' : 'No Overlay'}</div>
+        <div class="p5-img-sub">Static Maps with AI Overlay &bull; ${hasOverlay ? 'Measurement Lines Active' : 'No Overlay'}</div>
       </div>
     </div>
 
+    ${hasRgbAerial ? `
+    <!-- Row 1b: High-Resolution Solar API Aerial -->
+    <div style="margin:8px 0;border:2px solid #0ea5e9;border-radius:6px;overflow:hidden;position:relative">
+      <img src="${rgbAerialUrl}" alt="High-Resolution Solar API Aerial" style="width:100%;height:220px;object-fit:cover;display:block" onerror="this.parentElement.style.display='none'">
+      <div style="position:absolute;top:6px;left:6px;display:flex;gap:4px">
+        <span style="background:#0ea5e9;color:#fff;padding:2px 8px;border-radius:3px;font-size:8px;font-weight:700;letter-spacing:0.5px">SOLAR API AERIAL</span>
+        <span style="background:rgba(0,0,0,0.6);color:#fff;padding:2px 8px;border-radius:3px;font-size:8px;font-weight:600">${report.metadata?.building_insights_quality || 'HIGH'} Quality &bull; 0.1-0.5m/px</span>
+      </div>
+      <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,43,92,0.85));padding:8px 12px 6px;color:#fff;font-size:9px">
+        <strong>Google Solar API High-Resolution Aerial Imagery</strong> &mdash; Captured by low-altitude aircraft for maximum roof detail. Significantly higher resolution than standard satellite map tiles.
+      </div>
+    </div>
+    ` : ''}
+
     <!-- Row 2: Directional Aerial Views -->
-    <div style="font-size:10px;font-weight:700;color:#002B5C;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Directional Aerial Views &mdash; 25m Offset</div>
+    <div style="font-size:10px;font-weight:700;color:#002B5C;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Directional Aerial Views &mdash; 20m Offset</div>
     <div class="p5-grid-4">
       <div class="p5-img-card">
         ${northUrl ? `<img src="${northUrl}" alt="North" style="height:95px">` : '<div class="p5-img-placeholder" style="height:95px">N/A</div>'}

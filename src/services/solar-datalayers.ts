@@ -123,6 +123,8 @@ export interface DataLayersAnalysis {
   dsmUrl: string
   maskUrl: string
   rgbUrl: string
+  /** Base64 data URL of the Solar API's aerial RGB image (0.1-0.5m/pixel resolution) */
+  rgbAerialDataUrl: string
   satelliteUrl: string
   /** High-res overhead satellite URL (640x640 square, optimal zoom for roof measurement) */
   satelliteOverheadUrl: string
@@ -263,6 +265,108 @@ export async function downloadGeoTIFF(
     bounds,
     pixelSizeMeters
   }
+}
+
+// ============================================================
+// RGB GEOTIFF → BASE64 PNG — Convert Solar API aerial imagery
+// to an embeddable data URL for high-res roof report images.
+//
+// The Solar API rgbUrl returns a 3-band (R, G, B) GeoTIFF
+// at 0.1m/pixel (HIGH) or 0.25m/pixel (MEDIUM/BASE).
+// This is actual aerial photography — far superior to Google
+// Static Maps satellite tiles which are just web map tiles.
+//
+// We convert to BMP format (simple, no compression library needed)
+// and then base64 encode for embedding in HTML reports.
+// ============================================================
+async function convertRgbGeoTiffToDataUrl(
+  rgbUrl: string,
+  apiKey: string
+): Promise<string> {
+  const fetchUrl = rgbUrl.includes('solar.googleapis.com')
+    ? `${rgbUrl}&key=${apiKey}`
+    : rgbUrl
+
+  const response = await fetch(fetchUrl)
+  if (!response.ok) {
+    throw new Error(`RGB GeoTIFF download failed (${response.status})`)
+  }
+
+  const arrayBuffer = await response.arrayBuffer()
+  console.log(`[RGB] Downloaded ${(arrayBuffer.byteLength / 1024).toFixed(1)} KB`)
+
+  const tiff = await geotiff.fromArrayBuffer(arrayBuffer)
+  const image = await tiff.getImage()
+  const rasters = await image.readRasters()
+  const width = image.getWidth()
+  const height = image.getHeight()
+
+  console.log(`[RGB] Image: ${width}x${height}, ${rasters.length} bands`)
+
+  // Guard: skip conversion if image is too large (> 500x500 pixels = 750KB BMP)
+  // This prevents memory issues in Cloudflare Workers
+  if (width > 500 || height > 500) {
+    console.warn(`[RGB] Image too large for data URL embedding (${width}x${height}), skipping`)
+    return ''
+  }
+
+  if (rasters.length < 3) {
+    throw new Error(`RGB GeoTIFF has only ${rasters.length} bands, expected 3+`)
+  }
+
+  const r = rasters[0] as any
+  const g = rasters[1] as any
+  const b = rasters[2] as any
+
+  // Build BMP file in memory (uncompressed 24-bit bitmap)
+  // BMP is simple to construct without any encoding library
+  const rowSize = Math.ceil(width * 3 / 4) * 4  // rows must be padded to 4 bytes
+  const pixelDataSize = rowSize * height
+  const fileSize = 54 + pixelDataSize  // 14 byte header + 40 byte info header + pixel data
+
+  const bmp = new Uint8Array(fileSize)
+  const view = new DataView(bmp.buffer)
+
+  // BMP File Header (14 bytes)
+  bmp[0] = 0x42; bmp[1] = 0x4D  // 'BM'
+  view.setUint32(2, fileSize, true)
+  view.setUint32(10, 54, true)  // pixel data offset
+
+  // BMP Info Header (40 bytes)
+  view.setUint32(14, 40, true)  // header size
+  view.setInt32(18, width, true)
+  view.setInt32(22, height, true)
+  view.setUint16(26, 1, true)   // planes
+  view.setUint16(28, 24, true)  // bits per pixel
+  view.setUint32(34, pixelDataSize, true)
+
+  // Pixel data (BMP is bottom-up, BGR order)
+  for (let y = 0; y < height; y++) {
+    const bmpRow = height - 1 - y  // BMP rows are bottom-to-top
+    for (let x = 0; x < width; x++) {
+      const srcIdx = y * width + x
+      const dstIdx = 54 + bmpRow * rowSize + x * 3
+      // Clamp values to 0-255 (GeoTIFF might have values outside range)
+      bmp[dstIdx]     = Math.max(0, Math.min(255, Math.round(b[srcIdx])))  // Blue
+      bmp[dstIdx + 1] = Math.max(0, Math.min(255, Math.round(g[srcIdx])))  // Green
+      bmp[dstIdx + 2] = Math.max(0, Math.min(255, Math.round(r[srcIdx])))  // Red
+    }
+  }
+
+  // Convert to base64 data URL
+  // Cloudflare Workers supports btoa() for base64 encoding
+  let binary = ''
+  const chunkSize = 8192
+  for (let i = 0; i < bmp.length; i += chunkSize) {
+    const chunk = bmp.subarray(i, Math.min(i + chunkSize, bmp.length))
+    binary += String.fromCharCode(...chunk)
+  }
+
+  const base64 = btoa(binary)
+  const dataUrl = `data:image/bmp;base64,${base64}`
+
+  console.log(`[RGB] Converted to BMP data URL: ${width}x${height}, ${(dataUrl.length / 1024).toFixed(0)} KB`)
+  return dataUrl
 }
 
 // ============================================================
@@ -608,6 +712,20 @@ export async function executeRoofOrder(
     }
   }
 
+  // Step 3b: Download RGB aerial GeoTIFF (Solar API's actual aerial/satellite photo)
+  // This is dramatically higher resolution than Google Static Maps tiles
+  // HIGH quality = 0.1m/pixel aerial photo, MEDIUM/BASE = 0.25m/pixel
+  let rgbAerialDataUrl = ''
+  if (dataLayers.rgbUrl) {
+    try {
+      console.log(`[Pipeline] Step 3b: Downloading RGB aerial GeoTIFF for high-res roof image`)
+      rgbAerialDataUrl = await convertRgbGeoTiffToDataUrl(dataLayers.rgbUrl, apiKey)
+      console.log(`[Pipeline] RGB aerial image converted: ${(rgbAerialDataUrl.length / 1024).toFixed(0)} KB data URL`)
+    } catch (rgbErr: any) {
+      console.warn(`[Pipeline] RGB aerial download failed (non-critical): ${rgbErr.message}`)
+    }
+  }
+
   // Step 4: Analyze DSM with mask
   console.log(`[Pipeline] Step 4: Analyzing DSM (${dsmGeoTiff.width}x${dsmGeoTiff.height} pixels)`)
   const dsmAnalysis = analyzeDSM(dsmGeoTiff, maskGeoTiff)
@@ -706,10 +824,12 @@ export async function executeRoofOrder(
     ? `${imgDate.year}-${String(imgDate.month).padStart(2, '0')}-${String(imgDate.day).padStart(2, '0')}`
     : 'unknown'
 
-  // Max zoom for building isolation: zoom 21 for residential (<500m²), zoom 20 for large commercial
+  // Zoom levels for satellite imagery — zoomed out enough to see ENTIRE roof + context
+  // Reduced by 1 notch from original values to ensure full roof visibility:
+  //   Large (>1000 m²): 17, Medium (500-1000): 18, Small (<500): 19
   // scale=2 for high-res output (1280x1280 actual pixels)
   const footprintM2 = areaCalc.flatAreaSqft / 10.7639
-  const roofZoom = footprintM2 > 1000 ? 19 : footprintM2 > 500 ? 20 : 21
+  const roofZoom = footprintM2 > 1000 ? 17 : footprintM2 > 500 ? 18 : 19
   const contextZoom = roofZoom - 3
   const mediumZoom = roofZoom - 1
 
@@ -742,6 +862,7 @@ export async function executeRoofOrder(
     dsmUrl: dataLayers.dsmUrl,
     maskUrl: dataLayers.maskUrl || '',
     rgbUrl: dataLayers.rgbUrl || '',
+    rgbAerialDataUrl: rgbAerialDataUrl,
     satelliteUrl,
     satelliteOverheadUrl,
     satelliteContextUrl,
