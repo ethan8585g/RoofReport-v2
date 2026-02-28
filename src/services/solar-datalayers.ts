@@ -712,19 +712,12 @@ export async function executeRoofOrder(
     }
   }
 
-  // Step 3b: Download RGB aerial GeoTIFF (Solar API's actual aerial/satellite photo)
-  // This is dramatically higher resolution than Google Static Maps tiles
-  // HIGH quality = 0.1m/pixel aerial photo, MEDIUM/BASE = 0.25m/pixel
+  // Step 3b: RGB aerial GeoTIFF — DISABLED for now.
+  // The Solar API rgbUrl covers the entire 50m radius area (100m × 100m), not cropped to the roof.
+  // Without building-footprint-aware cropping, the raw GeoTIFF shows too much neighborhood
+  // context and looks worse than a properly zoomed Google Static Maps image.
+  // TODO: Future enhancement — use mask GeoTIFF to crop RGB to building footprint only.
   let rgbAerialDataUrl = ''
-  if (dataLayers.rgbUrl) {
-    try {
-      console.log(`[Pipeline] Step 3b: Downloading RGB aerial GeoTIFF for high-res roof image`)
-      rgbAerialDataUrl = await convertRgbGeoTiffToDataUrl(dataLayers.rgbUrl, apiKey)
-      console.log(`[Pipeline] RGB aerial image converted: ${(rgbAerialDataUrl.length / 1024).toFixed(0)} KB data URL`)
-    } catch (rgbErr: any) {
-      console.warn(`[Pipeline] RGB aerial download failed (non-critical): ${rgbErr.message}`)
-    }
-  }
 
   // Step 4: Analyze DSM with mask
   console.log(`[Pipeline] Step 4: Analyzing DSM (${dsmGeoTiff.width}x${dsmGeoTiff.height} pixels)`)
@@ -824,12 +817,11 @@ export async function executeRoofOrder(
     ? `${imgDate.year}-${String(imgDate.month).padStart(2, '0')}-${String(imgDate.day).padStart(2, '0')}`
     : 'unknown'
 
-  // Zoom levels for satellite imagery — zoomed out enough to see ENTIRE roof + context
-  // Reduced by 1 notch from original values to ensure full roof visibility:
-  //   Large (>1000 m²): 17, Medium (500-1000): 18, Small (<500): 19
-  // scale=2 for high-res output (1280x1280 actual pixels)
+  // Zoom levels — tight on the roof for measurement quality
+  // Zoom 20 (~30m across at scale=2) is ideal for most residential roofs
+  // Only zoom out to 19 for very large commercial (>2000 m²)
   const footprintM2 = areaCalc.flatAreaSqft / 10.7639
-  const roofZoom = footprintM2 > 1000 ? 17 : footprintM2 > 500 ? 18 : 19
+  const roofZoom = footprintM2 > 2000 ? 19 : footprintM2 > 800 ? 20 : 20
   const contextZoom = roofZoom - 3
   const mediumZoom = roofZoom - 1
 
