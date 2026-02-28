@@ -34,14 +34,17 @@ function generateEnhancedImagery(lat: number, lng: number, apiKey: string, footp
   //   Zoom 21 ≈ 15m across  → too close, only sees part of a roof
   //   Zoom 20 ≈ 30m across  → small roof barely fits
   //   Zoom 19 ≈ 60m across  → good for small residential (shows full roof + yard)
-  //   Zoom 18 ≈ 120m across → good for large commercial (shows building + parking)
+  //   Zoom 18 ≈ 120m across → good for large/medium residential (shows full roof + context)
   //   Zoom 17 ≈ 240m across → neighborhood context
+  //   Zoom 16 ≈ 480m across → wide neighborhood
   const footprintM2 = footprintSqft / 10.7639
-  // Lower zoom = more zoomed out. We want the FULL roof visible with context.
-  const roofZoom = footprintM2 > 1000 ? 18 : footprintM2 > 500 ? 19 : 20
+  // Lower zoom = more zoomed out. We want the FULL roof visible with generous context.
+  // Reduced by 1 notch from previous values so the entire roof is always visible:
+  //   Large (>1000 m²): 18→17, Medium (500-1000): 19→18, Small (<500): 20→19
+  const roofZoom = footprintM2 > 1000 ? 17 : footprintM2 > 500 ? 18 : 19
   const mediumZoom = roofZoom - 1     // Bridge: property + neighbors
   const contextZoom = roofZoom - 3    // Wide neighborhood context
-  const closeupZoom = Math.min(roofZoom + 1, 21)  // Detail view — still shows most of roof
+  const closeupZoom = Math.min(roofZoom + 1, 20)  // Detail view — still shows most of roof
   
   // Directional offset distance — moderate so roof stays in frame.
   // At lat ~53° N (Edmonton): 1° lat ≈ 111.3 km, 1° lng ≈ 67 km
@@ -49,12 +52,14 @@ function generateEnhancedImagery(lat: number, lng: number, apiKey: string, footp
   const latDegPerMeter = 1 / 111320
   const lngDegPerMeter = 1 / (111320 * Math.cos(lat * Math.PI / 180))
   
-  const dirOffsetMeters = 25   // 25m offset for directional views (was 50m — too far)
+  // At zoom-1 (more zoomed out), the roof stays centered even with a slightly larger offset.
+  // 20m keeps the full roof visible while showing clear directional perspective.
+  const dirOffsetMeters = 20   // 20m offset for directional views (roof stays fully visible at new zoom)
   const offsetLat = dirOffsetMeters * latDegPerMeter
   const offsetLng = dirOffsetMeters * lngDegPerMeter
   
-  // Quadrant close-up offset (~10m from center for corner detail)
-  const quadOffsetMeters = 10
+  // Quadrant close-up offset (~8m from center for corner detail)
+  const quadOffsetMeters = 8
   const quadLat = quadOffsetMeters * latDegPerMeter
   const quadLng = quadOffsetMeters * lngDegPerMeter
   
@@ -1884,7 +1889,8 @@ function generateProfessionalReportHTML(report: RoofReport): string {
   // Wider context view (zoom-3 from overhead)
   const contextUrl = report.imagery?.satellite_context_url || (satelliteUrl ? satelliteUrl.replace(/zoom=\d+/, 'zoom=18') : '')
   // Max zoom close-up (zoom+1 from overhead, capped at 22)
-  const closeupUrl = overheadUrl ? overheadUrl.replace(/zoom=(\d+)/, (m: string, z: string) => `zoom=${Math.min(parseInt(z) + 1, 21)}`) : ''
+  // Close-up: zoom+1 from overhead, capped at 20 (was 21 — too zoomed in, cut off roofs)
+  const closeupUrl = overheadUrl ? overheadUrl.replace(/zoom=(\d+)/, (m: string, z: string) => `zoom=${Math.min(parseInt(z) + 1, 20)}`) : ''
   // Directional aerial satellite views (offset 50m from center)
   const northUrl = report.imagery?.north_url || ''
   const southUrl = report.imagery?.south_url || ''
