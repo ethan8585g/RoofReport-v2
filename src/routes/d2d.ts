@@ -282,7 +282,7 @@ d2dRoutes.post('/pins', async (c) => {
   await ensureD2DTables(c.env.DB)
 
   const { lat, lng, address, turf_id, status, notes, knocked_by } = await c.req.json()
-  if (!lat || !lng) return c.json({ error: 'lat and lng are required' }, 400)
+  if (lat === undefined || lat === null || lng === undefined || lng === null) return c.json({ error: 'lat and lng are required' }, 400)
 
   const result = await c.env.DB.prepare(
     `INSERT INTO d2d_pins (owner_id, turf_id, lat, lng, address, status, notes, knocked_by, knocked_at)

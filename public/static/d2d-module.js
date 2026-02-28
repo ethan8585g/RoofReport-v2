@@ -371,6 +371,8 @@
     // ---- SINGLE unified click handler for the entire map ----
     // Uses a 250ms debounce to distinguish single-click from double-click
     map.addListener('click', function(e) {
+      console.log('[D2D] Map click — tool:', activeTool, 'isDrawing:', isDrawing, 'latLng:', e.latLng.lat(), e.latLng.lng());
+
       // If we're drawing a turf, debounce to avoid double-click adding an extra point
       if (isDrawing) {
         if (clickTimer) clearTimeout(clickTimer);
@@ -471,9 +473,29 @@
       });
 
       polygon.addListener('click', function(e) {
-        if (isDrawing || activeTool === 'pin') return; // don't open info during drawing or pinning
+        // When in pin mode, forward the click to pin placement instead of turf info
+        if (activeTool === 'pin') {
+          placePinAtLocation(e.latLng);
+          return;
+        }
+        if (isDrawing) {
+          // During drawing, add point (use debounce like the map handler)
+          if (clickTimer) clearTimeout(clickTimer);
+          clickTimer = setTimeout(function() {
+            addDrawingPoint(e.latLng);
+          }, 250);
+          return;
+        }
         selectTurf(turf.id);
         showTurfInfo(turf, e.latLng);
+      });
+
+      // Also forward dblclick from polygon during drawing
+      polygon.addListener('dblclick', function(e) {
+        if (isDrawing) {
+          if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; }
+          finishDrawing();
+        }
       });
 
       turfPolygons[turf.id] = polygon;
@@ -500,8 +522,10 @@
       title: pin.address || 'Pin #' + pin.id
     });
 
-    marker.addListener('click', function() {
+    marker.addListener('click', function(e) {
       if (isDrawing) return;
+      // In pin mode, don't open info window for existing pins — place a new pin nearby
+      if (activeTool === 'pin') return;
       showPinInfo(pin, marker);
     });
 
@@ -781,14 +805,33 @@
   function placePinAtLocation(latLng) {
     var lat = latLng.lat();
     var lng = latLng.lng();
+    console.log('[D2D] Pin placement at', lat, lng);
+
+    // Show a temporary pulsing marker while geocoding
+    var tempMarker = new google.maps.Marker({
+      position: latLng,
+      map: map,
+      icon: {
+        path: google.maps.SymbolPath.CIRCLE,
+        scale: 12,
+        fillColor: '#0ea5e9',
+        fillOpacity: 0.6,
+        strokeColor: '#0ea5e9',
+        strokeWeight: 3
+      },
+      zIndex: 100
+    });
 
     // Reverse geocode to get address
     if (geocoder) {
       geocoder.geocode({ location: latLng }, function(results, status) {
+        tempMarker.setMap(null); // remove temp marker
         var address = (status === 'OK' && results && results[0]) ? results[0].formatted_address : '';
+        console.log('[D2D] Geocode result:', status, address);
         showPlacePinModal(lat, lng, address);
       });
     } else {
+      tempMarker.setMap(null);
       showPlacePinModal(lat, lng, '');
     }
   }
@@ -867,6 +910,7 @@
         notes: document.getElementById('pinNotes').value.trim(),
         knocked_by: document.getElementById('pinKnockedBy').value || null
       }).then(function(r) {
+        console.log('[D2D] Pin save response:', r);
         if (r.success) {
           toast('Pin placed!');
           overlay.remove();
