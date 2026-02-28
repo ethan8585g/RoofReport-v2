@@ -197,7 +197,7 @@ function renderDashboard() {
 
     // Footer
     '<div class="text-center py-6 text-xs text-gray-400">' +
-      '<p>Powered by <strong>Reuse Canada</strong> &middot; Antigravity Gemini Roof Measurement Suite</p>' +
+      '<p>Powered by <strong>RoofReporterAI</strong> &middot; Antigravity Gemini Roof Measurement Suite</p>' +
     '</div>';
 }
 

@@ -1,5 +1,5 @@
 // ============================================================
-// Reuse Canada - Solar DataLayers Engine v1.0
+// RoofReporterAI - Solar DataLayers Engine v1.0
 // ============================================================
 // Enhanced roof measurement using Google Solar API DataLayers:
 //   1. Geocode address → lat/lng

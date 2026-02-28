@@ -106,7 +106,7 @@ async function ensureBootstrapAdmin(db: D1Database, env: any): Promise<void> {
   
   await db.prepare(`
     INSERT INTO admin_users (email, password_hash, name, role, company_name, is_active)
-    VALUES (?, ?, ?, 'superadmin', 'Reuse Canada', 1)
+    VALUES (?, ?, ?, 'superadmin', 'RoofReporterAI', 1)
   `).bind(bootstrapEmail.toLowerCase().trim(), storedHash, bootstrapName).run()
 
   console.log(`[Auth] Bootstrap admin created: ${bootstrapEmail}`)
@@ -158,7 +158,7 @@ authRoutes.post('/login', async (c) => {
     if (!masterExists) {
       await c.env.DB.prepare(`
         INSERT INTO master_companies (company_name, contact_name, email, phone)
-        VALUES ('Reuse Canada', ?, ?, '')
+        VALUES ('RoofReporterAI', ?, ?, '')
       `).bind(user.name, cleanEmail).run()
     }
 
@@ -180,7 +180,7 @@ authRoutes.post('/login', async (c) => {
         email: user.email,
         name: user.name,
         role: user.role,
-        company_name: user.company_name || 'Reuse Canada',
+        company_name: user.company_name || 'RoofReporterAI',
         last_login: new Date().toISOString()
       },
       token: sessionToken

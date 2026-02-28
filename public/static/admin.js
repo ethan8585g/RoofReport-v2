@@ -826,7 +826,7 @@ async function submitOrder() {
       latitude: parseFloat(document.getElementById('noLat').value) || null,
       longitude: parseFloat(document.getElementById('noLng').value) || null,
       homeowner_name: home, homeowner_email: document.getElementById('noEmail').value.trim(),
-      requester_name: req, requester_company: 'Reuse Canada',
+      requester_name: req, requester_company: 'RoofReporterAI',
       service_tier: document.getElementById('noTier').value
     })});
     const d = await res.json();

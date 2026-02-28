@@ -1,5 +1,5 @@
 // ============================================================
-// Reuse Canada - Professional Landing Page
+// RoofReporterAI - Professional Landing Page
 // Customer-facing marketing funnel with conversion CTAs
 // ============================================================
 
@@ -46,7 +46,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // ============================================================
 function renderHero() {
   return `
-    <section class="relative overflow-hidden bg-gradient-to-br from-slate-900 via-brand-900 to-slate-900 text-white">
+    <section class="relative overflow-hidden bg-gradient-to-br from-sky-400 via-blue-500 to-sky-600 text-white">
       <!-- Background pattern -->
       <div class="absolute inset-0 opacity-10">
         <div class="absolute inset-0" style="background-image: url('data:image/svg+xml,%3Csvg width=60 height=60 xmlns=%22http://www.w3.org/2000/svg%22%3E%3Cpath d=%22M30 0L60 30L30 60L0 30z%22 fill=%22none%22 stroke=%22white%22 stroke-width=%220.5%22/%3E%3C/svg%3E'); background-size: 60px 60px;"></div>

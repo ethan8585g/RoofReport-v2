@@ -10,8 +10,8 @@ export const customerAuthRoutes = new Hono<{ Bindings: Bindings }>()
 const DEV_ACCOUNT = {
   email: 'dev@reusecanada.ca',
   password: 'DevTest2026!',
-  name: 'Reuse Canada Dev',
-  company_name: 'Reuse Canada (Dev Testing)',
+  name: 'RoofReporterAI Dev',
+  company_name: 'RoofReporterAI (Dev Testing)',
   phone: '780-000-0000'
 }
 

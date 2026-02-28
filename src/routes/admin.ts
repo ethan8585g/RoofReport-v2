@@ -66,8 +66,13 @@ adminRoutes.get('/dashboard', async (c) => {
       ORDER BY o.created_at DESC LIMIT 10
     `).all()
 
-    // Customer count
+    // Customer count (registered platform users — from customers table)
     const customerCount = await c.env.DB.prepare(
+      'SELECT COUNT(*) as count FROM customers WHERE is_active = 1'
+    ).first<{ count: number }>()
+
+    // Customer company count (admin-managed B2B clients)
+    const companyCount = await c.env.DB.prepare(
       'SELECT COUNT(*) as count FROM customer_companies WHERE is_active = 1'
     ).first<{ count: number }>()
 
@@ -103,6 +108,7 @@ adminRoutes.get('/dashboard', async (c) => {
       tiers: tierStats.results,
       recent_orders: recentOrders.results,
       customer_count: customerCount?.count || 0,
+      company_count: companyCount?.count || 0,
       recent_activity: recentActivity.results,
       report_stats: reportStats
     })

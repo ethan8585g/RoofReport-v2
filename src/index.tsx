@@ -39,7 +39,7 @@ app.get('/api/health', (c) => {
   // Report which env vars are configured (true/false only — never expose values)
   return c.json({
     status: 'ok',
-    service: 'Reuse Canada - Roof Measurement Reports',
+    service: 'RoofReporterAI - Business Management CRM',
     timestamp: new Date().toISOString(),
     env_configured: {
       GOOGLE_SOLAR_API_KEY: !!c.env.GOOGLE_SOLAR_API_KEY,
@@ -248,8 +248,8 @@ function getTailwindConfig() {
       theme: {
         extend: {
           colors: {
-            brand: { 50:'#eff6ff',100:'#dbeafe',200:'#bfdbfe',300:'#93c5fd',400:'#60a5fa',500:'#3b82f6',600:'#2563eb',700:'#1d4ed8',800:'#1e3a5f',900:'#0f172a' },
-            accent: { 50:'#f0f9ff',100:'#e0f2fe',200:'#bae6fd',300:'#7dd3fc',400:'#38bdf8',500:'#0ea5e9',600:'#0284c7',700:'#0369a1',800:'#075985',900:'#0c4a6e' }
+            brand: { 50:'#f0f9ff',100:'#e0f2fe',200:'#bae6fd',300:'#7dd3fc',400:'#38bdf8',500:'#0ea5e9',600:'#0284c7',700:'#0369a1',800:'#075985',900:'#0c4a6e' },
+            accent: { 50:'#eff6ff',100:'#dbeafe',200:'#bfdbfe',300:'#93c5fd',400:'#60a5fa',500:'#3b82f6',600:'#2563eb',700:'#1d4ed8',800:'#1e40af',900:'#1e3a8a' }
           },
           animation: {
             'fade-in-up': 'fadeInUp 0.6s ease-out forwards',
@@ -300,11 +300,11 @@ function getMainPageHTML(mapsApiKey: string) {
 <html lang="en">
 <head>
   ${getHeadTags()}
-  <title>Order a Roof Report - Reuse Canada</title>
+  <title>Order a Roof Report - RoofReporterAI</title>
   ${mapsScript}
 </head>
 <body class="bg-gray-50 min-h-screen">
-  <header class="bg-brand-800 text-white shadow-lg">
+  <header class="bg-gradient-to-r from-sky-500 to-blue-600 text-white shadow-lg">
     <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
       <div class="flex items-center space-x-3">
         <a href="/" class="flex items-center space-x-3 hover:opacity-90 transition-opacity">
@@ -313,7 +313,7 @@ function getMainPageHTML(mapsApiKey: string) {
           </div>
           <div>
             <h1 class="text-xl font-bold">Order a Report</h1>
-            <p class="text-brand-200 text-xs">Reuse Canada</p>
+            <p class="text-brand-200 text-xs">RoofReporterAI</p>
           </div>
         </a>
       </div>
@@ -327,8 +327,8 @@ function getMainPageHTML(mapsApiKey: string) {
     <div id="app-root"></div>
   </main>
   <footer class="bg-gray-800 text-gray-400 text-center py-6 mt-12">
-    <p class="text-sm">&copy; 2026 Reuse Canada. All rights reserved.</p>
-    <p class="text-xs mt-1">Professional Roof Measurement Reports</p>
+    <p class="text-sm">&copy; 2026 RoofReporterAI. All rights reserved.</p>
+    <p class="text-xs mt-1">Professional Roof Measurement Reports & Business Management CRM</p>
   </footer>
   <script src="/static/app.js"></script>
 </body>
@@ -340,7 +340,7 @@ function getSuperAdminDashboardHTML() {
 <html lang="en">
 <head>
   ${getHeadTags()}
-  <title>Super Admin Dashboard - Reuse Canada</title>
+  <title>Super Admin Dashboard - RoofReporterAI</title>
   <style>
     .sa-sidebar { transition: width 0.3s ease; }
     .sa-sidebar .label { transition: opacity 0.2s ease; }
@@ -356,14 +356,14 @@ function getSuperAdminDashboardHTML() {
 </head>
 <body class="bg-gray-100 min-h-screen">
   <!-- Super Admin Top Bar -->
-  <header class="bg-gray-900 text-white shadow-xl sticky top-0 z-50">
+  <header class="bg-slate-700 text-white shadow-xl sticky top-0 z-50">
     <div class="max-w-full mx-auto px-6 h-14 flex items-center justify-between">
       <div class="flex items-center gap-3">
         <div class="w-8 h-8 bg-red-600 rounded-lg flex items-center justify-center">
           <i class="fas fa-crown text-white text-sm"></i>
         </div>
         <div class="leading-tight">
-          <span class="text-white font-bold text-sm">REUSE CANADA</span>
+          <span class="text-white font-bold text-sm">ROOFREPORTERAI</span>
           <span class="text-gray-400 text-[10px] block -mt-0.5">Super Admin Command Center</span>
         </div>
       </div>
@@ -382,7 +382,7 @@ function getSuperAdminDashboardHTML() {
 
   <div class="flex min-h-[calc(100vh-56px)]">
     <!-- Sidebar Navigation -->
-    <aside class="sa-sidebar w-64 bg-gray-900 border-r border-gray-800 flex-shrink-0">
+    <aside class="sa-sidebar w-64 bg-slate-800 border-r border-slate-700 flex-shrink-0">
       <div class="p-4 space-y-1" id="sa-nav">
         <div class="sa-nav-item active rounded-xl px-4 py-3 flex items-center gap-3" onclick="saSetView('users')">
           <i class="fas fa-users w-5 text-center"></i>
@@ -466,7 +466,7 @@ function getAdminPageHTML() {
 <html lang="en">
 <head>
   ${getHeadTags()}
-  <title>Admin Control Panel - Reuse Canada</title>
+  <title>Admin Control Panel - RoofReporterAI</title>
   <style>
     .admin-sidebar { transition: width 0.3s ease; }
     .admin-sidebar .label { transition: opacity 0.2s ease; }
@@ -479,14 +479,14 @@ function getAdminPageHTML() {
 </head>
 <body class="bg-gray-100 min-h-screen">
   <!-- Admin Top Bar -->
-  <header class="bg-gray-900 text-white shadow-xl sticky top-0 z-50">
+  <header class="bg-slate-700 text-white shadow-xl sticky top-0 z-50">
     <div class="max-w-full mx-auto px-6 h-14 flex items-center justify-between">
       <div class="flex items-center gap-3">
         <div class="w-8 h-8 bg-red-600 rounded-lg flex items-center justify-center">
           <i class="fas fa-shield-alt text-white text-sm"></i>
         </div>
         <div class="leading-tight">
-          <span class="text-white font-bold text-sm">REUSE CANADA</span>
+          <span class="text-white font-bold text-sm">ROOFREPORTERAI</span>
           <span class="text-gray-400 text-[10px] block -mt-0.5">Admin Control Panel</span>
         </div>
       </div>
@@ -547,7 +547,7 @@ function getOrderConfirmationHTML() {
   <title>Order Confirmation - Roof Measurement Tool</title>
 </head>
 <body class="bg-gray-50 min-h-screen">
-  <header class="bg-brand-800 text-white shadow-lg">
+  <header class="bg-gradient-to-r from-sky-500 to-blue-600 text-white shadow-lg">
     <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
       <div class="flex items-center space-x-3">
         <div class="w-10 h-10 bg-accent-500 rounded-lg flex items-center justify-center">
@@ -555,7 +555,7 @@ function getOrderConfirmationHTML() {
         </div>
         <div>
           <h1 class="text-xl font-bold">Order Confirmation</h1>
-          <p class="text-brand-200 text-xs">Powered by Reuse Canada</p>
+          <p class="text-brand-200 text-xs">Powered by RoofReporterAI</p>
         </div>
       </div>
       <a href="/" class="text-brand-200 hover:text-white text-sm"><i class="fas fa-arrow-left mr-1"></i>Home</a>
@@ -576,9 +576,9 @@ function getLoginPageHTML() {
 <html lang="en">
 <head>
   ${getHeadTags()}
-  <title>Admin Login - Reuse Canada</title>
+  <title>Admin Login - RoofReporterAI</title>
 </head>
-<body class="bg-gradient-to-br from-gray-900 via-slate-900 to-gray-800 min-h-screen flex items-center justify-center">
+<body class="bg-gradient-to-br from-sky-100 via-blue-50 to-white min-h-screen flex items-center justify-center">
   <div class="w-full max-w-md mx-auto px-4">
     <!-- Logo -->
     <div class="text-center mb-8">
@@ -587,15 +587,15 @@ function getLoginPageHTML() {
           <i class="fas fa-shield-alt text-white text-xl"></i>
         </div>
         <div class="text-left">
-          <span class="text-white font-bold text-2xl block">Reuse Canada</span>
-          <span class="text-gray-400 text-xs">Admin Access - Authorized Personnel Only</span>
+          <span class="text-gray-800 font-bold text-2xl block">RoofReporterAI</span>
+          <span class="text-gray-500 text-xs">Admin Access - Authorized Personnel Only</span>
         </div>
       </a>
     </div>
 
     <!-- Admin Login Card -->
     <div class="bg-white rounded-2xl shadow-2xl overflow-hidden border border-gray-200">
-      <div class="bg-gradient-to-r from-gray-800 to-gray-900 px-8 py-4">
+      <div class="bg-gradient-to-r from-sky-600 to-blue-700 px-8 py-4">
         <div class="flex items-center gap-2">
           <i class="fas fa-lock text-red-400"></i>
           <span class="text-white font-semibold text-sm">Admin Control Panel</span>
@@ -619,7 +619,7 @@ function getLoginPageHTML() {
 
         <div id="loginError" class="hidden mt-4 p-3 bg-red-50 text-red-700 rounded-lg text-sm"></div>
 
-        <button onclick="doLogin()" class="w-full mt-6 py-3 bg-gray-800 hover:bg-gray-900 text-white font-bold rounded-xl transition-all hover:scale-[1.02] shadow-lg">
+        <button onclick="doLogin()" class="w-full mt-6 py-3 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-xl transition-all hover:scale-[1.02] shadow-lg">
           <i class="fas fa-sign-in-alt mr-2"></i>Access Admin Panel
         </button>
 
@@ -692,8 +692,8 @@ function getLandingPageHTML() {
 <html lang="en">
 <head>
   ${getHeadTags()}
-  <title>Professional Roof Measurement Reports - Reuse Canada</title>
-  <meta name="description" content="Get accurate roof area, pitch analysis, edge breakdowns, material estimates, and solar potential from satellite imagery. Sign up and get 3 free reports instantly.">
+  <title>Professional Roof Measurement Reports - RoofReporterAI</title>
+  <meta name="description" content="Get accurate roof area, pitch analysis, edge breakdowns, material estimates, and solar potential from satellite imagery. Sign up and get 3 free reports instantly. Powered by RoofReporterAI Business Management CRM.">
   <style>
     /* Landing page scroll animations */
     .scroll-animate {
@@ -710,7 +710,7 @@ function getLandingPageHTML() {
     /* Navbar transparency transition */
     .landing-nav { transition: all 0.3s ease; }
     .landing-nav.scrolled {
-      background: rgba(15, 23, 42, 0.97);
+      background: rgba(14, 165, 233, 0.97);
       backdrop-filter: blur(12px);
       box-shadow: 0 4px 20px rgba(0,0,0,0.15);
     }
@@ -725,8 +725,8 @@ function getLandingPageHTML() {
           <i class="fas fa-home text-white"></i>
         </div>
         <div class="leading-tight">
-          <span class="text-white font-bold text-lg">Reuse Canada</span>
-          <span class="hidden sm:block text-brand-200 text-[10px] -mt-0.5">Roof Measurement Reports</span>
+          <span class="text-white font-bold text-lg">RoofReporterAI</span>
+          <span class="hidden sm:block text-brand-200 text-[10px] -mt-0.5">Roof Measurement Reports & Business Management CRM</span>
         </div>
       </a>
 
@@ -748,7 +748,7 @@ function getLandingPageHTML() {
     </div>
 
     <!-- Mobile menu -->
-    <div id="mobile-menu" class="hidden md:hidden bg-brand-900/95 backdrop-blur-md border-t border-brand-700">
+    <div id="mobile-menu" class="hidden md:hidden bg-sky-600/95 backdrop-blur-md border-t border-sky-400">
       <div class="max-w-7xl mx-auto px-4 py-4 flex flex-col gap-3">
         <a href="#how-it-works" class="text-brand-200 hover:text-white text-sm py-2" onclick="document.getElementById('mobile-menu').classList.add('hidden')">How It Works</a>
         <a href="#features" class="text-brand-200 hover:text-white text-sm py-2" onclick="document.getElementById('mobile-menu').classList.add('hidden')">Features</a>
@@ -763,7 +763,7 @@ function getLandingPageHTML() {
   <div id="landing-root"></div>
 
   <!-- Footer -->
-  <footer class="bg-gray-900 text-gray-400 border-t border-gray-800">
+  <footer class="bg-slate-100 text-gray-600 border-t border-slate-200">
     <div class="max-w-7xl mx-auto px-4 py-16">
       <div class="grid md:grid-cols-4 gap-8">
         <div>
@@ -771,40 +771,40 @@ function getLandingPageHTML() {
             <div class="w-9 h-9 bg-accent-500 rounded-lg flex items-center justify-center">
               <i class="fas fa-home text-white"></i>
             </div>
-            <span class="text-white font-bold text-lg">Reuse Canada</span>
+            <span class="text-gray-800 font-bold text-lg">RoofReporterAI</span>
           </div>
           <p class="text-sm leading-relaxed">Professional AI-powered roof measurement reports for contractors, estimators, and roofing professionals across Canada.</p>
         </div>
         <div>
-          <h4 class="text-white font-semibold mb-4 text-sm uppercase tracking-wider">Product</h4>
+          <h4 class="text-gray-800 font-semibold mb-4 text-sm uppercase tracking-wider">Product</h4>
           <ul class="space-y-2 text-sm">
-            <li><a href="#features" class="hover:text-white transition-colors">Features</a></li>
-            <li><a href="#pricing" class="hover:text-white transition-colors">Pricing</a></li>
-            <li><a href="#how-it-works" class="hover:text-white transition-colors">How It Works</a></li>
-            <li><a href="/customer/login" class="hover:text-white transition-colors">Customer Login</a></li>
+            <li><a href="#features" class="hover:text-sky-600 transition-colors">Features</a></li>
+            <li><a href="#pricing" class="hover:text-sky-600 transition-colors">Pricing</a></li>
+            <li><a href="#how-it-works" class="hover:text-sky-600 transition-colors">How It Works</a></li>
+            <li><a href="/customer/login" class="hover:text-sky-600 transition-colors">Customer Login</a></li>
           </ul>
         </div>
         <div>
-          <h4 class="text-white font-semibold mb-4 text-sm uppercase tracking-wider">Company</h4>
+          <h4 class="text-gray-800 font-semibold mb-4 text-sm uppercase tracking-wider">Company</h4>
           <ul class="space-y-2 text-sm">
-            <li><a href="https://reusecanada.ca" class="hover:text-white transition-colors">Reuse Canada</a></li>
-            <li><a href="#faq" class="hover:text-white transition-colors">FAQ</a></li>
-            <li><a href="mailto:reports@reusecanada.ca" class="hover:text-white transition-colors">Contact</a></li>
+            <li><a href="https://reusecanada.ca" class="hover:text-sky-600 transition-colors">RoofReporterAI</a></li>
+            <li><a href="#faq" class="hover:text-sky-600 transition-colors">FAQ</a></li>
+            <li><a href="mailto:reports@reusecanada.ca" class="hover:text-sky-600 transition-colors">Contact</a></li>
           </ul>
         </div>
         <div>
-          <h4 class="text-white font-semibold mb-4 text-sm uppercase tracking-wider">Get Started</h4>
+          <h4 class="text-gray-800 font-semibold mb-4 text-sm uppercase tracking-wider">Get Started</h4>
           <p class="text-sm mb-4">Ready to save hours on every estimate?</p>
           <a href="/customer/login" class="inline-block bg-accent-500 hover:bg-accent-600 text-white font-semibold py-2.5 px-6 rounded-lg text-sm transition-all">
             Customer Login
           </a>
         </div>
       </div>
-      <div class="border-t border-gray-800 mt-12 pt-8 flex flex-col md:flex-row items-center justify-between gap-4">
-        <p class="text-sm">&copy; 2026 Reuse Canada. All rights reserved.</p>
+      <div class="border-t border-slate-300 mt-12 pt-8 flex flex-col md:flex-row items-center justify-between gap-4">
+        <p class="text-sm">&copy; 2026 RoofReporterAI. All rights reserved.</p>
         <div class="flex items-center gap-6 text-sm">
-          <span class="flex items-center gap-1.5"><i class="fas fa-map-marker-alt text-brand-400"></i> Alberta, Canada</span>
-          <span class="flex items-center gap-1.5"><i class="fas fa-envelope text-brand-400"></i> reports@reusecanada.ca</span>
+          <span class="flex items-center gap-1.5"><i class="fas fa-map-marker-alt text-sky-500"></i> Alberta, Canada</span>
+          <span class="flex items-center gap-1.5"><i class="fas fa-envelope text-sky-500"></i> reports@reusecanada.ca</span>
         </div>
       </div>
     </div>
@@ -831,10 +831,10 @@ function getSettingsPageHTML() {
 <html lang="en">
 <head>
   ${getHeadTags()}
-  <title>Settings - Roof Measurement Tool</title>
+  <title>Settings - RoofReporterAI</title>
 </head>
 <body class="bg-gray-50 min-h-screen">
-  <header class="bg-brand-800 text-white shadow-lg">
+  <header class="bg-gradient-to-r from-sky-500 to-blue-600 text-white shadow-lg">
     <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
       <div class="flex items-center space-x-3">
         <div class="w-10 h-10 bg-accent-500 rounded-lg flex items-center justify-center">
@@ -870,9 +870,9 @@ function getCustomerLoginHTML() {
 <html lang="en">
 <head>
   ${getHeadTags()}
-  <title>Customer Login - Reuse Canada Roof Reports</title>
+  <title>Customer Login - RoofReporterAI</title>
 </head>
-<body class="bg-gradient-to-br from-brand-900 via-slate-900 to-brand-800 min-h-screen flex items-center justify-center">
+<body class="bg-gradient-to-br from-sky-100 via-blue-50 to-white min-h-screen flex items-center justify-center">
   <div class="w-full max-w-md mx-auto px-4">
     <!-- Logo -->
     <div class="text-center mb-8">
@@ -881,8 +881,8 @@ function getCustomerLoginHTML() {
           <i class="fas fa-home text-white text-xl"></i>
         </div>
         <div class="text-left">
-          <span class="text-white font-bold text-2xl block">Reuse Canada</span>
-          <span class="text-brand-300 text-xs">Customer Portal - Roof Reports</span>
+          <span class="text-gray-800 font-bold text-2xl block">RoofReporterAI</span>
+          <span class="text-sky-600 text-xs">Customer Portal - Roof Reports & CRM</span>
         </div>
       </a>
     </div>
@@ -1051,10 +1051,10 @@ function getCustomerDashboardHTML() {
 <html lang="en">
 <head>
   ${getHeadTags()}
-  <title>My Dashboard - Reuse Canada Roof Reports</title>
+  <title>My Dashboard - RoofReporterAI</title>
 </head>
 <body class="bg-gray-50 min-h-screen">
-  <header class="bg-brand-800 text-white shadow-lg">
+  <header class="bg-gradient-to-r from-sky-500 to-blue-600 text-white shadow-lg">
     <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
       <div class="flex items-center space-x-3">
         <a href="/" class="flex items-center space-x-3 hover:opacity-90 transition-opacity">
@@ -1063,7 +1063,7 @@ function getCustomerDashboardHTML() {
           </div>
           <div>
             <h1 class="text-xl font-bold">My Dashboard</h1>
-            <p class="text-brand-200 text-xs">Reuse Canada - Roof Reports</p>
+            <p class="text-brand-200 text-xs">RoofReporterAI - Roof Reports & CRM</p>
           </div>
         </a>
       </div>
@@ -1107,10 +1107,10 @@ function getCustomerInvoiceHTML() {
 <html lang="en">
 <head>
   ${getHeadTags()}
-  <title>Invoice - Reuse Canada</title>
+  <title>Invoice - RoofReporterAI</title>
 </head>
 <body class="bg-gray-50 min-h-screen">
-  <header class="bg-brand-800 text-white shadow-lg">
+  <header class="bg-gradient-to-r from-sky-500 to-blue-600 text-white shadow-lg">
     <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
       <div class="flex items-center space-x-3">
         <a href="/customer/dashboard" class="flex items-center space-x-3 hover:opacity-90">
@@ -1119,7 +1119,7 @@ function getCustomerInvoiceHTML() {
           </div>
           <div>
             <h1 class="text-xl font-bold">Invoice</h1>
-            <p class="text-brand-200 text-xs">Reuse Canada</p>
+            <p class="text-brand-200 text-xs">RoofReporterAI</p>
           </div>
         </a>
       </div>
@@ -1150,14 +1150,14 @@ function getPricingPageHTML() {
 <html lang="en">
 <head>
   ${getHeadTags()}
-  <title>Pricing - Reuse Canada Roof Reports</title>
+  <title>Pricing - RoofReporterAI</title>
 </head>
 <body class="bg-gray-50 min-h-screen">
-  <nav class="bg-brand-800 text-white shadow-lg">
+  <nav class="bg-gradient-to-r from-sky-500 to-blue-600 text-white shadow-lg">
     <div class="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
       <a href="/" class="flex items-center gap-3">
         <div class="w-9 h-9 bg-accent-500 rounded-lg flex items-center justify-center"><i class="fas fa-home text-white"></i></div>
-        <span class="text-white font-bold text-lg">Reuse Canada</span>
+        <span class="text-white font-bold text-lg">RoofReporterAI</span>
       </a>
       <div class="flex items-center gap-4">
         <a href="/" class="text-brand-200 hover:text-white text-sm">Home</a>
@@ -1191,17 +1191,17 @@ function getCustomerOrderPageHTML(mapsApiKey: string) {
 <html lang="en">
 <head>
   ${getHeadTags()}
-  <title>Order a Report - Reuse Canada</title>
+  <title>Order a Report - RoofReporterAI</title>
   ${mapsScript}
 </head>
 <body class="bg-gray-50 min-h-screen">
-  <header class="bg-brand-800 text-white shadow-lg">
+  <header class="bg-gradient-to-r from-sky-500 to-blue-600 text-white shadow-lg">
     <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
       <a href="/customer/dashboard" class="flex items-center space-x-3 hover:opacity-90">
         <div class="w-10 h-10 bg-accent-500 rounded-lg flex items-center justify-center"><i class="fas fa-home text-white text-lg"></i></div>
         <div>
           <h1 class="text-xl font-bold">Order a Report</h1>
-          <p class="text-brand-200 text-xs">Reuse Canada</p>
+          <p class="text-brand-200 text-xs">RoofReporterAI</p>
         </div>
       </a>
       <nav class="flex items-center space-x-4">
@@ -1232,10 +1232,10 @@ function getBrandingSetupHTML() {
 <html lang="en">
 <head>
   ${getHeadTags()}
-  <title>Custom Branding Setup - Reuse Canada</title>
+  <title>Custom Branding Setup - RoofReporterAI</title>
 </head>
 <body class="bg-gray-50 min-h-screen">
-  <header class="bg-brand-800 text-white shadow-lg">
+  <header class="bg-gradient-to-r from-sky-500 to-blue-600 text-white shadow-lg">
     <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
       <div class="flex items-center space-x-3">
         <a href="/customer/dashboard" class="flex items-center space-x-3 hover:opacity-90">
@@ -1244,7 +1244,7 @@ function getBrandingSetupHTML() {
           </div>
           <div>
             <h1 class="text-lg font-bold">Custom Branding Setup</h1>
-            <p class="text-brand-200 text-xs">Reuse Canada</p>
+            <p class="text-brand-200 text-xs">RoofReporterAI</p>
           </div>
         </a>
       </div>
@@ -1297,7 +1297,7 @@ function getPropertyImageryPageHTML(mapsApiKey: string) {
 <html lang="en">
 <head>
   ${getHeadTags()}
-  <title>Property Imagery - Reuse Canada (Dev Tool)</title>
+  <title>Property Imagery - RoofReporterAI (Dev Tool)</title>
   ${mapsScript}
 </head>
 <body class="bg-gray-50 min-h-screen">
@@ -1310,7 +1310,7 @@ function getPropertyImageryPageHTML(mapsApiKey: string) {
           </div>
           <div>
             <h1 class="text-xl font-bold">Property Imagery</h1>
-            <p class="text-emerald-200 text-xs">Dev Tool — Reuse Canada</p>
+            <p class="text-emerald-200 text-xs">Dev Tool — RoofReporterAI</p>
           </div>
         </a>
       </div>
@@ -1351,10 +1351,10 @@ function getCrmSubPageHTML(module: string, title: string, icon: string) {
 <html lang="en">
 <head>
   ${getHeadTags()}
-  <title>${title} - Reuse Canada</title>
+  <title>${title} - RoofReporterAI</title>
 </head>
 <body class="bg-gray-50 min-h-screen">
-  <header class="bg-brand-800 text-white shadow-lg">
+  <header class="bg-gradient-to-r from-sky-500 to-blue-600 text-white shadow-lg">
     <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
       <div class="flex items-center space-x-3">
         <a href="/customer/dashboard" class="flex items-center space-x-3 hover:opacity-90">
@@ -1363,7 +1363,7 @@ function getCrmSubPageHTML(module: string, title: string, icon: string) {
           </div>
           <div>
             <h1 class="text-lg font-bold">${title}</h1>
-            <p class="text-brand-200 text-xs">Reuse Canada</p>
+            <p class="text-brand-200 text-xs">RoofReporterAI</p>
           </div>
         </a>
       </div>

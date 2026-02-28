@@ -313,7 +313,7 @@ function renderOrderPage() {
       <!-- Order Form -->
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
         <!-- Header -->
-        <div class="bg-brand-800 text-white p-6">
+        <div class="bg-gradient-to-r from-sky-500 to-blue-600 text-white p-6">
           <h2 class="text-xl font-bold"><i class="fas fa-crosshairs mr-2"></i>Order a Roof Measurement Report</h2>
           <p class="text-brand-200 text-sm mt-1">Click the map or enter coordinates to select a roof location</p>
         </div>

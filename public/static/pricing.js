@@ -125,7 +125,7 @@ function renderPricing(root, packages) {
             </div>
             <p class="text-sm font-semibold text-brand-600 mb-1">$${priceEach}/report</p>
             ${savings > 0 ? `<span class="inline-block bg-green-100 text-green-700 px-2 py-0.5 rounded-full text-xs font-bold mb-3">Save ${savings}%</span>` : '<div class="mb-3"></div>'}
-            <a href="/customer/login" class="block w-full py-2.5 ${isBest || isPopular ? 'bg-brand-600 hover:bg-brand-700' : 'bg-gray-800 hover:bg-gray-900'} text-white font-bold rounded-lg text-sm transition-all hover:scale-[1.02]">
+            <a href="/customer/login" class="block w-full py-2.5 ${isBest || isPopular ? 'bg-brand-600 hover:bg-brand-700' : 'bg-sky-600 hover:bg-sky-700'} text-white font-bold rounded-lg text-sm transition-all hover:scale-[1.02]">
               Buy ${pkg.credits} Credits
             </a>
           </div>

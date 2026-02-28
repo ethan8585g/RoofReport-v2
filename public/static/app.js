@@ -1,5 +1,5 @@
 // ============================================================
-// Reuse Canada - Roofing Measurement Tool
+// RoofReporterAI - Roofing Measurement Tool
 // Main Order Form Application v2.1
 // Two-Phase Address Selection + Satellite Roof Pinning
 // ============================================================

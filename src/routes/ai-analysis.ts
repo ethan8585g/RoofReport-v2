@@ -1,5 +1,5 @@
 // ============================================================
-// Reuse Canada - AI Measurement Engine API Routes
+// RoofReporterAI - AI Measurement Engine API Routes
 // Server-side Gemini Vision analysis for roof geometry
 // ============================================================
 // POST /api/ai/:orderId/analyze — Run full AI analysis

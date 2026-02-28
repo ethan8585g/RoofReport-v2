@@ -65,7 +65,7 @@ function renderInvoiceView(inv, items) {
     <!-- Invoice Document -->
     <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden print:shadow-none print:border-none">
       <!-- Header -->
-      <div class="bg-brand-800 text-white p-8">
+      <div class="bg-gradient-to-r from-sky-500 to-blue-600 text-white p-8">
         <div class="flex justify-between items-start">
           <div>
             <div class="flex items-center gap-3 mb-3">
@@ -73,7 +73,7 @@ function renderInvoiceView(inv, items) {
                 <i class="fas fa-home text-white text-lg"></i>
               </div>
               <div>
-                <h1 class="text-xl font-bold">Reuse Canada</h1>
+                <h1 class="text-xl font-bold">RoofReporterAI</h1>
                 <p class="text-brand-200 text-xs">Professional Roof Measurement Reports</p>
               </div>
             </div>
@@ -172,7 +172,7 @@ function renderInvoiceView(inv, items) {
 
       <!-- Footer -->
       <div class="text-center py-4 bg-gray-50 border-t border-gray-100">
-        <p class="text-xs text-gray-400">Thank you for your business! &middot; Reuse Canada &middot; reports@reusecanada.ca</p>
+        <p class="text-xs text-gray-400">Thank you for your business! &middot; RoofReporterAI &middot; reports@reusecanada.ca</p>
       </div>
     </div>
   `;

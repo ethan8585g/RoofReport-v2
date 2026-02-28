@@ -439,7 +439,7 @@ stripeRoutes.post('/use-credit', async (c) => {
 
     // Ensure master company exists
     await c.env.DB.prepare(
-      "INSERT OR IGNORE INTO master_companies (id, company_name, contact_name, email) VALUES (1, 'Reuse Canada', 'Admin', 'reports@reusecanada.ca')"
+      "INSERT OR IGNORE INTO master_companies (id, company_name, contact_name, email) VALUES (1, 'RoofReporterAI', 'Admin', 'reports@reusecanada.ca')"
     ).run()
 
     // Generate order number
@@ -652,7 +652,7 @@ stripeRoutes.post('/webhook', async (c) => {
 
           // Ensure master company exists
           await c.env.DB.prepare(
-            "INSERT OR IGNORE INTO master_companies (id, company_name, contact_name, email) VALUES (1, 'Reuse Canada', 'Admin', 'reports@reusecanada.ca')"
+            "INSERT OR IGNORE INTO master_companies (id, company_name, contact_name, email) VALUES (1, 'RoofReporterAI', 'Admin', 'reports@reusecanada.ca')"
           ).run()
 
           const custData = await c.env.DB.prepare('SELECT * FROM customers WHERE id = ?').bind(customerId).first<any>()

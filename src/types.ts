@@ -1,5 +1,5 @@
 // ============================================================
-// Reuse Canada - Roofing Measurement Tool
+// RoofReporterAI - Roofing Measurement Tool
 // Core Type Definitions - v2.0
 // ============================================================
 // This is the canonical data contract for the entire system.
@@ -270,7 +270,7 @@ export interface MaterialEstimate {
 
 // ============================================================
 // RAS (Recycled Asphalt Shingle) YIELD ANALYSIS
-// For Reuse Canada's waste-to-value material recovery operations
+// For RoofReporterAI's waste-to-value material recovery operations
 // ============================================================
 
 /** Classification of a roof segment for RAS material recovery */
@@ -448,7 +448,7 @@ export interface RoofReport {
   // ---- AI GEOMETRY OVERLAY — Gemini Vision facet polygons for satellite image overlay ----
   ai_geometry?: AIMeasurementAnalysis | null
 
-  // ---- RAS YIELD ANALYSIS (Reuse Canada value-add) ----
+  // ---- RAS YIELD ANALYSIS (RoofReporterAI value-add) ----
   ras_yield?: RASYieldAnalysis
 
   // ---- METADATA ----
@@ -778,7 +778,7 @@ export function computeMaterialEstimate(
 }
 
 // ============================================================
-// RAS YIELD ANALYSIS — Reuse Canada's Waste-to-Value Engine
+// RAS YIELD ANALYSIS — RoofReporterAI's Waste-to-Value Engine
 // ============================================================
 // Computes material recovery potential from roof tear-off shingles.
 // Based on slope classification from deep research:

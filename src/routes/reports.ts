@@ -908,7 +908,7 @@ reportsRoutes.get('/:orderId/pdf', async (c) => {
 </head>
 <body>
 <div class="print-controls">
-  <span>Reuse Canada | Roof Report: ${address}</span>
+  <span>RoofReporterAI | Roof Report: ${address}</span>
   <button onclick="window.print()">Download PDF (Print)</button>
 </div>
 ${html}
@@ -1153,7 +1153,7 @@ function buildEmailWrapper(reportHtml: string, address: string, reportNum: strin
 
   <!-- Email Footer -->
   <div style="text-align:center;padding:20px;color:#9CA3AF;font-size:11px">
-    <p>&copy; ${new Date().getFullYear()} Reuse Canada | Professional Roof Measurement Reports</p>
+    <p>&copy; ${new Date().getFullYear()} RoofReporterAI | Professional Roof Measurement Reports</p>
     <p style="margin-top:4px">This report was sent to ${recipient}. Questions? Contact reports@reusecanada.ca</p>
   </div>
 </div>
@@ -1242,7 +1242,7 @@ async function sendGmailEmail(serviceAccountJson: string, to: string, subject: s
   }
 
   const rawMessage = [
-    `From: Reuse Canada Reports <${fromEmail}>`,
+    `From: RoofReporterAI Reports <${fromEmail}>`,
     `To: ${to}`,
     `Subject: =?UTF-8?B?${btoa(unescape(encodeURIComponent(subject)))}?=`,
     `MIME-Version: 1.0`,
@@ -1303,8 +1303,8 @@ async function sendViaResend(
   // Resend free tier sends from onboarding@resend.dev
   // With verified domain, send from your own email
   const from = fromEmail
-    ? `Reuse Canada Reports <${fromEmail}>`
-    : 'Reuse Canada Reports <onboarding@resend.dev>'
+    ? `RoofReporterAI Reports <${fromEmail}>`
+    : 'RoofReporterAI Reports <onboarding@resend.dev>'
 
   const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
@@ -1371,7 +1371,7 @@ async function sendGmailOAuth2(
   }
 
   const rawMessage = [
-    `From: Reuse Canada Reports <${fromAddr}>`,
+    `From: RoofReporterAI Reports <${fromAddr}>`,
     `To: ${to}`,
     `Subject: =?UTF-8?B?${btoa(unescape(encodeURIComponent(subject)))}?=`,
     `MIME-Version: 1.0`,
@@ -1846,7 +1846,7 @@ function computeEdgeSummary(edges: EdgeMeasurement[]) {
 
 // ============================================================
 // PROFESSIONAL 3-PAGE REPORT HTML GENERATOR
-// Matches Reuse Canada branded templates:
+// Matches RoofReporterAI branded templates:
 //   Page 1: Dark theme Roof Measurement Dashboard
 //   Page 2: Light theme Material Order Calculation
 //   Page 3: Light theme Detailed Measurements + Roof Diagram
@@ -2055,7 +2055,7 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
       <div>
         <div class="p1-logo-text">ROOF MEASUREMENT REPORT</div>
         <div class="p1-logo-sub">ANTIGRAVITY GEMINI</div>
-        <div class="p1-logo-brand">Powered by Reuse Canada</div>
+        <div class="p1-logo-brand">Powered by RoofReporterAI</div>
       </div>
     </div>
     <div class="p1-meta">
@@ -2206,7 +2206,7 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
     ${report.ai_geometry?.facets?.length ? `<span class="p1-badge p1-badge-green">AI OVERLAY: ${report.ai_geometry.facets.length} FACETS</span>` : ''}
   </div>
 
-  <div class="p1-footer"><div class="p1-footer-text">Powered by Reuse Canada | Antigravity Gemini Roof Measurement System | ${reportNum} | v${report.report_version || '3.0'}</div></div>
+  <div class="p1-footer"><div class="p1-footer-text">Powered by RoofReporterAI | Antigravity Gemini Roof Measurement System | ${reportNum} | v${report.report_version || '3.0'}</div></div>
 </div>
 
 <!-- ==================== PAGE 2: MATERIAL ORDER CALCULATION ==================== -->
@@ -2284,7 +2284,7 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
     </div>
   </div>
 
-  <div style="text-align:center;margin-top:12px;color:#5A7A96;font-size:7px">Reuse Canada | Material Order Calculation | ${reportNum} | Quantities are estimates &mdash; verify with your supplier. Pricing subject to change.</div>
+  <div style="text-align:center;margin-top:12px;color:#5A7A96;font-size:7px">RoofReporterAI | Material Order Calculation | ${reportNum} | Quantities are estimates &mdash; verify with your supplier. Pricing subject to change.</div>
 </div>
 
 <!-- ==================== PAGE 3: DETAILED MEASUREMENTS + DIAGRAM ==================== -->
@@ -2443,7 +2443,7 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
   </div>
 
   <div style="text-align:center;margin-top:10px;color:#5A7A96;font-size:7px">
-    &copy; ${new Date().getFullYear()} Reuse Canada | Antigravity Gemini Professional Roof Measurement Reports | ${reportNum} | v${report.report_version || '3.0'}
+    &copy; ${new Date().getFullYear()} RoofReporterAI | Antigravity Gemini Professional Roof Measurement Reports | ${reportNum} | v${report.report_version || '3.0'}
   </div>
 </div>
 
@@ -2578,7 +2578,7 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
   </div>
 
   <div style="text-align:center;margin-top:10px;color:#94a3b8;font-size:7px">
-    &copy; ${new Date().getFullYear()} Reuse Canada | Antigravity Gemini | ${reportNum} | v${report.report_version || '3.0'} | All imagery &copy; Google
+    &copy; ${new Date().getFullYear()} RoofReporterAI | Antigravity Gemini | ${reportNum} | v${report.report_version || '3.0'} | All imagery &copy; Google
   </div>
 </div>
 

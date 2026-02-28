@@ -313,7 +313,7 @@ function renderBranding() {
       '<div class="bg-gradient-to-br from-pink-50 to-fuchsia-50 rounded-xl border border-pink-200 p-6">' +
         '<h3 class="font-bold text-gray-800 text-sm mb-3"><i class="fas fa-check-double text-pink-500 mr-2"></i>Your Branding Applies To</h3>' +
         '<div class="space-y-2">' +
-          '<div class="flex items-center gap-3 p-2.5 bg-white rounded-lg"><i class="fas fa-file-alt text-blue-500 w-5 text-center"></i><span class="text-sm text-gray-700">Roof Measurement Reports</span><i class="fas fa-check-circle text-green-500 ml-auto"></i></div>' +
+          '<div class="flex items-center gap-3 p-2.5 bg-white rounded-lg"><i class="fas fa-file-alt text-blue-500 w-5 text-center"></i><span class="text-sm text-gray-700">Roof Reports & CRM</span><i class="fas fa-check-circle text-green-500 ml-auto"></i></div>' +
           '<div class="flex items-center gap-3 p-2.5 bg-white rounded-lg"><i class="fas fa-file-signature text-purple-500 w-5 text-center"></i><span class="text-sm text-gray-700">Sales Proposals & Estimates</span><i class="fas fa-check-circle text-green-500 ml-auto"></i></div>' +
           '<div class="flex items-center gap-3 p-2.5 bg-white rounded-lg"><i class="fas fa-file-invoice-dollar text-amber-500 w-5 text-center"></i><span class="text-sm text-gray-700">Customer Invoices</span><i class="fas fa-check-circle text-green-500 ml-auto"></i></div>' +
           '<div class="flex items-center gap-3 p-2.5 bg-white rounded-lg"><i class="fas fa-envelope text-green-500 w-5 text-center"></i><span class="text-sm text-gray-700">Email Report Delivery</span><i class="fas fa-check-circle text-green-500 ml-auto"></i></div>' +
