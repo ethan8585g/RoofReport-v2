@@ -9,14 +9,21 @@
   if (!root) return;
 
   // --- State ---
-  var map, drawingManager, geocoder;
+  var map, geocoder;
   var turfs = [], pins = [], team = [], stats = {};
   var selectedTurfId = null;
   var activeTool = 'pointer'; // pointer | pin | turf
-  var turfPolygons = {};  // id → google.maps.Polygon
-  var pinMarkers = {};    // id → google.maps.marker.AdvancedMarkerElement or Marker
-  var currentDrawingPolygon = null;
+  var turfPolygons = {};  // id -> google.maps.Polygon
+  var pinMarkers = {};    // id -> google.maps.Marker
   var infoWindow = null;
+
+  // Drawing state
+  var isDrawing = false;
+  var drawingPoints = [];
+  var drawingMarkers = [];
+  var drawingPolyline = null;
+  var drawingPreviewPolygon = null;
+  var clickTimer = null; // debounce click vs dblclick
 
   var COLORS = ['#0ea5e9','#ef4444','#22c55e','#f59e0b','#8b5cf6','#ec4899','#14b8a6','#f97316',
                 '#6366f1','#84cc16','#06b6d4','#e11d48','#a855f7','#10b981','#f43f5e','#3b82f6'];
@@ -44,10 +51,11 @@
   // --- Toast ---
   function toast(msg, type) {
     var t = document.createElement('div');
-    t.className = 'fixed bottom-4 right-4 z-[60] px-5 py-3 rounded-xl shadow-xl text-sm font-medium text-white ' + (type === 'error' ? 'bg-red-600' : 'bg-green-600');
-    t.innerHTML = '<i class="fas ' + (type === 'error' ? 'fa-exclamation-circle' : 'fa-check-circle') + ' mr-2"></i>' + msg;
+    t.className = 'fixed bottom-4 right-4 z-[60] px-5 py-3 rounded-xl shadow-xl text-sm font-medium text-white ' +
+      (type === 'error' ? 'bg-red-600' : type === 'info' ? 'bg-sky-600' : 'bg-green-600');
+    t.innerHTML = '<i class="fas ' + (type === 'error' ? 'fa-exclamation-circle' : type === 'info' ? 'fa-info-circle' : 'fa-check-circle') + ' mr-2"></i>' + msg;
     document.body.appendChild(t);
-    setTimeout(function() { t.remove(); }, 3000);
+    setTimeout(function() { t.remove(); }, 4000);
   }
 
   // ============================================================
@@ -56,28 +64,30 @@
   function renderLayout() {
     root.innerHTML = '<div class="d2d-container">' +
       '<div class="d2d-sidebar">' +
-        // Stats
         '<div class="d2d-stats" id="d2dStats"></div>' +
-        // Tabs
         '<div class="d2d-tabs">' +
           '<div class="d2d-tab active" data-tab="turfs"><i class="fas fa-map"></i>Turfs</div>' +
           '<div class="d2d-tab" data-tab="pins"><i class="fas fa-map-pin"></i>Pins</div>' +
           '<div class="d2d-tab" data-tab="team"><i class="fas fa-users"></i>Team</div>' +
         '</div>' +
-        // Panels
         '<div class="d2d-panel active" id="panelTurfs"></div>' +
         '<div class="d2d-panel" id="panelPins"></div>' +
         '<div class="d2d-panel" id="panelTeam"></div>' +
       '</div>' +
       '<div class="d2d-map-area">' +
         '<div id="d2dMap" style="width:100%;height:100%"></div>' +
-        // Toolbar
         '<div class="d2d-toolbar" id="d2dToolbar">' +
-          '<div class="d2d-tool active" data-tool="pointer" title="Select"><i class="fas fa-mouse-pointer"></i></div>' +
-          '<div class="d2d-tool" data-tool="turf" title="Draw Turf"><i class="fas fa-draw-polygon"></i></div>' +
-          '<div class="d2d-tool" data-tool="pin" title="Place Pin"><i class="fas fa-map-pin"></i></div>' +
+          '<div class="d2d-tool active" data-tool="pointer" title="Select / Navigate"><i class="fas fa-mouse-pointer"></i></div>' +
+          '<div class="d2d-tool" data-tool="turf" title="Draw Turf Zone"><i class="fas fa-draw-polygon"></i></div>' +
+          '<div class="d2d-tool" data-tool="pin" title="Place Door Pin"><i class="fas fa-map-pin"></i></div>' +
         '</div>' +
-        // Legend
+        // Instruction banner (hidden by default)
+        '<div id="d2dBanner" class="hidden" style="position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:10;background:#fff;padding:8px 20px;border-radius:10px;box-shadow:0 2px 12px rgba(0,0,0,.15);font-size:13px;font-weight:600;white-space:nowrap;"></div>' +
+        // Finish drawing button (hidden by default)
+        '<div id="d2dFinishBar" class="hidden" style="position:absolute;top:60px;left:50%;transform:translateX(-50%);z-index:10;display:flex;gap:8px;">' +
+          '<button onclick="window.d2d.finishDrawing()" class="d2d-btn d2d-btn-primary" style="box-shadow:0 2px 12px rgba(0,0,0,.2)"><i class="fas fa-check mr-1"></i>Finish Turf</button>' +
+          '<button onclick="window.d2d.cancelDrawing()" class="d2d-btn d2d-btn-outline" style="background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.2)"><i class="fas fa-times mr-1"></i>Cancel</button>' +
+        '</div>' +
         '<div class="d2d-legend">' +
           '<div class="d2d-legend-row"><div class="d2d-legend-dot" style="background:#22c55e"></div>Yes / Interested</div>' +
           '<div class="d2d-legend-row"><div class="d2d-legend-dot" style="background:#ef4444"></div>No / Not Interested</div>' +
@@ -100,7 +110,13 @@
     // Tool switching
     document.querySelectorAll('.d2d-tool').forEach(function(tool) {
       tool.addEventListener('click', function() {
-        setActiveTool(tool.getAttribute('data-tool'));
+        var t = tool.getAttribute('data-tool');
+        if (t === 'turf') {
+          startDrawTurf();
+        } else {
+          if (isDrawing) cancelDrawing();
+          setActiveTool(t);
+        }
       });
     });
   }
@@ -112,14 +128,42 @@
     document.querySelectorAll('.d2d-tool').forEach(function(t) {
       t.classList.toggle('active', t.getAttribute('data-tool') === tool);
     });
+
+    var banner = document.getElementById('d2dBanner');
+    if (banner) {
+      if (tool === 'pin') {
+        banner.classList.remove('hidden');
+        banner.innerHTML = '<i class="fas fa-map-pin mr-2 text-sky-500"></i>Click on a house to place a door pin';
+        banner.style.color = '#0369a1';
+      } else if (tool === 'turf') {
+        // Handled by startDrawTurf
+      } else {
+        banner.classList.add('hidden');
+      }
+    }
+
+    var finishBar = document.getElementById('d2dFinishBar');
+    if (finishBar && tool !== 'turf') {
+      finishBar.classList.add('hidden');
+    }
+
     if (map) {
-      map.setOptions({ draggableCursor: tool === 'pin' ? 'crosshair' : (tool === 'turf' ? 'crosshair' : '') });
+      map.setOptions({ draggableCursor: (tool === 'pin' || tool === 'turf') ? 'crosshair' : '' });
     }
-    // Cancel any ongoing polygon drawing
-    if (tool !== 'turf' && currentDrawingPolygon) {
-      currentDrawingPolygon.setMap(null);
-      currentDrawingPolygon = null;
+  }
+
+  function showBanner(html, color) {
+    var banner = document.getElementById('d2dBanner');
+    if (banner) {
+      banner.classList.remove('hidden');
+      banner.innerHTML = html;
+      banner.style.color = color || '#374151';
     }
+  }
+
+  function hideBanner() {
+    var banner = document.getElementById('d2dBanner');
+    if (banner) banner.classList.add('hidden');
   }
 
   // ============================================================
@@ -148,12 +192,12 @@
     '</div>';
 
     if (turfs.length === 0) {
-      html += '<div class="d2d-empty"><i class="fas fa-map-marked-alt"></i><p>No turfs yet.<br>Click "New Turf" or use the draw tool on the map.</p></div>';
+      html += '<div class="d2d-empty"><i class="fas fa-map-marked-alt"></i><p>No turfs yet.<br>Click "New Turf" or use the polygon tool to draw one on the map.</p></div>';
     } else {
       for (var i = 0; i < turfs.length; i++) {
         var t = turfs[i];
-        var total = (t.yes_count || 0) + (t.no_count || 0) + (t.no_answer_count || 0) + (t.not_knocked_count || 0);
-        var knocked = (t.yes_count || 0) + (t.no_count || 0) + (t.no_answer_count || 0);
+        var total = (t.yes_count||0) + (t.no_count||0) + (t.no_answer_count||0) + (t.not_knocked_count||0);
+        var knocked = (t.yes_count||0) + (t.no_count||0) + (t.no_answer_count||0);
         var pct = total > 0 ? Math.round((knocked / total) * 100) : 0;
         html += '<div class="d2d-card' + (selectedTurfId == t.id ? ' selected' : '') + '" onclick="window.d2d.selectTurf(' + t.id + ')">' +
           '<div class="flex items-start justify-between">' +
@@ -169,14 +213,14 @@
             '</div>' +
           '</div>' +
           '<div class="mt-2 grid grid-cols-4 gap-1 text-center text-[10px]">' +
-            '<div class="pin-yes rounded px-1 py-0.5"><b>' + (t.yes_count || 0) + '</b> Yes</div>' +
-            '<div class="pin-no rounded px-1 py-0.5"><b>' + (t.no_count || 0) + '</b> No</div>' +
-            '<div class="pin-no-answer rounded px-1 py-0.5"><b>' + (t.no_answer_count || 0) + '</b> N/A</div>' +
-            '<div class="pin-not-knocked rounded px-1 py-0.5"><b>' + (t.not_knocked_count || 0) + '</b> TBD</div>' +
+            '<div class="pin-yes rounded px-1 py-0.5"><b>' + (t.yes_count||0) + '</b> Yes</div>' +
+            '<div class="pin-no rounded px-1 py-0.5"><b>' + (t.no_count||0) + '</b> No</div>' +
+            '<div class="pin-no-answer rounded px-1 py-0.5"><b>' + (t.no_answer_count||0) + '</b> N/A</div>' +
+            '<div class="pin-not-knocked rounded px-1 py-0.5"><b>' + (t.not_knocked_count||0) + '</b> TBD</div>' +
           '</div>' +
           '<div class="mt-2">' +
             '<div class="flex justify-between text-[10px] mb-1"><span class="text-gray-500">Progress</span><span class="font-semibold">' + pct + '%</span></div>' +
-            '<div class="w-full bg-gray-200 rounded-full h-1.5"><div class="h-1.5 rounded-full" style="width:' + pct + '%;background:' + (t.color || '#0ea5e9') + '"></div></div>' +
+            '<div class="w-full bg-gray-200 rounded-full h-1.5"><div class="h-1.5 rounded-full" style="width:' + pct + '%;background:' + (t.color||'#0ea5e9') + '"></div></div>' +
           '</div>' +
         '</div>';
       }
@@ -192,7 +236,6 @@
     var panel = document.getElementById('panelPins');
     if (!panel) return;
 
-    // Filter bar
     var html = '<div class="flex items-center justify-between mb-3">' +
       '<h3 class="font-bold text-gray-800 text-sm">Door Pins <span class="text-gray-400 font-normal">(' + pins.length + ')</span></h3>' +
       '<select id="pinFilter" class="d2d-select" style="width:auto;font-size:11px;padding:4px 8px" onchange="window.d2d.filterPins(this.value)">' +
@@ -205,9 +248,8 @@
     '</div>';
 
     if (pins.length === 0) {
-      html += '<div class="d2d-empty"><i class="fas fa-map-pin"></i><p>No pins yet.<br>Use the pin tool to drop pins on houses.</p></div>';
+      html += '<div class="d2d-empty"><i class="fas fa-map-pin"></i><p>No pins yet.<br>Select the pin tool and click on houses on the map.</p></div>';
     } else {
-      // Group by turf
       var byTurf = {};
       var noTurf = [];
       for (var i = 0; i < pins.length; i++) {
@@ -222,15 +264,11 @@
 
       for (var tid in byTurf) {
         html += '<div class="text-xs font-semibold text-gray-500 mb-1 mt-2"><i class="fas fa-map mr-1"></i>' + escH(byTurf[tid].name) + ' (' + byTurf[tid].pins.length + ')</div>';
-        for (var j = 0; j < byTurf[tid].pins.length; j++) {
-          html += renderPinCard(byTurf[tid].pins[j]);
-        }
+        for (var j = 0; j < byTurf[tid].pins.length; j++) html += renderPinCard(byTurf[tid].pins[j]);
       }
       if (noTurf.length > 0) {
         html += '<div class="text-xs font-semibold text-gray-500 mb-1 mt-2">Unassigned (' + noTurf.length + ')</div>';
-        for (var k = 0; k < noTurf.length; k++) {
-          html += renderPinCard(noTurf[k]);
-        }
+        for (var k = 0; k < noTurf.length; k++) html += renderPinCard(noTurf[k]);
       }
     }
 
@@ -238,7 +276,7 @@
   }
 
   function renderPinCard(p) {
-    var statusClass = 'pin-' + (p.status || 'not_knocked').replace('_', '-');
+    var statusClass = 'pin-' + (p.status || 'not_knocked').replace(/_/g, '-');
     return '<div class="d2d-card" onclick="window.d2d.focusPin(' + p.id + ')" style="padding:8px 10px">' +
       '<div class="flex items-center justify-between">' +
         '<div class="flex items-center gap-2">' +
@@ -290,9 +328,9 @@
             '</div>' +
           '</div>' +
           '<div class="mt-2 grid grid-cols-3 gap-1 text-center text-[10px]">' +
-            '<div class="bg-sky-50 text-sky-700 rounded px-1 py-0.5"><b>' + (m.turf_count || 0) + '</b> Turfs</div>' +
-            '<div class="bg-gray-50 text-gray-700 rounded px-1 py-0.5"><b>' + (m.knock_count || 0) + '</b> Knocks</div>' +
-            '<div class="bg-green-50 text-green-700 rounded px-1 py-0.5"><b>' + (m.yes_count || 0) + '</b> Yes</div>' +
+            '<div class="bg-sky-50 text-sky-700 rounded px-1 py-0.5"><b>' + (m.turf_count||0) + '</b> Turfs</div>' +
+            '<div class="bg-gray-50 text-gray-700 rounded px-1 py-0.5"><b>' + (m.knock_count||0) + '</b> Knocks</div>' +
+            '<div class="bg-green-50 text-green-700 rounded px-1 py-0.5"><b>' + (m.yes_count||0) + '</b> Yes</div>' +
           '</div>' +
         '</div>';
       }
@@ -302,11 +340,10 @@
   }
 
   // ============================================================
-  // MAP INITIALIZATION
+  // MAP INITIALIZATION — Single click handler architecture
   // ============================================================
   function initMap() {
     if (typeof google === 'undefined' || !google.maps) {
-      // Retry after a short delay
       setTimeout(initMap, 500);
       return;
     }
@@ -321,6 +358,7 @@
       streetViewControl: false,
       fullscreenControl: true,
       fullscreenControlOptions: { position: google.maps.ControlPosition.RIGHT_TOP },
+      disableDoubleClickZoom: false, // will be toggled during drawing
       styles: [
         { featureType: 'poi', elementType: 'labels', stylers: [{ visibility: 'off' }] },
         { featureType: 'transit', stylers: [{ visibility: 'off' }] }
@@ -330,14 +368,33 @@
     geocoder = new google.maps.Geocoder();
     infoWindow = new google.maps.InfoWindow();
 
-    // Click handler for pin placement
+    // ---- SINGLE unified click handler for the entire map ----
+    // Uses a 250ms debounce to distinguish single-click from double-click
     map.addListener('click', function(e) {
+      // If we're drawing a turf, debounce to avoid double-click adding an extra point
+      if (isDrawing) {
+        if (clickTimer) clearTimeout(clickTimer);
+        clickTimer = setTimeout(function() {
+          addDrawingPoint(e.latLng);
+        }, 250);
+        return;
+      }
+
+      // Pin tool — place pin
       if (activeTool === 'pin') {
         placePinAtLocation(e.latLng);
       }
     });
 
-    // Load initial data
+    map.addListener('dblclick', function(e) {
+      if (isDrawing) {
+        // Cancel the pending single-click
+        if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; }
+        finishDrawing();
+      }
+    });
+
+    // Load data
     loadAll();
   }
 
@@ -374,24 +431,13 @@
   // ============================================================
   function renderMapObjects() {
     // Clear old
-    for (var pid in pinMarkers) {
-      pinMarkers[pid].setMap(null);
-    }
+    for (var pid in pinMarkers) { pinMarkers[pid].setMap(null); }
     pinMarkers = {};
-    for (var tid in turfPolygons) {
-      turfPolygons[tid].setMap(null);
-    }
+    for (var tid in turfPolygons) { turfPolygons[tid].setMap(null); }
     turfPolygons = {};
 
-    // Draw turfs
-    for (var i = 0; i < turfs.length; i++) {
-      drawTurfOnMap(turfs[i]);
-    }
-
-    // Draw pins
-    for (var j = 0; j < pins.length; j++) {
-      drawPinOnMap(pins[j]);
-    }
+    for (var i = 0; i < turfs.length; i++) drawTurfOnMap(turfs[i]);
+    for (var j = 0; j < pins.length; j++) drawPinOnMap(pins[j]);
 
     // Auto-zoom to fit
     if (turfs.length > 0 || pins.length > 0) {
@@ -399,14 +445,10 @@
       for (var ti = 0; ti < turfs.length; ti++) {
         try {
           var poly = JSON.parse(turfs[ti].polygon_json || '[]');
-          for (var pi = 0; pi < poly.length; pi++) {
-            bounds.extend(new google.maps.LatLng(poly[pi].lat, poly[pi].lng));
-          }
+          for (var pi = 0; pi < poly.length; pi++) bounds.extend(new google.maps.LatLng(poly[pi].lat, poly[pi].lng));
         } catch(e) {}
       }
-      for (var pk = 0; pk < pins.length; pk++) {
-        bounds.extend(new google.maps.LatLng(pins[pk].lat, pins[pk].lng));
-      }
+      for (var pk = 0; pk < pins.length; pk++) bounds.extend(new google.maps.LatLng(pins[pk].lat, pins[pk].lng));
       map.fitBounds(bounds, 60);
     }
   }
@@ -429,6 +471,7 @@
       });
 
       polygon.addListener('click', function(e) {
+        if (isDrawing || activeTool === 'pin') return; // don't open info during drawing or pinning
         selectTurf(turf.id);
         showTurfInfo(turf, e.latLng);
       });
@@ -442,45 +485,25 @@
   function drawPinOnMap(pin) {
     var color = PIN_COLORS[pin.status] || '#9ca3af';
 
-    // Create custom marker element
-    var el = document.createElement('div');
-    el.style.cssText = 'width:28px;height:28px;background:' + color + ';border-radius:50%;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.3);cursor:pointer;display:flex;align-items:center;justify-content:center;';
-    
-    var icon = document.createElement('i');
-    icon.className = 'fas ' + (PIN_ICONS[pin.status] || 'fa-circle');
-    icon.style.cssText = 'color:#fff;font-size:10px;';
-    el.appendChild(icon);
+    var marker = new google.maps.Marker({
+      map: map,
+      position: { lat: pin.lat, lng: pin.lng },
+      icon: {
+        path: google.maps.SymbolPath.CIRCLE,
+        scale: 10,
+        fillColor: color,
+        fillOpacity: 1,
+        strokeColor: '#fff',
+        strokeWeight: 3
+      },
+      zIndex: 10,
+      title: pin.address || 'Pin #' + pin.id
+    });
 
-    var marker;
-    if (google.maps.marker && google.maps.marker.AdvancedMarkerElement) {
-      marker = new google.maps.marker.AdvancedMarkerElement({
-        map: map,
-        position: { lat: pin.lat, lng: pin.lng },
-        content: el,
-        zIndex: 10
-      });
-      marker.addListener('click', function() {
-        showPinInfo(pin, marker);
-      });
-    } else {
-      // Fallback to classic marker
-      marker = new google.maps.Marker({
-        map: map,
-        position: { lat: pin.lat, lng: pin.lng },
-        icon: {
-          path: google.maps.SymbolPath.CIRCLE,
-          scale: 10,
-          fillColor: color,
-          fillOpacity: 1,
-          strokeColor: '#fff',
-          strokeWeight: 2
-        },
-        zIndex: 10
-      });
-      marker.addListener('click', function() {
-        showPinInfo(pin, marker);
-      });
-    }
+    marker.addListener('click', function() {
+      if (isDrawing) return;
+      showPinInfo(pin, marker);
+    });
 
     pinMarkers[pin.id] = marker;
   }
@@ -539,79 +562,140 @@
     '</div>';
 
     infoWindow.setContent(html);
-    if (marker.position) {
-      infoWindow.setPosition(marker.position instanceof google.maps.LatLng ? marker.position : new google.maps.LatLng(marker.position.lat, marker.position.lng));
-    }
+    infoWindow.setPosition(marker.getPosition());
     infoWindow.open(map);
   }
 
   // ============================================================
-  // TURF DRAWING (Polygon)
+  // TURF DRAWING — Click-by-click polygon with finish button
   // ============================================================
-  var drawingPoints = [];
-  var drawingMarkers = [];
-  var drawingPolyline = null;
-
   function startDrawTurf() {
-    setActiveTool('turf');
+    // If already drawing, do nothing
+    if (isDrawing) return;
+
+    isDrawing = true;
+    activeTool = 'turf';
     drawingPoints = [];
     clearDrawingUI();
-    toast('Click on the map to place turf boundary points. Double-click to finish.', 'info');
 
-    // Use map click for polygon drawing
-    var clickListener = map.addListener('click', function(e) {
-      drawingPoints.push({ lat: e.latLng.lat(), lng: e.latLng.lng() });
-      // Draw marker at point
-      var marker = new google.maps.Marker({
-        position: e.latLng,
-        map: map,
-        icon: {
-          path: google.maps.SymbolPath.CIRCLE,
-          scale: 6,
-          fillColor: '#0ea5e9',
-          fillOpacity: 1,
-          strokeColor: '#fff',
-          strokeWeight: 2
-        },
-        zIndex: 100
-      });
-      drawingMarkers.push(marker);
+    // Update toolbar
+    document.querySelectorAll('.d2d-tool').forEach(function(t) {
+      t.classList.toggle('active', t.getAttribute('data-tool') === 'turf');
+    });
 
-      // Draw polyline
-      if (drawingPolyline) drawingPolyline.setMap(null);
-      drawingPolyline = new google.maps.Polyline({
-        path: drawingPoints,
+    // Disable double-click zoom while drawing
+    map.setOptions({ disableDoubleClickZoom: true, draggableCursor: 'crosshair' });
+
+    // Show instructions
+    showBanner('<i class="fas fa-draw-polygon mr-2 text-sky-500"></i>Click to add boundary points. Click "Finish Turf" or double-click to complete.', '#0369a1');
+
+    // Show finish/cancel bar
+    var finishBar = document.getElementById('d2dFinishBar');
+    if (finishBar) finishBar.classList.remove('hidden');
+
+    // Close any open info window
+    if (infoWindow) infoWindow.close();
+  }
+
+  function addDrawingPoint(latLng) {
+    var pt = { lat: latLng.lat(), lng: latLng.lng() };
+    drawingPoints.push(pt);
+
+    // Drop a numbered marker
+    var marker = new google.maps.Marker({
+      position: latLng,
+      map: map,
+      icon: {
+        path: google.maps.SymbolPath.CIRCLE,
+        scale: 7,
+        fillColor: '#0ea5e9',
+        fillOpacity: 1,
+        strokeColor: '#fff',
+        strokeWeight: 2
+      },
+      label: {
+        text: String(drawingPoints.length),
+        color: '#fff',
+        fontSize: '10px',
+        fontWeight: 'bold'
+      },
+      zIndex: 100
+    });
+    drawingMarkers.push(marker);
+
+    // Update polyline preview
+    if (drawingPolyline) drawingPolyline.setMap(null);
+    drawingPolyline = new google.maps.Polyline({
+      path: drawingPoints,
+      strokeColor: '#0ea5e9',
+      strokeWeight: 2,
+      strokeOpacity: 0.8,
+      map: map
+    });
+
+    // Show preview polygon fill after 3+ points
+    if (drawingPoints.length >= 3) {
+      if (drawingPreviewPolygon) drawingPreviewPolygon.setMap(null);
+      drawingPreviewPolygon = new google.maps.Polygon({
+        paths: drawingPoints,
         strokeColor: '#0ea5e9',
-        strokeWeight: 2,
-        strokeOpacity: 0.8,
-        map: map
+        strokeOpacity: 0.5,
+        strokeWeight: 1,
+        fillColor: '#0ea5e9',
+        fillOpacity: 0.1,
+        map: map,
+        clickable: false,
+        zIndex: 0
       });
-    });
+    }
 
-    var dblClickListener = map.addListener('dblclick', function(e) {
-      google.maps.event.removeListener(clickListener);
-      google.maps.event.removeListener(dblClickListener);
-      clearDrawingUI();
+    // Update banner with point count
+    showBanner('<i class="fas fa-draw-polygon mr-2 text-sky-500"></i>' + drawingPoints.length + ' point' + (drawingPoints.length > 1 ? 's' : '') + ' placed — ' + (drawingPoints.length < 3 ? 'need ' + (3 - drawingPoints.length) + ' more' : 'click "Finish Turf" or double-click to save'), '#0369a1');
+  }
 
-      if (drawingPoints.length < 3) {
-        toast('Need at least 3 points to create a turf.', 'error');
-        setActiveTool('pointer');
-        return;
-      }
+  function finishDrawing() {
+    if (!isDrawing) return;
 
-      // Show save dialog
-      showSaveTurfModal(drawingPoints);
-    });
+    // Cancel the debounce timer
+    if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; }
+
+    if (drawingPoints.length < 3) {
+      toast('Need at least 3 points to create a turf.', 'error');
+      return; // Don't cancel, let user keep adding points
+    }
+
+    var polygon = drawingPoints.slice(); // copy
+    clearDrawingUI();
+    isDrawing = false;
+    map.setOptions({ disableDoubleClickZoom: false, draggableCursor: '' });
+    hideBanner();
+    var finishBar = document.getElementById('d2dFinishBar');
+    if (finishBar) finishBar.classList.add('hidden');
+
+    showSaveTurfModal(polygon);
+  }
+
+  function cancelDrawing() {
+    if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; }
+    clearDrawingUI();
+    isDrawing = false;
+    drawingPoints = [];
+    map.setOptions({ disableDoubleClickZoom: false, draggableCursor: '' });
+    hideBanner();
+    var finishBar = document.getElementById('d2dFinishBar');
+    if (finishBar) finishBar.classList.add('hidden');
+    setActiveTool('pointer');
+    toast('Drawing cancelled.', 'info');
   }
 
   function clearDrawingUI() {
     for (var i = 0; i < drawingMarkers.length; i++) drawingMarkers[i].setMap(null);
     drawingMarkers = [];
     if (drawingPolyline) { drawingPolyline.setMap(null); drawingPolyline = null; }
+    if (drawingPreviewPolygon) { drawingPreviewPolygon.setMap(null); drawingPreviewPolygon = null; }
   }
 
   function showSaveTurfModal(polygon) {
-    // Calculate center
     var cLat = 0, cLng = 0;
     for (var i = 0; i < polygon.length; i++) { cLat += polygon[i].lat; cLng += polygon[i].lng; }
     cLat /= polygon.length; cLng /= polygon.length;
@@ -630,24 +714,23 @@
     overlay.className = 'fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4';
     overlay.id = 'd2dModal';
     overlay.innerHTML = '<div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">' +
-      '<div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between"><h3 class="font-bold text-gray-800"><i class="fas fa-draw-polygon mr-2 text-sky-500"></i>Create New Turf</h3><button onclick="document.getElementById(\'d2dModal\').remove()" class="text-gray-400 hover:text-gray-600 text-lg">&times;</button></div>' +
+      '<div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between"><h3 class="font-bold text-gray-800"><i class="fas fa-draw-polygon mr-2 text-sky-500"></i>Save New Turf</h3><button onclick="document.getElementById(\'d2dModal\').remove();window.d2d.setTool(\'pointer\')" class="text-gray-400 hover:text-gray-600 text-lg">&times;</button></div>' +
       '<div class="p-6 space-y-4">' +
         '<div><label class="text-xs font-semibold text-gray-600 mb-1 block">Turf Name *</label><input id="turfName" class="d2d-input" placeholder="e.g., North Hill Crescent" autofocus></div>' +
         '<div><label class="text-xs font-semibold text-gray-600 mb-1 block">Description</label><input id="turfDesc" class="d2d-input" placeholder="Optional description..."></div>' +
         '<div><label class="text-xs font-semibold text-gray-600 mb-1 block">Assign To</label><select id="turfAssign" class="d2d-select">' + teamOpts + '</select></div>' +
         '<div><label class="text-xs font-semibold text-gray-600 mb-1 block">Color</label><div class="d2d-color-grid" id="colorGrid">' + colorGrid + '</div></div>' +
-        '<div class="text-xs text-gray-400"><i class="fas fa-info-circle mr-1"></i>' + polygon.length + ' points drawn</div>' +
+        '<div class="text-xs text-gray-400"><i class="fas fa-info-circle mr-1"></i>' + polygon.length + ' boundary points drawn</div>' +
       '</div>' +
       '<div class="px-6 py-4 border-t border-gray-100 flex justify-end gap-2">' +
-        '<button onclick="document.getElementById(\'d2dModal\').remove()" class="d2d-btn d2d-btn-outline">Cancel</button>' +
+        '<button onclick="document.getElementById(\'d2dModal\').remove();window.d2d.setTool(\'pointer\')" class="d2d-btn d2d-btn-outline">Cancel</button>' +
         '<button id="saveTurfBtn" class="d2d-btn d2d-btn-primary"><i class="fas fa-save mr-1"></i>Save Turf</button>' +
       '</div>' +
     '</div>';
 
     document.body.appendChild(overlay);
-    overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+    overlay.addEventListener('click', function(e) { if (e.target === overlay) { overlay.remove(); setActiveTool('pointer'); } });
 
-    // Color selection
     var selectedColor = COLORS[0];
     document.querySelectorAll('#colorGrid .d2d-color-swatch').forEach(function(sw) {
       sw.addEventListener('click', function() {
@@ -657,10 +740,13 @@
       });
     });
 
-    // Save
     document.getElementById('saveTurfBtn').addEventListener('click', function() {
       var name = document.getElementById('turfName').value.trim();
       if (!name) { toast('Please enter a turf name.', 'error'); return; }
+
+      var btn = document.getElementById('saveTurfBtn');
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>Saving...';
 
       api('POST', '/turfs', {
         name: name,
@@ -678,7 +764,13 @@
           loadAll();
         } else {
           toast(r.error || 'Failed to create turf', 'error');
+          btn.disabled = false;
+          btn.innerHTML = '<i class="fas fa-save mr-1"></i>Save Turf';
         }
+      }).catch(function() {
+        toast('Network error', 'error');
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-save mr-1"></i>Save Turf';
       });
     });
   }
@@ -707,9 +799,9 @@
     for (var i = 0; i < turfs.length; i++) {
       try {
         var poly = JSON.parse(turfs[i].polygon_json || '[]');
-        if (poly.length >= 3) {
+        if (poly.length >= 3 && google.maps.geometry && google.maps.geometry.poly) {
           var gPoly = new google.maps.Polygon({ paths: poly });
-          if (google.maps.geometry && google.maps.geometry.poly.containsLocation(new google.maps.LatLng(lat, lng), gPoly)) {
+          if (google.maps.geometry.poly.containsLocation(new google.maps.LatLng(lat, lng), gPoly)) {
             inTurf = turfs[i];
             break;
           }
@@ -730,12 +822,12 @@
       '<div class="p-6 space-y-4">' +
         '<div><label class="text-xs font-semibold text-gray-600 mb-1 block">Address</label><input id="pinAddress" class="d2d-input" value="' + escAttr(address) + '"></div>' +
         (inTurf ? '<div class="text-xs text-sky-600 bg-sky-50 rounded-lg p-2"><i class="fas fa-map mr-1"></i>Inside turf: <b>' + escH(inTurf.name) + '</b></div>' : '<div class="text-xs text-gray-400 bg-gray-50 rounded-lg p-2"><i class="fas fa-exclamation-triangle mr-1 text-amber-500"></i>Not inside any turf</div>') +
-        '<div><label class="text-xs font-semibold text-gray-600 mb-1 block">Initial Status</label>' +
+        '<div><label class="text-xs font-semibold text-gray-600 mb-1 block">Status</label>' +
           '<div class="grid grid-cols-2 gap-2" id="pinStatusGrid">' +
-            '<div class="border rounded-lg p-2 cursor-pointer text-center text-xs font-semibold hover:border-gray-400 selected" data-status="not_knocked" style="border-color:#9ca3af"><i class="fas fa-circle mr-1" style="color:#9ca3af"></i>Not Knocked</div>' +
-            '<div class="border rounded-lg p-2 cursor-pointer text-center text-xs font-semibold hover:border-green-400" data-status="yes"><i class="fas fa-check-circle mr-1" style="color:#22c55e"></i>Yes</div>' +
-            '<div class="border rounded-lg p-2 cursor-pointer text-center text-xs font-semibold hover:border-red-400" data-status="no"><i class="fas fa-times-circle mr-1" style="color:#ef4444"></i>No</div>' +
-            '<div class="border rounded-lg p-2 cursor-pointer text-center text-xs font-semibold hover:border-amber-400" data-status="no_answer"><i class="fas fa-question-circle mr-1" style="color:#f59e0b"></i>No Answer</div>' +
+            '<div class="border-2 rounded-lg p-2 cursor-pointer text-center text-xs font-semibold" data-status="not_knocked" style="border-color:#9ca3af;background:#f9fafb"><i class="fas fa-circle mr-1" style="color:#9ca3af"></i>Not Knocked</div>' +
+            '<div class="border-2 rounded-lg p-2 cursor-pointer text-center text-xs font-semibold border-gray-200" data-status="yes"><i class="fas fa-check-circle mr-1" style="color:#22c55e"></i>Yes</div>' +
+            '<div class="border-2 rounded-lg p-2 cursor-pointer text-center text-xs font-semibold border-gray-200" data-status="no"><i class="fas fa-times-circle mr-1" style="color:#ef4444"></i>No</div>' +
+            '<div class="border-2 rounded-lg p-2 cursor-pointer text-center text-xs font-semibold border-gray-200" data-status="no_answer"><i class="fas fa-question-circle mr-1" style="color:#f59e0b"></i>No Answer</div>' +
           '</div>' +
         '</div>' +
         '<div><label class="text-xs font-semibold text-gray-600 mb-1 block">Knocked By</label><select id="pinKnockedBy" class="d2d-select">' + memberOpts + '</select></div>' +
@@ -754,15 +846,18 @@
     var selectedStatus = 'not_knocked';
     document.querySelectorAll('#pinStatusGrid > div').forEach(function(el) {
       el.addEventListener('click', function() {
-        document.querySelectorAll('#pinStatusGrid > div').forEach(function(d) { d.classList.remove('selected'); d.style.borderColor = ''; });
-        el.classList.add('selected');
+        document.querySelectorAll('#pinStatusGrid > div').forEach(function(d) { d.style.borderColor = '#e5e7eb'; d.style.background = ''; });
+        el.style.borderColor = PIN_COLORS[el.getAttribute('data-status')] || '#9ca3af';
+        el.style.background = '#f9fafb';
         selectedStatus = el.getAttribute('data-status');
-        el.style.borderColor = PIN_COLORS[selectedStatus] || '#9ca3af';
       });
     });
 
-    // Save
     document.getElementById('savePinBtn').addEventListener('click', function() {
+      var btn = document.getElementById('savePinBtn');
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>Saving...';
+
       api('POST', '/pins', {
         lat: lat,
         lng: lng,
@@ -778,7 +873,13 @@
           loadAll();
         } else {
           toast(r.error || 'Failed to place pin', 'error');
+          btn.disabled = false;
+          btn.innerHTML = '<i class="fas fa-map-pin mr-1"></i>Save Pin';
         }
+      }).catch(function() {
+        toast('Network error', 'error');
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-map-pin mr-1"></i>Save Pin';
       });
     });
   }
@@ -790,21 +891,16 @@
     selectedTurfId = (selectedTurfId == id) ? null : id;
     renderTurfsPanel();
 
-    // Zoom to turf
     if (selectedTurfId) {
       var turf = turfs.find(function(t) { return t.id == id; });
       if (turf) {
         try {
           var coords = JSON.parse(turf.polygon_json || '[]');
           var bounds = new google.maps.LatLngBounds();
-          for (var i = 0; i < coords.length; i++) {
-            bounds.extend(new google.maps.LatLng(coords[i].lat, coords[i].lng));
-          }
+          for (var i = 0; i < coords.length; i++) bounds.extend(new google.maps.LatLng(coords[i].lat, coords[i].lng));
           map.fitBounds(bounds, 80);
         } catch(e) {}
       }
-
-      // Highlight
       for (var tid in turfPolygons) {
         turfPolygons[tid].setOptions({ fillOpacity: tid == id ? 0.25 : 0.08, strokeOpacity: tid == id ? 1 : 0.4 });
       }
@@ -865,13 +961,8 @@
         assigned_to: document.getElementById('editTurfAssign').value || null,
         color: selectedColor
       }).then(function(r) {
-        if (r.success) {
-          toast('Turf updated!');
-          overlay.remove();
-          loadAll();
-        } else {
-          toast(r.error || 'Failed to update', 'error');
-        }
+        if (r.success) { toast('Turf updated!'); overlay.remove(); loadAll(); }
+        else { toast(r.error || 'Failed to update', 'error'); }
       });
     });
   }
@@ -879,11 +970,7 @@
   function deleteTurf(id) {
     if (!confirm('Delete this turf and all its pins?')) return;
     api('DELETE', '/turfs/' + id).then(function(r) {
-      if (r.success) {
-        toast('Turf deleted');
-        infoWindow.close();
-        loadAll();
-      }
+      if (r.success) { toast('Turf deleted'); infoWindow.close(); loadAll(); }
     });
   }
 
@@ -892,20 +979,13 @@
   // ============================================================
   function updatePinStatus(id, status) {
     api('PUT', '/pins/' + id, { status: status }).then(function(r) {
-      if (r.success) {
-        toast('Pin updated to ' + PIN_LABELS[status]);
-        infoWindow.close();
-        loadAll();
-      }
+      if (r.success) { toast('Pin updated to ' + PIN_LABELS[status]); infoWindow.close(); loadAll(); }
     });
   }
 
   function assignPin(id, memberId) {
     api('PUT', '/pins/' + id, { knocked_by: memberId || null }).then(function(r) {
-      if (r.success) {
-        toast('Pin assigned');
-        loadAll();
-      }
+      if (r.success) { toast('Pin assigned'); loadAll(); }
     });
   }
 
@@ -914,10 +994,7 @@
     var note = prompt('Enter notes for this pin:', pin ? (pin.notes || '') : '');
     if (note !== null) {
       api('PUT', '/pins/' + id, { notes: note }).then(function(r) {
-        if (r.success) {
-          toast('Notes saved');
-          loadAll();
-        }
+        if (r.success) { toast('Notes saved'); loadAll(); }
       });
     }
   }
@@ -925,11 +1002,7 @@
   function deletePin(id) {
     if (!confirm('Delete this pin?')) return;
     api('DELETE', '/pins/' + id).then(function(r) {
-      if (r.success) {
-        toast('Pin deleted');
-        infoWindow.close();
-        loadAll();
-      }
+      if (r.success) { toast('Pin deleted'); infoWindow.close(); loadAll(); }
     });
   }
 
@@ -938,19 +1011,15 @@
     if (pin && map) {
       map.panTo({ lat: pin.lat, lng: pin.lng });
       map.setZoom(18);
-      if (pinMarkers[id]) {
-        showPinInfo(pin, pinMarkers[id]);
-      }
+      if (pinMarkers[id]) showPinInfo(pin, pinMarkers[id]);
     }
   }
 
   function filterPins(status) {
-    // Reload with filter
     var url = '/pins' + (status ? '?status=' + status : '');
     api('GET', url).then(function(r) {
       pins = r.pins || [];
       renderPinsPanel();
-      // Show/hide markers
       for (var pid in pinMarkers) {
         var show = !status || pins.some(function(p) { return p.id == pid; });
         pinMarkers[pid].setMap(show ? map : null);
@@ -1008,13 +1077,8 @@
         role: document.getElementById('memberRole').value,
         color: selectedColor
       }).then(function(r) {
-        if (r.success) {
-          toast('Team member added!');
-          overlay.remove();
-          loadAll();
-        } else {
-          toast(r.error || 'Failed to add member', 'error');
-        }
+        if (r.success) { toast('Team member added!'); overlay.remove(); loadAll(); }
+        else { toast(r.error || 'Failed to add member', 'error'); }
       });
     });
   }
@@ -1066,13 +1130,8 @@
         role: document.getElementById('editMemberRole').value,
         color: selectedColor
       }).then(function(r) {
-        if (r.success) {
-          toast('Team member updated!');
-          overlay.remove();
-          loadAll();
-        } else {
-          toast(r.error || 'Failed to update', 'error');
-        }
+        if (r.success) { toast('Team member updated!'); overlay.remove(); loadAll(); }
+        else { toast(r.error || 'Failed to update', 'error'); }
       });
     });
   }
@@ -1080,10 +1139,7 @@
   function deleteMember(id) {
     if (!confirm('Remove this team member?')) return;
     api('DELETE', '/team/' + id).then(function(r) {
-      if (r.success) {
-        toast('Team member removed');
-        loadAll();
-      }
+      if (r.success) { toast('Team member removed'); loadAll(); }
     });
   }
 
@@ -1095,10 +1151,12 @@
   function fmtDate(d) { return d ? new Date(d).toLocaleDateString() : ''; }
 
   // ============================================================
-  // GLOBAL API
+  // GLOBAL API (exposed for onclick handlers)
   // ============================================================
   window.d2d = {
     startDrawTurf: startDrawTurf,
+    finishDrawing: finishDrawing,
+    cancelDrawing: cancelDrawing,
     selectTurf: selectTurf,
     editTurf: editTurf,
     deleteTurf: deleteTurf,
@@ -1110,7 +1168,8 @@
     deletePin: deletePin,
     addMember: addMember,
     editMember: editMember,
-    deleteMember: deleteMember
+    deleteMember: deleteMember,
+    setTool: setActiveTool
   };
 
   // ============================================================
@@ -1118,7 +1177,6 @@
   // ============================================================
   renderLayout();
 
-  // Wait for Google Maps
   function waitForMaps() {
     if (typeof google !== 'undefined' && google.maps) {
       initMap();
