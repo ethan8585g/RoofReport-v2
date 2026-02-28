@@ -1912,6 +1912,16 @@ function generateProfessionalReportHTML(report: RoofReport): string {
     : 'GOOGLE SOLAR API'
   const confidenceColor = quality.confidence_score >= 90 ? '#00E676' : quality.confidence_score >= 75 ? '#FFB300' : '#FF5252'
 
+  // ====================================================================
+  // EAGLEVIEW-INSPIRED PROFESSIONAL REPORT TEMPLATE
+  // ====================================================================
+  // Total perimeter for summary
+  const totalPerimeterFt = es.total_eave_ft + es.total_rake_ft
+  // Predominant pitch from the largest segment
+  const largestSeg = [...report.segments].sort((a, b) => b.true_area_sqft - a.true_area_sqft)[0]
+  const predominantPitch = largestSeg?.pitch_ratio || report.roof_pitch_ratio
+  const predominantPitchDeg = largestSeg?.pitch_degrees || report.roof_pitch_degrees
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1921,670 +1931,674 @@ function generateProfessionalReportHTML(report: RoofReport): string {
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;color:#1a1a2e;font-size:10pt;line-height:1.4}
-@media print{.page{page-break-after:always}.page:last-child{page-break-after:auto}}
+body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;color:#1B2838;font-size:10pt;line-height:1.5}
+@media print{.page{page-break-after:always}.page:last-child{page-break-after:auto}body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
 
-/* ==================== PAGE 1: DARK DASHBOARD ==================== */
-.p1{background:linear-gradient(180deg,#0A1929 0%,#0D2137 40%,#0F2740 60%,#0A1929 100%);color:#fff;min-height:11in;max-width:8.5in;margin:0 auto;padding:24px 28px;position:relative;overflow:hidden}
-.p1::before{content:'';position:absolute;top:0;left:0;right:0;bottom:0;background:radial-gradient(ellipse at 30% 15%,rgba(0,229,255,0.04) 0%,transparent 50%),radial-gradient(ellipse at 70% 85%,rgba(0,145,234,0.03) 0%,transparent 50%);pointer-events:none}
-.p1-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;position:relative}
-.p1-logo{display:flex;align-items:center;gap:10px}
-.p1-logo-icon{width:44px;height:44px;background:linear-gradient(135deg,#00E5FF 0%,#0091EA 50%,#2962FF 100%);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:900;color:#0A1929;letter-spacing:-1px;box-shadow:0 2px 12px rgba(0,229,255,0.3)}
-.p1-logo-text{font-size:18px;font-weight:800;letter-spacing:1.5px;color:#fff}
-.p1-logo-sub{font-size:10px;color:#00E5FF;margin-top:1px;letter-spacing:1px;font-weight:600}
-.p1-logo-brand{font-size:9px;color:#5A7A96;margin-top:1px;letter-spacing:0.5px}
-.p1-meta{text-align:right}
-.p1-rn{color:#00E5FF;font-size:12px;font-weight:700;letter-spacing:0.5px}
-.p1-date{color:#8ECAE6;font-size:10px;margin-top:2px}
-.p1-tier{display:inline-block;padding:2px 8px;background:rgba(0,229,255,0.12);border:1px solid rgba(0,229,255,0.25);border-radius:10px;font-size:8px;font-weight:700;color:#00E5FF;margin-top:3px;letter-spacing:0.5px}
+/* ==================== GLOBAL REPORT STYLES ==================== */
+.page{max-width:8.5in;min-height:11in;margin:0 auto;background:#fff;position:relative;overflow:hidden}
+/* ==================== HEADER BAR — Navy blue top stripe ==================== */
+.rpt-header{background:#002B5C;padding:12px 28px;display:flex;justify-content:space-between;align-items:center}
+.rpt-header-logo{display:flex;align-items:center;gap:10px}
+.rpt-header-logo-icon{width:36px;height:36px;background:linear-gradient(135deg,#0091EA,#002B5C);border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:900;color:#fff;letter-spacing:-0.5px;border:2px solid rgba(255,255,255,0.3)}
+.rpt-header-brand{color:#fff;font-size:16px;font-weight:800;letter-spacing:1px}
+.rpt-header-sub{color:#8ECAE6;font-size:9px;letter-spacing:0.8px;font-weight:600}
+.rpt-header-meta{text-align:right;color:#B0C4D8;font-size:10px}
+.rpt-header-meta b{color:#fff}
 
-/* Address Bar — enhanced with property info */
-.p1-addr-bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding:8px 14px;background:rgba(255,255,255,0.04);border:1px solid rgba(0,229,255,0.15);border-radius:8px}
-.p1-addr-main{color:#fff;font-size:12px;font-weight:600;letter-spacing:0.3px}
-.p1-addr-detail{color:#5A7A96;font-size:9px;margin-top:2px}
-.p1-addr-coords{color:#5A7A96;font-size:9px;text-align:right}
+/* Address bar — dark gray stripe below header */
+.rpt-addr{background:#1B2838;padding:8px 28px;display:flex;justify-content:space-between;align-items:center}
+.rpt-addr-text{color:#fff;font-size:13px;font-weight:600;letter-spacing:0.3px}
+.rpt-addr-detail{color:#8ECAE6;font-size:9px;margin-top:2px}
+.rpt-addr-right{color:#8ECAE6;font-size:10px;text-align:right}
 
-/* Section Labels */
-.p1-section-label{color:#00E5FF;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:2px;text-align:center;margin:10px 0 6px;position:relative}
-.p1-section-label::before,.p1-section-label::after{content:'';position:absolute;top:50%;height:1px;background:linear-gradient(90deg,transparent,rgba(0,229,255,0.3),transparent);width:28%}
-.p1-section-label::before{left:0}.p1-section-label::after{right:0}
+/* Section headers — clean dividers */
+.rpt-section{padding:0 28px}
+.rpt-section-title{font-size:13px;font-weight:800;color:#002B5C;text-transform:uppercase;letter-spacing:1px;padding:10px 0 6px;border-bottom:2px solid #002B5C;margin-bottom:10px}
 
-/* Aerial Cards */
-.p1-aerial-card{background:rgba(255,255,255,0.03);border:1px solid rgba(0,229,255,0.2);border-radius:8px;padding:6px;text-align:center;position:relative;overflow:hidden}
-.p1-aerial-card img{width:100%;height:130px;object-fit:cover;border-radius:5px;opacity:0.95}
-.p1-aerial-card .p1-aerial-label{color:#8ECAE6;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:1px;margin-top:4px}
-.p1-aerial-placeholder{width:100%;height:130px;background:rgba(0,229,255,0.05);border-radius:5px;display:flex;align-items:center;justify-content:center;color:rgba(0,229,255,0.3);font-size:28px}
+/* Footer — consistent across all pages */
+.rpt-footer{position:absolute;bottom:0;left:0;right:0;padding:8px 28px;border-top:1px solid #ddd;display:flex;justify-content:space-between;align-items:center;font-size:8px;color:#666}
+.rpt-footer-brand{font-weight:700;color:#002B5C}
 
-/* Data Cards */
-.p1-card{background:rgba(255,255,255,0.04);border:1px solid rgba(0,229,255,0.12);border-radius:8px;padding:10px 12px;position:relative}
-.p1-card-accent{border-color:rgba(0,229,255,0.5);background:linear-gradient(135deg,rgba(0,229,255,0.08),rgba(0,229,255,0.02))}
-.p1-card-label{color:#8ECAE6;font-size:7px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:3px}
-.p1-card-value{font-size:24px;font-weight:900;color:#00E5FF;line-height:1}
-.p1-card-value .p1-unit{font-size:12px;font-weight:500;color:#8ECAE6;margin-left:3px}
-.p1-card-detail{font-size:9px;color:#5A7A96;margin-top:2px}
+/* ==================== PAGE 1: COVER — Satellite + QuickSquares Summary ==================== */
+.p1-body{padding:16px 28px 60px}
+.p1-img-section{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+.p1-sat-container{position:relative;border-radius:4px;overflow:hidden;border:1px solid #ddd;background:#e5e7eb}
+.p1-sat-container img{width:100%;display:block}
+.p1-sat-label{position:absolute;bottom:0;left:0;right:0;padding:4px 8px;background:rgba(0,43,92,0.85);color:#fff;font-size:8px;font-weight:600;letter-spacing:0.5px}
 
-/* Squares Badge */
-.p1-squares{background:linear-gradient(135deg,rgba(0,229,255,0.12),rgba(0,229,255,0.04));border:2px solid rgba(0,229,255,0.4);border-radius:10px;padding:10px 14px;text-align:center;display:flex;flex-direction:column;align-items:center;justify-content:center}
-.p1-sq-num{font-size:36px;font-weight:900;color:#00E5FF;line-height:1}
-.p1-sq-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:#8ECAE6}
+/* QuickSquares callout box */
+.p1-squares-box{background:#002B5C;border-radius:8px;padding:24px 20px;text-align:center;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff}
+.p1-sq-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:#8ECAE6;margin-bottom:4px}
+.p1-sq-value{font-size:52px;font-weight:900;line-height:1;margin-bottom:2px}
+.p1-sq-unit{font-size:14px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:#8ECAE6}
+.p1-sq-detail{font-size:10px;color:#5A8AB0;margin-top:8px;line-height:1.4}
 
-/* Linear Measurement Cards */
-.p1-lin-card{border-radius:7px;padding:8px 6px;text-align:center}
-.p1-lin-card-title{font-size:7px;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px}
-.p1-lin-card-value{font-size:20px;font-weight:900;line-height:1}
-.p1-lin-card-unit{font-size:8px;color:#B0C4D8}
+/* Summary measurement table on page 1 */
+.p1-summary-table{width:100%;border-collapse:collapse;margin-bottom:12px}
+.p1-summary-table th{text-align:left;padding:6px 10px;background:#002B5C;color:#fff;font-size:10px;font-weight:700;letter-spacing:0.5px}
+.p1-summary-table td{padding:6px 10px;border-bottom:1px solid #E5E7EB;font-size:11px;color:#1B2838}
+.p1-summary-table td:last-child{text-align:right;font-weight:700;color:#002B5C}
+.p1-summary-table tr:nth-child(even){background:#F8FAFC}
 
-/* Badges */
-.p1-badges{display:flex;gap:6px;margin-top:8px;justify-content:center;flex-wrap:wrap}
-.p1-badge{padding:3px 10px;border-radius:20px;font-size:8px;font-weight:600;letter-spacing:0.5px}
-.p1-badge-cyan{background:rgba(0,229,255,0.12);color:#00E5FF;border:1px solid rgba(0,229,255,0.25)}
-.p1-badge-dim{background:rgba(255,255,255,0.04);color:#8ECAE6;border:1px solid rgba(255,255,255,0.08)}
-.p1-badge-green{background:rgba(0,230,118,0.12);color:#00E676;border:1px solid rgba(0,230,118,0.25)}
+/* Badges row */
+.p1-badges{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.p1-badge{padding:3px 10px;border-radius:4px;font-size:8px;font-weight:700;letter-spacing:0.3px}
 
-/* Footer */
-.p1-footer{text-align:center;margin-top:8px;padding-top:8px;border-top:1px solid rgba(0,229,255,0.08)}
-.p1-footer-text{color:#3A5A76;font-size:7px;letter-spacing:0.5px}
+/* ==================== PAGE 2: LENGTH DIAGRAM — Color-coded roof plan ==================== */
+.p2-body{padding:16px 28px 60px}
+.p2-diagram-container{background:#fff;border:1px solid #ddd;border-radius:4px;padding:16px;margin-bottom:16px;text-align:center}
+.p2-legend{display:flex;flex-wrap:wrap;gap:12px;padding:10px 0;margin-bottom:12px;border-bottom:1px solid #E5E7EB}
+.p2-legend-item{display:flex;align-items:center;gap:5px;font-size:10px;color:#1B2838;font-weight:500}
+.p2-legend-line{width:24px;height:0;border-top:3px solid}
+.p2-legend-dash{width:24px;height:0;border-top:3px dashed}
 
-/* Street View placeholder detection */
-.p1-sv-img{transition:opacity 0.3s}
-.p1-sv-nodata{display:none;align-items:center;justify-content:center;height:75px;background:rgba(0,229,255,0.05);border-radius:5px;color:rgba(0,229,255,0.4);font-size:10px;text-align:center;line-height:1.3;padding:6px}
+/* Length totals bar */
+.p2-totals{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:12px}
+.p2-total-card{text-align:center;padding:10px 6px;border-radius:6px;border:2px solid}
+.p2-total-label{font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px}
+.p2-total-value{font-size:22px;font-weight:900;line-height:1.1}
+.p2-total-unit{font-size:9px;color:#666}
 
-/* ==================== PAGE 2: MATERIAL ORDER (Light) ==================== */
-.p2{background:linear-gradient(180deg,#E8F4FD 0%,#F0F7FC 100%);min-height:11in;max-width:8.5in;margin:0 auto;padding:28px 32px;font-family:'Inter',system-ui,sans-serif}
-.p2-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;padding:16px 20px;background:linear-gradient(135deg,#002F6C,#0D47A1);border-radius:10px;color:#fff}
-.p2-header-title{font-size:20px;font-weight:900;text-transform:uppercase;letter-spacing:1px}
-.p2-header-sub{font-size:10px;color:#8ECAE6;margin-top:2px}
-.p2-header-meta{text-align:right;font-size:10px;color:#B0C4D8}
-.p2-header-meta b{color:#fff}
-.p2-section{background:#fff;border-radius:8px;padding:16px 20px;margin-bottom:12px;border-left:4px solid #002F6C;box-shadow:0 1px 4px rgba(0,0,0,0.05)}
-.p2-section-title{font-size:11px;font-weight:800;color:#002F6C;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;padding-bottom:5px;border-bottom:2px solid #E0ECF5}
-.p2-row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #F0F4F8}
-.p2-row:last-child{border-bottom:none}
-.p2-row-label{color:#335C8A;font-size:11px;font-weight:500}
-.p2-row-value{color:#002F6C;font-size:12px;font-weight:700}
-.p2-bottom{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:16px}
-.p2-badge-box{background:#fff;border:2px solid #002F6C;border-radius:10px;padding:14px;text-align:center}
-.p2-badge-label{font-size:9px;font-weight:800;color:#002F6C;text-transform:uppercase;letter-spacing:1px}
-.p2-badge-value{font-size:16px;font-weight:900;color:#002F6C;margin-top:3px}
+/* ==================== PAGE 3: MEASUREMENTS SUMMARY — Clean EagleView table ==================== */
+.p3-body{padding:16px 28px 60px}
+.p3-table{width:100%;border-collapse:collapse;margin-bottom:16px}
+.p3-table th{text-align:left;padding:8px 12px;background:#002B5C;color:#fff;font-size:10px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase}
+.p3-table th:last-child{text-align:right}
+.p3-table td{padding:7px 12px;border-bottom:1px solid #E5E7EB;font-size:11px;color:#1B2838}
+.p3-table td:last-child{text-align:right;font-weight:700;color:#002B5C}
+.p3-table tr:nth-child(even){background:#F8FAFC}
+.p3-table .row-total{background:#EFF6FF;font-weight:800;border-top:2px solid #002B5C}
+.p3-table .row-total td{color:#002B5C;font-size:12px}
 
-/* ==================== PAGE 3: DETAILED MEASUREMENTS ==================== */
-.p3{background:linear-gradient(180deg,#E0ECF5 0%,#EDF3F8 100%);min-height:11in;max-width:8.5in;margin:0 auto;padding:24px 28px;font-family:'Inter',system-ui,sans-serif}
-.p3-header{display:flex;justify-content:space-between;align-items:flex-start;background:linear-gradient(135deg,#002F6C,#0D47A1);color:#fff;padding:16px 20px;border-radius:10px;margin-bottom:14px}
-.p3-header-title{font-size:20px;font-weight:900;text-transform:uppercase;line-height:1.1}
-.p3-header-meta{text-align:right;font-size:10px;color:#B0C4D8}
-.p3-header-meta b{color:#fff}
-.p3-content{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
-.p3-box{background:#fff;border-radius:8px;padding:14px 18px;box-shadow:0 1px 3px rgba(0,0,0,0.05)}
-.p3-box-title{font-size:11px;font-weight:800;color:#002F6C;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;padding-bottom:5px;border-bottom:2px solid #E0ECF5}
-.p3-facet{display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid #F0F4F8;font-size:10px;color:#335C8A}
-.p3-facet:last-child{border-bottom:none}
-.p3-facet b{color:#002F6C}
-.p3-facet-color{width:10px;height:10px;border-radius:2px;flex-shrink:0}
-.p3-lin-row{display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #F0F4F8;font-size:11px}
-.p3-lin-row:last-child{border-bottom:none}
-.p3-lin-color{width:14px;height:14px;border-radius:3px;flex-shrink:0}
-.p3-lin-label{flex:1;color:#335C8A;font-weight:500}
-.p3-lin-value{font-weight:700;color:#002F6C;min-width:55px;text-align:right}
-.p3-penetrations{margin-top:12px}
-.p3-pen-title{font-size:10px;font-weight:800;color:#002F6C;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;padding-bottom:4px;border-bottom:2px solid #E0ECF5}
-.p3-pen-row{display:flex;justify-content:space-between;padding:3px 0;font-size:11px;color:#335C8A}
-.p3-pen-row b{color:#002F6C}
+/* Facet cards */
+.p3-facet-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px}
+.p3-facet-card{border:1px solid #ddd;border-radius:6px;padding:10px 12px;background:#fff}
+.p3-facet-card-header{display:flex;align-items:center;gap:6px;margin-bottom:4px}
+.p3-facet-dot{width:12px;height:12px;border-radius:3px;flex-shrink:0}
+.p3-facet-name{font-size:10px;font-weight:700;color:#002B5C;text-transform:uppercase}
+.p3-facet-area{font-size:16px;font-weight:900;color:#002B5C;line-height:1.1}
+.p3-facet-detail{font-size:9px;color:#5A7A96;margin-top:2px}
 
-/* Roof Diagram */
-.p3-diagram{background:#fff;border-radius:8px;padding:12px;box-shadow:0 1px 3px rgba(0,0,0,0.05)}
-.p3-diagram-title{font-size:11px;font-weight:800;color:#002F6C;text-transform:uppercase;text-align:center;letter-spacing:1px;margin-bottom:8px;padding-bottom:5px;border-bottom:2px solid #E0ECF5}
-.p3-diagram-svg{width:100%;max-height:260px}
+/* Penetrations box */
+.p3-pen-box{border:1px solid #ddd;border-radius:6px;padding:12px 16px;background:#fff}
 
-/* Print */
+/* ==================== PAGE 4: MATERIAL ORDER ==================== */
+.p4-body{padding:16px 28px 60px}
+.p4-section{background:#fff;border:1px solid #ddd;border-radius:6px;padding:14px 18px;margin-bottom:12px}
+.p4-section-title{font-size:11px;font-weight:800;color:#002B5C;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;padding-bottom:5px;border-bottom:2px solid #E5E7EB}
+.p4-row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #F0F4F8}
+.p4-row:last-child{border-bottom:none}
+.p4-row-label{color:#4A5568;font-size:11px;font-weight:500}
+.p4-row-value{color:#002B5C;font-size:12px;font-weight:700}
+
+/* Cost summary bar */
+.p4-cost-bar{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:16px}
+.p4-cost-box{text-align:center;padding:12px;border-radius:6px;border:2px solid #002B5C;background:#EFF6FF}
+.p4-cost-label{font-size:9px;font-weight:800;color:#002B5C;text-transform:uppercase;letter-spacing:0.5px}
+.p4-cost-value{font-size:18px;font-weight:900;color:#002B5C;margin-top:2px}
+
+/* ==================== PAGE 5: IMAGERY GALLERY ==================== */
+.p5-body{padding:16px 28px 60px}
+.p5-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+.p5-grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px}
+.p5-img-card{border:1px solid #ddd;border-radius:4px;overflow:hidden;background:#f8fafc}
+.p5-img-card img{width:100%;display:block;object-fit:cover}
+.p5-img-label{padding:4px 8px;font-size:9px;font-weight:700;color:#002B5C;text-transform:uppercase;letter-spacing:0.5px}
+.p5-img-sub{padding:0 8px 4px;font-size:8px;color:#64748b}
+.p5-img-placeholder{display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:10px;background:#f1f5f9}
+
+/* Verification badge */
+.rpt-verified{display:inline-flex;align-items:center;gap:5px;padding:4px 12px;background:#ECFDF5;border:1px solid #6EE7B7;border-radius:20px;font-size:9px;font-weight:700;color:#059669}
+.rpt-verified::before{content:'\\2713';font-size:11px}
+
+/* Print specifics */
 @media print{
-  .p1,.p2,.p3,.p4{page-break-after:always;min-height:auto}
-  .p1{-webkit-print-color-adjust:exact;print-color-adjust:exact}
-  .p4{-webkit-print-color-adjust:exact;print-color-adjust:exact}
-  body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .page{page-break-after:always;min-height:auto;box-shadow:none}
+  .rpt-header,.rpt-addr,.rpt-footer{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .p1-squares-box{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 }
 </style>
 </head>
 <body>
 
-<!-- ==================== PAGE 1: ROOF MEASUREMENT DASHBOARD ==================== -->
+<!-- ==================== PAGE 1: COVER — QuickSquares Report ==================== -->
 <div class="page p1">
-  <!-- Header: Branding + Report Meta -->
-  <div class="p1-header">
-    <div class="p1-logo">
-      <div class="p1-logo-icon">RC</div>
+  <!-- Top navy header bar -->
+  <div class="rpt-header">
+    <div class="rpt-header-logo">
+      <div class="rpt-header-logo-icon">RR</div>
       <div>
-        <div class="p1-logo-text">ROOF MEASUREMENT REPORT</div>
-        <div class="p1-logo-sub">ANTIGRAVITY GEMINI</div>
-        <div class="p1-logo-brand">Powered by RoofReporterAI</div>
+        <div class="rpt-header-brand">RoofReporterAI</div>
+        <div class="rpt-header-sub">PROFESSIONAL ROOF MEASUREMENT</div>
       </div>
     </div>
-    <div class="p1-meta">
-      <div class="p1-rn">${reportNum}</div>
-      <div class="p1-date">${reportDate}</div>
-      <div class="p1-tier">v${report.report_version || '3.0'}</div>
-    </div>
-  </div>
-
-  <!-- Address Bar with property details -->
-  <div class="p1-addr-bar">
-    <div>
-      <div class="p1-addr-main">${fullAddress}</div>
-      <div class="p1-addr-detail">${[prop.homeowner_name ? 'Homeowner: ' + prop.homeowner_name : '', prop.requester_name ? 'Requester: ' + prop.requester_name : '', prop.requester_company || ''].filter(Boolean).join(' | ')}</div>
-    </div>
-    <div class="p1-addr-coords">${prop.latitude && prop.longitude ? prop.latitude.toFixed(6) + ', ' + prop.longitude.toFixed(6) : ''}</div>
-  </div>
-
-  <!-- ====== ROOF IMAGERY: Central AI overlay + 4-panel directional views ====== -->
-  <div class="p1-section-label">AERIAL ROOF IMAGERY${hasOverlay ? ' &mdash; MEASURED ROOF DIAGRAM' : ''}</div>
-  
-  <!-- Main imagery grid: large overhead + 4 directional panels -->
-  <div style="display:grid;grid-template-columns:1.6fr 1fr;gap:6px;margin-bottom:10px">
-    <!-- PRIMARY: Overhead satellite with AI measurement overlay -->
-    <div class="p1-aerial-card" style="grid-row:1/3;padding:5px">
-      <div style="position:relative;width:100%;aspect-ratio:1/1;min-height:230px">
-        ${overheadUrl ? `<img src="${overheadUrl}" alt="Overhead Satellite" style="width:100%;height:100%;object-fit:cover;display:block;border-radius:5px" onerror="this.style.display='none'">` : '<div class="p1-aerial-placeholder" style="height:230px">SATELLITE</div>'}
-        ${hasOverlay ? `<svg viewBox="0 0 640 640" xmlns="http://www.w3.org/2000/svg" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;border-radius:5px">${overlaySVG}</svg>` : ''}
-      </div>
-      ${overlayLegend}
-      <div class="p1-aerial-label">${hasOverlay ? 'Measured Roof Diagram &mdash; All Lines in Feet &amp; Inches' : 'Overhead Satellite'} &mdash; Zoom ${report.metadata.provider === 'google_solar_datalayers' ? '21' : '20'} / Scale 2x</div>
-    </div>
-
-    <!-- Right column: 4 directional aerial views (satellite offset N/E/S/W) -->
-    <div style="display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:5px">
-      <div class="p1-aerial-card" style="padding:4px">
-        ${northUrl ? `<img src="${northUrl}" alt="North View" style="height:75px;width:100%;object-fit:cover;border-radius:4px" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-sv-nodata" style="height:75px;font-size:9px">No imagery<br>available</div>` : '<div class="p1-sv-nodata" style="display:flex;height:75px;font-size:9px">N/A</div>'}
-        <div class="p1-aerial-label" style="font-size:7px;margin-top:2px">NORTH <span style="color:rgba(0,229,255,0.4);font-size:6px">0&deg;</span></div>
-      </div>
-      <div class="p1-aerial-card" style="padding:4px">
-        ${eastUrl ? `<img src="${eastUrl}" alt="East View" style="height:75px;width:100%;object-fit:cover;border-radius:4px" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-sv-nodata" style="height:75px;font-size:9px">No imagery<br>available</div>` : '<div class="p1-sv-nodata" style="display:flex;height:75px;font-size:9px">N/A</div>'}
-        <div class="p1-aerial-label" style="font-size:7px;margin-top:2px">EAST <span style="color:rgba(0,229,255,0.4);font-size:6px">90&deg;</span></div>
-      </div>
-      <div class="p1-aerial-card" style="padding:4px">
-        ${southUrl ? `<img src="${southUrl}" alt="South View" style="height:75px;width:100%;object-fit:cover;border-radius:4px" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-sv-nodata" style="height:75px;font-size:9px">No imagery<br>available</div>` : '<div class="p1-sv-nodata" style="display:flex;height:75px;font-size:9px">N/A</div>'}
-        <div class="p1-aerial-label" style="font-size:7px;margin-top:2px">SOUTH <span style="color:rgba(0,229,255,0.4);font-size:6px">180&deg;</span></div>
-      </div>
-      <div class="p1-aerial-card" style="padding:4px">
-        ${westUrl ? `<img src="${westUrl}" alt="West View" style="height:75px;width:100%;object-fit:cover;border-radius:4px" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-sv-nodata" style="height:75px;font-size:9px">No imagery<br>available</div>` : '<div class="p1-sv-nodata" style="display:flex;height:75px;font-size:9px">N/A</div>'}
-        <div class="p1-aerial-label" style="font-size:7px;margin-top:2px">WEST <span style="color:rgba(0,229,255,0.4);font-size:6px">270&deg;</span></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ====== DATA DASHBOARD: 6 high-visibility metric cards ====== -->
-  <div class="p1-section-label">MEASUREMENT DATA</div>
-  <div style="display:grid;grid-template-columns:1.2fr 1fr 1fr 0.8fr 0.8fr 1fr;gap:6px;margin-bottom:8px">
-    <!-- Total Area (True 3D) — primary accent -->
-    <div class="p1-card p1-card-accent">
-      <div class="p1-card-label">TOTAL AREA</div>
-      <div class="p1-card-value" style="font-size:22px">${report.total_true_area_sqft.toLocaleString()}<span class="p1-unit" style="font-size:10px">sq ft</span></div>
-      <div class="p1-card-detail">Footprint: ${report.total_footprint_sqft.toLocaleString()} ft&sup2; &times; ${report.area_multiplier}x</div>
-    </div>
-    <!-- Pitch -->
-    <div class="p1-card">
-      <div class="p1-card-label">PITCH</div>
-      <div style="font-size:20px;font-weight:900;color:#fff;line-height:1">${report.roof_pitch_ratio}</div>
-      <div class="p1-card-detail">${report.roof_pitch_degrees.toFixed(1)}&deg; avg &bull; ${report.segments.length} facets</div>
-    </div>
-    <!-- Waste Factor -->
-    <div class="p1-card">
-      <div class="p1-card-label">WASTE FACTOR</div>
-      <div style="font-size:20px;font-weight:900;color:#FF6B8A;line-height:1">${mat.waste_pct}%</div>
-      <div class="p1-card-detail">${mat.complexity_class.replace('_',' ')} complexity</div>
-    </div>
-    <!-- Facets -->
-    <div class="p1-card">
-      <div class="p1-card-label">FACETS</div>
-      <div style="font-size:20px;font-weight:900;color:#C084FC;line-height:1">${report.segments.length}</div>
-      <div class="p1-card-detail">${report.ai_geometry?.facets?.length ? 'AI: ' + report.ai_geometry.facets.length : 'segments'}</div>
-    </div>
-    <!-- Total Linear -->
-    <div class="p1-card">
-      <div class="p1-card-label">LINEAR</div>
-      <div style="font-size:20px;font-weight:900;color:#FFB300;line-height:1">${totalLinearFt}</div>
-      <div class="p1-card-detail">total ft</div>
-    </div>
-    <!-- Squares — prominent -->
-    <div class="p1-squares">
-      <div class="p1-sq-num" style="font-size:32px">${Math.round(grossSquares)}</div>
-      <div class="p1-sq-label" style="font-size:9px">SQUARES</div>
-      <div style="font-size:7px;color:#5A7A96;margin-top:1px">${netSquares} net + ${mat.waste_pct}% waste</div>
-    </div>
-  </div>
-
-  <!-- ====== LINEAR MEASUREMENTS TABLE — color-coded ====== -->
-  <div class="p1-section-label">LINEAR MEASUREMENTS</div>
-  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:5px;margin-bottom:8px">
-    <div class="p1-lin-card" style="background:rgba(255,59,48,0.12);border:1px solid rgba(255,59,48,0.25)">
-      <div class="p1-lin-card-title" style="color:#FF6B8A">Ridge</div>
-      <div class="p1-lin-card-value" style="color:#FF6B8A">${es.total_ridge_ft}</div>
-      <div class="p1-lin-card-unit">ft</div>
-    </div>
-    <div class="p1-lin-card" style="background:rgba(59,130,246,0.12);border:1px solid rgba(59,130,246,0.25)">
-      <div class="p1-lin-card-title" style="color:#60A5FA">Hip</div>
-      <div class="p1-lin-card-value" style="color:#60A5FA">${es.total_hip_ft}</div>
-      <div class="p1-lin-card-unit">ft</div>
-    </div>
-    <div class="p1-lin-card" style="background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.25)">
-      <div class="p1-lin-card-title" style="color:#4ADE80">Valley</div>
-      <div class="p1-lin-card-value" style="color:#4ADE80">${es.total_valley_ft}</div>
-      <div class="p1-lin-card-unit">ft</div>
-    </div>
-    <div class="p1-lin-card" style="background:rgba(249,115,22,0.12);border:1px solid rgba(249,115,22,0.25)">
-      <div class="p1-lin-card-title" style="color:#FB923C">Eaves</div>
-      <div class="p1-lin-card-value" style="color:#FB923C">${es.total_eave_ft}</div>
-      <div class="p1-lin-card-unit">ft</div>
-    </div>
-    <div class="p1-lin-card" style="background:rgba(168,85,247,0.12);border:1px solid rgba(168,85,247,0.25)">
-      <div class="p1-lin-card-title" style="color:#C084FC">Rake</div>
-      <div class="p1-lin-card-value" style="color:#C084FC">${es.total_rake_ft}</div>
-      <div class="p1-lin-card-unit">ft</div>
-    </div>
-  </div>
-
-  <!-- Context + Medium + Close-up satellite views -->
-  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;margin-bottom:6px">
-    <div class="p1-aerial-card">
-      ${contextUrl ? `<img src="${contextUrl}" alt="Context" style="height:72px;width:100%;object-fit:cover;border-radius:4px" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-aerial-placeholder" style="display:none;height:72px">CONTEXT</div>` : '<div class="p1-aerial-placeholder" style="height:72px">CONTEXT</div>'}
-      <div class="p1-aerial-label" style="font-size:7px">Neighborhood</div>
-    </div>
-    <div class="p1-aerial-card">
-      ${mediumUrl ? `<img src="${mediumUrl}" alt="Medium" style="height:72px;width:100%;object-fit:cover;border-radius:4px" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-aerial-placeholder" style="display:none;height:72px">MEDIUM</div>` : '<div class="p1-aerial-placeholder" style="height:72px">MEDIUM</div>'}
-      <div class="p1-aerial-label" style="font-size:7px">Property</div>
-    </div>
-    <div class="p1-aerial-card">
-      ${closeupUrl ? `<img src="${closeupUrl}" alt="Close-up" style="height:72px;width:100%;object-fit:cover;border-radius:4px" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="p1-aerial-placeholder" style="display:none;height:72px">CLOSE-UP</div>` : '<div class="p1-aerial-placeholder" style="height:72px">CLOSE-UP</div>'}
-      <div class="p1-aerial-label" style="font-size:7px">Max Detail (Z22)</div>
-    </div>
-  </div>
-
-  <!-- Provider / Quality Badges -->
-  <div class="p1-badges">
-    <span class="p1-badge p1-badge-cyan">${quality.imagery_quality || 'BASE'} QUALITY</span>
-    <span class="p1-badge p1-badge-dim">${providerLabel}</span>
-    <span class="p1-badge" style="background:${confidenceColor}1A;color:${confidenceColor};border:1px solid ${confidenceColor}40">CONFIDENCE: ${quality.confidence_score}%</span>
-    <span class="p1-badge p1-badge-dim">SCALE: 2x HD</span>
-    ${report.ai_geometry?.facets?.length ? `<span class="p1-badge p1-badge-green">AI OVERLAY: ${report.ai_geometry.facets.length} FACETS</span>` : ''}
-  </div>
-
-  <div class="p1-footer"><div class="p1-footer-text">Powered by RoofReporterAI | Antigravity Gemini Roof Measurement System | ${reportNum} | v${report.report_version || '3.0'}</div></div>
-</div>
-
-<!-- ==================== PAGE 2: MATERIAL ORDER CALCULATION ==================== -->
-<div class="page p2">
-  <!-- Header -->
-  <div class="p2-header">
-    <div>
-      <div class="p2-header-title">MATERIAL ORDER CALCULATION</div>
-      <div class="p2-header-sub">Bill of Materials &mdash; Complete Roofing Package</div>
-    </div>
-    <div class="p2-header-meta">
-      <div><b>${fullAddress}</b></div>
-      <div>Report #: ${reportNum}</div>
+    <div class="rpt-header-meta">
+      <div><b>${reportNum}</b></div>
       <div>${reportDate}</div>
+      <div style="margin-top:3px"><span class="rpt-verified">Verified Report</span></div>
     </div>
   </div>
-
-  <!-- Area Summary -->
-  <div class="p2-section" style="border-left-color:#0091EA">
-    <div class="p2-section-title">AREA SUMMARY</div>
-    <div class="p2-row"><span class="p2-row-label">Flat Footprint Area</span><span class="p2-row-value">${report.total_footprint_sqft.toLocaleString()} sq ft</span></div>
-    <div class="p2-row"><span class="p2-row-label">Pitch Multiplier</span><span class="p2-row-value">&times;${report.area_multiplier} (${report.roof_pitch_ratio} / ${report.roof_pitch_degrees.toFixed(1)}&deg;)</span></div>
-    <div class="p2-row"><span class="p2-row-label">True 3D Roof Area</span><span class="p2-row-value" style="color:#0091EA;font-size:14px">${report.total_true_area_sqft.toLocaleString()} sq ft</span></div>
-    <div class="p2-row"><span class="p2-row-label">Net Roofing Squares</span><span class="p2-row-value">${netSquares} squares (area &divide; 100)</span></div>
-    <div class="p2-row"><span class="p2-row-label">Gross Squares (+${mat.waste_pct}% waste)</span><span class="p2-row-value" style="color:#002F6C;font-size:14px;font-weight:900">${Math.round(grossSquares)} squares</span></div>
-  </div>
-
-  <!-- Primary Roofing Materials -->
-  <div class="p2-section">
-    <div class="p2-section-title">PRIMARY ROOFING MATERIALS</div>
-    <div class="p2-row"><span class="p2-row-label">Shingles (3-tab / Architectural)</span><span class="p2-row-value">${Math.round(grossSquares)} squares (${bundleCount3Tab} bundles)</span></div>
-    <div class="p2-row"><span class="p2-row-label">Synthetic Underlayment</span><span class="p2-row-value">${report.total_true_area_sqft.toLocaleString()} sq ft</span></div>
-    <div class="p2-row"><span class="p2-row-label">Ice & Water Shield</span><span class="p2-row-value">${es.total_eave_ft + es.total_valley_ft} ft (eaves + valleys)</span></div>
-    <div class="p2-row"><span class="p2-row-label">Starter Strip</span><span class="p2-row-value">${starterStripFt} ft</span></div>
-  </div>
-
-  <!-- Accessories -->
-  <div class="p2-section">
-    <div class="p2-section-title">ACCESSORIES & FLASHING</div>
-    <div class="p2-row"><span class="p2-row-label">Ridge Cap / Hip-Ridge Shingles</span><span class="p2-row-value">${ridgeHipFt} ft</span></div>
-    <div class="p2-row"><span class="p2-row-label">Drip Edge (Eave + Rake)</span><span class="p2-row-value">${totalDripEdge} ft</span></div>
-    <div class="p2-row"><span class="p2-row-label">Valley Metal / W-Valley</span><span class="p2-row-value">${es.total_valley_ft} ft</span></div>
-    <div class="p2-row"><span class="p2-row-label">Step Flashing</span><span class="p2-row-value">${Math.round(es.total_valley_ft * 0.6)} ft</span></div>
-  </div>
-
-  <!-- Ventilation + Fasteners side by side -->
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-    <div class="p2-section">
-      <div class="p2-section-title">VENTILATION</div>
-      <div class="p2-row"><span class="p2-row-label">Ridge Vent</span><span class="p2-row-value">${es.total_ridge_ft} ft</span></div>
-      <div class="p2-row"><span class="p2-row-label">Pipe Boots</span><span class="p2-row-value">${pipeBoots}</span></div>
-      <div class="p2-row"><span class="p2-row-label">Exhaust Vents</span><span class="p2-row-value">${exhaustVents}</span></div>
-    </div>
-    <div class="p2-section">
-      <div class="p2-section-title">FASTENERS & SEALANTS</div>
-      <div class="p2-row"><span class="p2-row-label">Roofing Nails</span><span class="p2-row-value">${nailLbs} lbs</span></div>
-      <div class="p2-row"><span class="p2-row-label">Roof Cement</span><span class="p2-row-value">${cementTubes} tubes</span></div>
-      <div class="p2-row"><span class="p2-row-label">Caulking</span><span class="p2-row-value">${Math.max(2, Math.ceil(pipeBoots * 1.5))} tubes</span></div>
-    </div>
-  </div>
-
-  <!-- Bottom Summary Badges -->
-  <div class="p2-bottom">
-    <div class="p2-badge-box">
-      <div class="p2-badge-label">WASTE FACTOR</div>
-      <div class="p2-badge-value">${mat.waste_pct}%</div>
-    </div>
-    <div class="p2-badge-box">
-      <div class="p2-badge-label">COMPLEXITY</div>
-      <div class="p2-badge-value" style="text-transform:uppercase">${mat.complexity_class.replace('_',' ')}</div>
-    </div>
-    <div class="p2-badge-box" style="border-color:#0091EA">
-      <div class="p2-badge-label" style="color:#0091EA">EST. MATERIAL COST</div>
-      <div class="p2-badge-value" style="color:#0091EA">$${mat.total_material_cost_cad.toFixed(2)} CAD</div>
-    </div>
-  </div>
-
-  <div style="text-align:center;margin-top:12px;color:#5A7A96;font-size:7px">RoofReporterAI | Material Order Calculation | ${reportNum} | Quantities are estimates &mdash; verify with your supplier. Pricing subject to change.</div>
-</div>
-
-<!-- ==================== PAGE 3: DETAILED MEASUREMENTS + DIAGRAM ==================== -->
-<div class="page p3">
-  <!-- Header -->
-  <div class="p3-header">
+  <!-- Address bar -->
+  <div class="rpt-addr">
     <div>
-      <div class="p3-header-title">DETAILED ROOF<br>MEASUREMENTS</div>
+      <div class="rpt-addr-text">${fullAddress}</div>
+      <div class="rpt-addr-detail">${[prop.homeowner_name ? 'Homeowner: ' + prop.homeowner_name : '', prop.requester_name ? 'Prepared for: ' + prop.requester_name : '', prop.requester_company || ''].filter(Boolean).join(' &bull; ')}</div>
     </div>
-    <div class="p3-header-meta">
-      <div><b>Property:</b> ${fullAddress}</div>
-      <div><b>Report #:</b> ${reportNum}</div>
-      <div><b>Accuracy:</b> ${report.metadata.accuracy_benchmark || 'Standard'}</div>
-      <div><b>Provider:</b> ${providerLabel}</div>
-    </div>
+    <div class="rpt-addr-right">${prop.latitude && prop.longitude ? prop.latitude.toFixed(6) + ', ' + prop.longitude.toFixed(6) : ''}</div>
   </div>
 
-  <!-- Content Grid: Facets + Linear -->
-  <div class="p3-content">
-    <!-- Facet Breakdown with colors -->
-    <div class="p3-box">
-      <div class="p3-box-title">FACET BREAKDOWN (${report.segments.length} segments)</div>
-      ${report.segments.map((s, i) => `<div class="p3-facet"><div class="p3-facet-color" style="background:${facetColors[i % facetColors.length]}"></div><b>${s.name || 'Facet ' + (i+1)}:</b>&nbsp;${s.true_area_sqft.toLocaleString()} sq ft &bull; Pitch: ${s.pitch_ratio} (${s.pitch_degrees}&deg;) &bull; ${s.azimuth_direction || ''}</div>`).join('')}
-      <div style="margin-top:8px;padding-top:6px;border-top:2px solid #E0ECF5;font-size:10px;font-weight:700;color:#002F6C;display:flex;justify-content:space-between">
-        <span>TOTAL:</span><span>${report.total_true_area_sqft.toLocaleString()} sq ft (${report.total_true_area_sqm?.toFixed(1) || ''} m&sup2;)</span>
+  <div class="p1-body">
+    <!-- Two-column: Satellite image + Squares callout -->
+    <div class="p1-img-section">
+      <div>
+        <!-- Overhead satellite with overlay -->
+        <div class="p1-sat-container" style="height:280px">
+          ${overheadUrl ? `<img src="${overheadUrl}" alt="Overhead Satellite" style="width:100%;height:280px;object-fit:cover" onerror="this.style.display='none'">` : '<div class="p5-img-placeholder" style="height:280px">Satellite imagery loading...</div>'}
+          ${hasOverlay ? `<svg viewBox="0 0 640 640" xmlns="http://www.w3.org/2000/svg" style="position:absolute;top:0;left:0;width:100%;height:280px;pointer-events:none">${overlaySVG}</svg>` : ''}
+          <div class="p1-sat-label">${hasOverlay ? 'MEASURED ROOF OVERLAY' : 'OVERHEAD SATELLITE'} &mdash; Zoom ${report.metadata.provider === 'google_solar_datalayers' ? '21' : '20'}</div>
+        </div>
+        <!-- Overlay legend -->
+        ${overlayLegend ? `<div style="margin-top:6px">${overlayLegend}</div>` : ''}
+      </div>
+      <!-- Squares callout -->
+      <div>
+        <div class="p1-squares-box" style="height:280px">
+          <div class="p1-sq-label">Roof Area</div>
+          <div class="p1-sq-value">${Math.round(grossSquares)}</div>
+          <div class="p1-sq-unit">Squares</div>
+          <div class="p1-sq-detail">
+            ${report.total_true_area_sqft.toLocaleString()} sq ft total area<br>
+            ${netSquares} net + ${mat.waste_pct}% waste factor<br>
+            ${report.segments.length} facets &bull; ${predominantPitch} pitch
+          </div>
+        </div>
+        <!-- Mini directional views below squares -->
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-top:6px">
+          <div style="border:1px solid #ddd;border-radius:3px;overflow:hidden;text-align:center">
+            ${northUrl ? `<img src="${northUrl}" alt="N" style="width:100%;height:45px;object-fit:cover;display:block">` : '<div style="height:45px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:8px">N/A</div>'}
+            <div style="font-size:7px;font-weight:700;color:#002B5C;padding:2px">N</div>
+          </div>
+          <div style="border:1px solid #ddd;border-radius:3px;overflow:hidden;text-align:center">
+            ${eastUrl ? `<img src="${eastUrl}" alt="E" style="width:100%;height:45px;object-fit:cover;display:block">` : '<div style="height:45px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:8px">N/A</div>'}
+            <div style="font-size:7px;font-weight:700;color:#002B5C;padding:2px">E</div>
+          </div>
+          <div style="border:1px solid #ddd;border-radius:3px;overflow:hidden;text-align:center">
+            ${southUrl ? `<img src="${southUrl}" alt="S" style="width:100%;height:45px;object-fit:cover;display:block">` : '<div style="height:45px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:8px">N/A</div>'}
+            <div style="font-size:7px;font-weight:700;color:#002B5C;padding:2px">S</div>
+          </div>
+          <div style="border:1px solid #ddd;border-radius:3px;overflow:hidden;text-align:center">
+            ${westUrl ? `<img src="${westUrl}" alt="W" style="width:100%;height:45px;object-fit:cover;display:block">` : '<div style="height:45px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:8px">N/A</div>'}
+            <div style="font-size:7px;font-weight:700;color:#002B5C;padding:2px">W</div>
+          </div>
+        </div>
       </div>
     </div>
 
-    <!-- Linear Measurements + Penetrations -->
-    <div class="p3-box">
-      <div class="p3-box-title">LINEAR MEASUREMENTS</div>
-      <div class="p3-lin-row"><div class="p3-lin-color" style="background:#E53935"></div><div class="p3-lin-label">Ridge</div><div class="p3-lin-value">${es.total_ridge_ft} ft</div></div>
-      <div class="p3-lin-row"><div class="p3-lin-color" style="background:#5B9BD5"></div><div class="p3-lin-label">Hip</div><div class="p3-lin-value">${es.total_hip_ft} ft</div></div>
-      <div class="p3-lin-row"><div class="p3-lin-color" style="background:#43A047"></div><div class="p3-lin-label">Valley</div><div class="p3-lin-value">${es.total_valley_ft} ft</div></div>
-      <div class="p3-lin-row"><div class="p3-lin-color" style="background:#FF9800"></div><div class="p3-lin-label">Eaves</div><div class="p3-lin-value">${es.total_eave_ft} ft</div></div>
-      <div class="p3-lin-row"><div class="p3-lin-color" style="background:#9C27B0"></div><div class="p3-lin-label">Rake</div><div class="p3-lin-value">${es.total_rake_ft} ft</div></div>
-      <div class="p3-lin-row"><div class="p3-lin-color" style="background:#795548"></div><div class="p3-lin-label">Drip Edge (Eave + Rake)</div><div class="p3-lin-value">${totalDripEdge} ft</div></div>
-      <div style="margin-top:4px;padding-top:4px;border-top:2px solid #E0ECF5;font-size:10px;font-weight:700;color:#002F6C;display:flex;justify-content:space-between">
-        <span>TOTAL LINEAR:</span><span>${totalLinearFt} ft</span>
-      </div>
-
-      <div class="p3-penetrations">
-        <div class="p3-pen-title">PENETRATIONS</div>
-        <div class="p3-pen-row"><span>Pipe Boots</span><b>${pipeBoots}</b></div>
-        <div class="p3-pen-row"><span>Chimney</span><b>${chimneys}</b></div>
-        <div class="p3-pen-row"><span>Skylight</span><b>0</b></div>
-        <div class="p3-pen-row"><span>Exhaust Vents</span><b>${exhaustVents}</b></div>
-      </div>
+    <!-- Measurements Summary Table -->
+    <div class="rpt-section" style="padding:0">
+      <div class="rpt-section-title" style="padding:8px 0 6px">Measurements Summary</div>
     </div>
-  </div>
-
-  <!-- PERIMETER SIDE-BY-SIDE MEASUREMENTS TABLE -->
-  ${perimeterData.sides.length > 0 ? `
-  <div class="p3-box" style="grid-column:1/-1;margin-bottom:12px">
-    <div class="p3-box-title">ROOF PERIMETER &mdash; SIDE-BY-SIDE MEASUREMENTS (${perimeterData.sides.length} Sides)</div>
-    <table style="width:100%;border-collapse:collapse;font-size:10px">
-      <thead>
-        <tr style="border-bottom:2px solid #E0ECF5">
-          <th style="text-align:left;padding:4px 6px;color:#002F6C;font-weight:700">#</th>
-          <th style="text-align:left;padding:4px 6px;color:#002F6C;font-weight:700">Edge Type</th>
-          <th style="text-align:right;padding:4px 6px;color:#002F6C;font-weight:700">Length (ft &amp; in)</th>
-          <th style="text-align:right;padding:4px 6px;color:#002F6C;font-weight:700">Length (ft)</th>
-        </tr>
-      </thead>
+    <table class="p1-summary-table">
+      <thead><tr><th>Measurement</th><th style="text-align:right">Value</th></tr></thead>
       <tbody>
-        ${perimeterData.sides.map((side, i) => {
-          const edgeColorMap: Record<string, string> = { 'EAVE': '#FF9100', 'RAKE': '#D500F9', 'HIP': '#2979FF', 'RIDGE': '#FF1744' }
-          const color = edgeColorMap[side.type] || '#335C8A'
-          return `<tr style="border-bottom:1px solid #F0F4F8">
-            <td style="padding:3px 6px;color:#335C8A">${i + 1}</td>
-            <td style="padding:3px 6px"><span style="display:inline-block;width:10px;height:10px;background:${color};border-radius:2px;vertical-align:middle;margin-right:4px"></span><span style="color:${color};font-weight:600">${side.type}</span></td>
-            <td style="text-align:right;padding:3px 6px;font-weight:700;color:#002F6C">${side.ftInches}</td>
-            <td style="text-align:right;padding:3px 6px;color:#335C8A">${side.ft.toFixed(1)}</td>
-          </tr>`
-        }).join('')}
+        <tr><td>Total Roof Area</td><td>${report.total_true_area_sqft.toLocaleString()} sq ft</td></tr>
+        <tr><td>Flat Footprint Area</td><td>${report.total_footprint_sqft.toLocaleString()} sq ft</td></tr>
+        <tr><td>Number of Facets</td><td>${report.segments.length}</td></tr>
+        <tr><td>Predominant Pitch</td><td>${predominantPitch} (${predominantPitchDeg.toFixed(1)}&deg;)</td></tr>
+        <tr><td>Pitch Multiplier</td><td>&times;${report.area_multiplier}</td></tr>
+        <tr><td>Total Ridges</td><td style="color:#C62828">${es.total_ridge_ft} ft</td></tr>
+        <tr><td>Total Hips</td><td style="color:#1565C0">${es.total_hip_ft} ft</td></tr>
+        <tr><td>Total Valleys</td><td style="color:#2E7D32">${es.total_valley_ft} ft</td></tr>
+        <tr><td>Total Eaves</td><td>${es.total_eave_ft} ft</td></tr>
+        <tr><td>Total Rakes</td><td>${es.total_rake_ft} ft</td></tr>
+        <tr><td>Drip Edge</td><td>${totalDripEdge} ft</td></tr>
+        <tr><td>Total Linear Footage</td><td style="font-size:13px">${totalLinearFt} ft</td></tr>
+        <tr style="background:#EFF6FF"><td style="font-weight:800;color:#002B5C">Roofing Squares (Gross)</td><td style="font-size:14px;font-weight:900;color:#002B5C">${Math.round(grossSquares)} squares</td></tr>
       </tbody>
-      <tfoot>
-        <tr style="border-top:2px solid #002F6C;font-weight:800;color:#002F6C">
-          <td colspan="2" style="padding:5px 6px">TOTAL PERIMETER</td>
-          <td style="text-align:right;padding:5px 6px">${feetToFeetInches(perimeterData.totalFt)}</td>
-          <td style="text-align:right;padding:5px 6px">${perimeterData.totalFt.toFixed(1)} ft</td>
-        </tr>
-      </tfoot>
     </table>
-    <!-- Perimeter breakdown by type -->
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid #E0ECF5">
-      <div style="text-align:center;padding:6px;background:#FFF3E0;border-radius:5px;border:1px solid #FFB74D">
-        <div style="font-size:7px;color:#E65100;font-weight:700;text-transform:uppercase;letter-spacing:0.5px">Eaves</div>
-        <div style="font-size:14px;font-weight:900;color:#E65100">${es.total_eave_ft}<span style="font-size:9px;color:#FF9800"> ft</span></div>
-      </div>
-      <div style="text-align:center;padding:6px;background:#F3E5F5;border-radius:5px;border:1px solid #CE93D8">
-        <div style="font-size:7px;color:#7B1FA2;font-weight:700;text-transform:uppercase;letter-spacing:0.5px">Rakes</div>
-        <div style="font-size:14px;font-weight:900;color:#7B1FA2">${es.total_rake_ft}<span style="font-size:9px;color:#AB47BC"> ft</span></div>
-      </div>
-      <div style="text-align:center;padding:6px;background:#FFEBEE;border-radius:5px;border:1px solid #EF9A9A">
-        <div style="font-size:7px;color:#C62828;font-weight:700;text-transform:uppercase;letter-spacing:0.5px">Ridge</div>
-        <div style="font-size:14px;font-weight:900;color:#C62828">${es.total_ridge_ft}<span style="font-size:9px;color:#E53935"> ft</span></div>
-      </div>
-      <div style="text-align:center;padding:6px;background:#E3F2FD;border-radius:5px;border:1px solid #90CAF9">
-        <div style="font-size:7px;color:#1565C0;font-weight:700;text-transform:uppercase;letter-spacing:0.5px">Hips</div>
-        <div style="font-size:14px;font-weight:900;color:#1565C0">${es.total_hip_ft}<span style="font-size:9px;color:#1E88E5"> ft</span></div>
-      </div>
-    </div>
-    <!-- Squares / Sq Ft summary row -->
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:6px">
-      <div style="text-align:center;padding:8px;background:#002F6C;border-radius:6px">
-        <div style="font-size:7px;color:#8ECAE6;font-weight:700;text-transform:uppercase;letter-spacing:0.5px">Square Footage</div>
-        <div style="font-size:16px;font-weight:900;color:#fff">${report.total_true_area_sqft.toLocaleString()}<span style="font-size:10px;color:#8ECAE6"> ft&sup2;</span></div>
-      </div>
-      <div style="text-align:center;padding:8px;background:#002F6C;border-radius:6px">
-        <div style="font-size:7px;color:#8ECAE6;font-weight:700;text-transform:uppercase;letter-spacing:0.5px">Net Squares</div>
-        <div style="font-size:16px;font-weight:900;color:#fff">${netSquares}</div>
-      </div>
-      <div style="text-align:center;padding:8px;background:linear-gradient(135deg,#0091EA,#002F6C);border-radius:6px">
-        <div style="font-size:7px;color:#B3E5FC;font-weight:700;text-transform:uppercase;letter-spacing:0.5px">Gross Squares (+${mat.waste_pct}%)</div>
-        <div style="font-size:16px;font-weight:900;color:#fff">${Math.round(grossSquares)}</div>
-      </div>
-    </div>
-  </div>
-  ` : ''}
 
-  <!-- Roof Diagram (SVG) -->
-  <div class="p3-diagram">
-    <div class="p3-diagram-title">ROOF DIAGRAM &mdash; PLAN VIEW</div>
-    <svg class="p3-diagram-svg" viewBox="0 0 500 280" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <pattern id="grid" width="25" height="25" patternUnits="userSpaceOnUse"><path d="M 25 0 L 0 0 0 25" fill="none" stroke="#E0ECF5" stroke-width="0.5"/></pattern>
-      </defs>
-      <rect width="500" height="280" fill="#F8FBFF"/>
-      <rect width="500" height="280" fill="url(#grid)"/>
-      ${generateRoofDiagramSVG(report.segments, facetColors)}
-    </svg>
-  </div>
-
-  <!-- Report Summary -->
-  <div style="background:#fff;border-radius:8px;padding:12px 18px;margin-top:12px;box-shadow:0 1px 3px rgba(0,0,0,0.05);text-align:center">
-    <div style="font-size:10px;font-weight:800;color:#002F6C;text-transform:uppercase;letter-spacing:1px;margin-bottom:5px">REPORT SUMMARY</div>
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
-      <div style="text-align:center;padding:6px;background:#EFF6FF;border-radius:5px">
-        <div style="font-size:7px;color:#475569;text-transform:uppercase;letter-spacing:0.5px">Total Area</div>
-        <div style="font-size:14px;font-weight:800;color:#1D4ED8">${report.total_true_area_sqft.toLocaleString()} ft&sup2;</div>
-      </div>
-      <div style="text-align:center;padding:6px;background:#EFF6FF;border-radius:5px">
-        <div style="font-size:7px;color:#475569;text-transform:uppercase;letter-spacing:0.5px">Squares (Gross)</div>
-        <div style="font-size:14px;font-weight:800;color:#1D4ED8">${Math.round(grossSquares)}</div>
-      </div>
-      <div style="text-align:center;padding:6px;background:#EFF6FF;border-radius:5px">
-        <div style="font-size:7px;color:#475569;text-transform:uppercase;letter-spacing:0.5px">Total Linear</div>
-        <div style="font-size:14px;font-weight:800;color:#1D4ED8">${totalLinearFt} ft</div>
-      </div>
-      <div style="text-align:center;padding:6px;background:#EFF6FF;border-radius:5px">
-        <div style="font-size:7px;color:#475569;text-transform:uppercase;letter-spacing:0.5px">Est. Cost</div>
-        <div style="font-size:14px;font-weight:800;color:#1D4ED8">$${mat.total_material_cost_cad.toFixed(2)}</div>
-      </div>
+    <!-- Provider / Quality Badges -->
+    <div class="p1-badges">
+      <span class="p1-badge" style="background:#EFF6FF;color:#002B5C;border:1px solid #002B5C">${quality.imagery_quality || 'BASE'} QUALITY</span>
+      <span class="p1-badge" style="background:#F1F5F9;color:#475569;border:1px solid #CBD5E1">${providerLabel}</span>
+      <span class="p1-badge" style="background:${quality.confidence_score >= 90 ? '#ECFDF5' : quality.confidence_score >= 75 ? '#FFFBEB' : '#FEF2F2'};color:${quality.confidence_score >= 90 ? '#059669' : quality.confidence_score >= 75 ? '#D97706' : '#DC2626'};border:1px solid ${quality.confidence_score >= 90 ? '#6EE7B7' : quality.confidence_score >= 75 ? '#FCD34D' : '#FCA5A5'}">CONFIDENCE: ${quality.confidence_score}%</span>
+      ${report.ai_geometry?.facets?.length ? `<span class="p1-badge" style="background:#ECFDF5;color:#059669;border:1px solid #6EE7B7">AI OVERLAY: ${report.ai_geometry.facets.length} FACETS</span>` : ''}
     </div>
   </div>
 
-  <div style="text-align:center;margin-top:10px;color:#5A7A96;font-size:7px">
-    &copy; ${new Date().getFullYear()} RoofReporterAI | Antigravity Gemini Professional Roof Measurement Reports | ${reportNum} | v${report.report_version || '3.0'}
+  <!-- Footer -->
+  <div class="rpt-footer">
+    <span class="rpt-footer-brand">RoofReporterAI &mdash; Professional Roof Measurement Reports</span>
+    <span>${reportNum} &bull; Page 1 of 5</span>
   </div>
 </div>
 
-<!-- ==================== PAGE 4: COMPLETE IMAGERY GALLERY ==================== -->
-<div class="page p4" style="background:linear-gradient(180deg,#F5F7FA 0%,#E8ECF1 100%);min-height:11in;max-width:8.5in;margin:0 auto;padding:24px 28px;font-family:'Inter',system-ui,sans-serif">
-  <!-- Header -->
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;background:linear-gradient(135deg,#1B2838,#2D4A63);color:#fff;padding:16px 20px;border-radius:10px;margin-bottom:14px">
-    <div>
-      <div style="font-size:20px;font-weight:900;text-transform:uppercase;letter-spacing:1px">IMAGERY GALLERY</div>
-      <div style="font-size:10px;color:#8ECAE6;margin-top:2px">Complete Satellite &amp; Street View Coverage &mdash; ${quality.imagery_quality || 'BASE'} Quality</div>
+<!-- ==================== PAGE 2: LENGTH DIAGRAM — Color-coded Roof Plan ==================== -->
+<div class="page p2">
+  <div class="rpt-header">
+    <div class="rpt-header-logo">
+      <div class="rpt-header-logo-icon">RR</div>
+      <div>
+        <div class="rpt-header-brand">LENGTH DIAGRAM</div>
+        <div class="rpt-header-sub">COLOR-CODED ROOF MEASUREMENTS</div>
+      </div>
     </div>
-    <div style="text-align:right;font-size:10px;color:#B0C4D8">
+    <div class="rpt-header-meta">
       <div><b>${fullAddress}</b></div>
       <div>${reportNum} &bull; ${reportDate}</div>
-      <div style="margin-top:2px;color:#8ECAE6">${prop.latitude?.toFixed(6) || ''}, ${prop.longitude?.toFixed(6) || ''}</div>
+    </div>
+  </div>
+  <div class="rpt-addr">
+    <div class="rpt-addr-text">${fullAddress}</div>
+    <div class="rpt-addr-right">${prop.latitude?.toFixed(6) || ''}, ${prop.longitude?.toFixed(6) || ''}</div>
+  </div>
+
+  <div class="p2-body">
+    <!-- Color legend — matches EagleView style -->
+    <div class="p2-legend">
+      <div class="p2-legend-item"><div class="p2-legend-line" style="border-color:#C62828"></div>Ridge</div>
+      <div class="p2-legend-item"><div class="p2-legend-line" style="border-color:#C62828"></div>Hip</div>
+      <div class="p2-legend-item"><div class="p2-legend-line" style="border-color:#1565C0"></div>Valley</div>
+      <div class="p2-legend-item"><div class="p2-legend-line" style="border-color:#1B2838"></div>Eave</div>
+      <div class="p2-legend-item"><div class="p2-legend-line" style="border-color:#E91E63"></div>Rake</div>
+      <div class="p2-legend-item"><div class="p2-legend-dash" style="border-color:#FFB300"></div>Obstruction</div>
+    </div>
+
+    <!-- Primary roof diagram — satellite with overlay OR generated diagram -->
+    <div class="p2-diagram-container">
+      ${hasOverlay ? `
+      <div style="position:relative;max-width:500px;margin:0 auto">
+        ${overheadUrl ? `<img src="${overheadUrl}" alt="Roof" style="width:100%;max-height:380px;object-fit:cover;border-radius:2px;display:block">` : ''}
+        <svg viewBox="0 0 640 640" xmlns="http://www.w3.org/2000/svg" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none">${overlaySVG}</svg>
+      </div>
+      ` : `
+      <svg viewBox="0 0 500 280" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-height:340px">
+        <defs><pattern id="grid2" width="25" height="25" patternUnits="userSpaceOnUse"><path d="M 25 0 L 0 0 0 25" fill="none" stroke="#E5E7EB" stroke-width="0.5"/></pattern></defs>
+        <rect width="500" height="280" fill="#FAFBFC"/>
+        <rect width="500" height="280" fill="url(#grid2)"/>
+        ${generateRoofDiagramSVG(report.segments, facetColors)}
+      </svg>
+      `}
+    </div>
+
+    <!-- Length totals — color-coded cards -->
+    <div class="p2-totals">
+      <div class="p2-total-card" style="border-color:#C62828;background:#FFF5F5">
+        <div class="p2-total-label" style="color:#C62828">Ridges</div>
+        <div class="p2-total-value" style="color:#C62828">${es.total_ridge_ft}</div>
+        <div class="p2-total-unit">ft</div>
+      </div>
+      <div class="p2-total-card" style="border-color:#C62828;background:#FFF5F5">
+        <div class="p2-total-label" style="color:#C62828">Hips</div>
+        <div class="p2-total-value" style="color:#C62828">${es.total_hip_ft}</div>
+        <div class="p2-total-unit">ft</div>
+      </div>
+      <div class="p2-total-card" style="border-color:#1565C0;background:#EFF6FF">
+        <div class="p2-total-label" style="color:#1565C0">Valleys</div>
+        <div class="p2-total-value" style="color:#1565C0">${es.total_valley_ft}</div>
+        <div class="p2-total-unit">ft</div>
+      </div>
+      <div class="p2-total-card" style="border-color:#1B2838;background:#F8FAFC">
+        <div class="p2-total-label" style="color:#1B2838">Eaves</div>
+        <div class="p2-total-value" style="color:#1B2838">${es.total_eave_ft}</div>
+        <div class="p2-total-unit">ft</div>
+      </div>
+      <div class="p2-total-card" style="border-color:#E91E63;background:#FFF0F5">
+        <div class="p2-total-label" style="color:#E91E63">Rakes</div>
+        <div class="p2-total-value" style="color:#E91E63">${es.total_rake_ft}</div>
+        <div class="p2-total-unit">ft</div>
+      </div>
+    </div>
+
+    <!-- Perimeter Side-by-Side Table -->
+    ${perimeterData.sides.length > 0 ? `
+    <div style="margin-top:14px">
+      <div style="font-size:11px;font-weight:800;color:#002B5C;text-transform:uppercase;letter-spacing:0.5px;padding-bottom:5px;border-bottom:2px solid #002B5C;margin-bottom:6px">Perimeter Measurements (${perimeterData.sides.length} Sides)</div>
+      <table style="width:100%;border-collapse:collapse;font-size:10px">
+        <thead>
+          <tr style="background:#F8FAFC;border-bottom:1px solid #ddd">
+            <th style="text-align:left;padding:4px 8px;color:#002B5C;font-weight:700;font-size:9px">#</th>
+            <th style="text-align:left;padding:4px 8px;color:#002B5C;font-weight:700;font-size:9px">EDGE TYPE</th>
+            <th style="text-align:right;padding:4px 8px;color:#002B5C;font-weight:700;font-size:9px">FT &amp; IN</th>
+            <th style="text-align:right;padding:4px 8px;color:#002B5C;font-weight:700;font-size:9px">FT</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${perimeterData.sides.map((side, i) => {
+            const edgeColorMap: Record<string, string> = { 'EAVE': '#1B2838', 'RAKE': '#E91E63', 'HIP': '#C62828', 'RIDGE': '#C62828' }
+            const color = edgeColorMap[side.type] || '#1B2838'
+            return `<tr style="border-bottom:1px solid #F0F4F8">
+              <td style="padding:3px 8px;color:#666">${i + 1}</td>
+              <td style="padding:3px 8px"><span style="display:inline-block;width:10px;height:3px;background:${color};border-radius:1px;vertical-align:middle;margin-right:5px"></span><span style="color:${color};font-weight:600">${side.type}</span></td>
+              <td style="text-align:right;padding:3px 8px;font-weight:700;color:#002B5C">${side.ftInches}</td>
+              <td style="text-align:right;padding:3px 8px;color:#666">${side.ft.toFixed(1)}</td>
+            </tr>`
+          }).join('')}
+        </tbody>
+        <tfoot>
+          <tr style="border-top:2px solid #002B5C;font-weight:800;color:#002B5C">
+            <td colspan="2" style="padding:5px 8px">TOTAL PERIMETER</td>
+            <td style="text-align:right;padding:5px 8px">${feetToFeetInches(perimeterData.totalFt)}</td>
+            <td style="text-align:right;padding:5px 8px">${perimeterData.totalFt.toFixed(1)} ft</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+    ` : ''}
+  </div>
+
+  <div class="rpt-footer">
+    <span class="rpt-footer-brand">RoofReporterAI &mdash; Length Diagram</span>
+    <span>${reportNum} &bull; Page 2 of 5</span>
+  </div>
+</div>
+
+<!-- ==================== PAGE 3: MEASUREMENTS SUMMARY ==================== -->
+<div class="page p3">
+  <div class="rpt-header">
+    <div class="rpt-header-logo">
+      <div class="rpt-header-logo-icon">RR</div>
+      <div>
+        <div class="rpt-header-brand">MEASUREMENTS SUMMARY</div>
+        <div class="rpt-header-sub">DETAILED ROOF ANALYSIS</div>
+      </div>
+    </div>
+    <div class="rpt-header-meta">
+      <div><b>${fullAddress}</b></div>
+      <div>${reportNum} &bull; ${reportDate}</div>
+    </div>
+  </div>
+  <div class="rpt-addr">
+    <div class="rpt-addr-text">${fullAddress}</div>
+    <div class="rpt-addr-right">v${report.report_version || '3.0'} &bull; ${providerLabel}</div>
+  </div>
+
+  <div class="p3-body">
+    <!-- Main measurements table (EagleView-style) -->
+    <table class="p3-table">
+      <thead><tr><th>Measurement</th><th>Value</th></tr></thead>
+      <tbody>
+        <tr><td>Total Roof Area (3D True Area)</td><td>${report.total_true_area_sqft.toLocaleString()} sq ft</td></tr>
+        <tr><td>Flat Footprint Area</td><td>${report.total_footprint_sqft.toLocaleString()} sq ft</td></tr>
+        <tr><td>Number of Roof Facets</td><td>${report.segments.length}</td></tr>
+        <tr><td>Predominant Pitch</td><td>${predominantPitch} (${predominantPitchDeg.toFixed(1)}&deg;)</td></tr>
+        <tr><td>Pitch Area Multiplier</td><td>&times;${report.area_multiplier}</td></tr>
+      </tbody>
+    </table>
+
+    <!-- Linear Measurements Table -->
+    <div style="font-size:12px;font-weight:800;color:#002B5C;text-transform:uppercase;letter-spacing:0.5px;padding-bottom:5px;border-bottom:2px solid #002B5C;margin-bottom:8px">Linear Measurements</div>
+    <table class="p3-table">
+      <thead><tr><th style="width:40px">Color</th><th>Type</th><th>Length</th></tr></thead>
+      <tbody>
+        <tr><td><div style="width:24px;height:4px;background:#C62828;border-radius:2px"></div></td><td>Ridges</td><td>${es.total_ridge_ft} ft</td></tr>
+        <tr><td><div style="width:24px;height:4px;background:#C62828;border-radius:2px"></div></td><td>Hips</td><td>${es.total_hip_ft} ft</td></tr>
+        <tr><td><div style="width:24px;height:4px;background:#1565C0;border-radius:2px"></div></td><td>Valleys</td><td>${es.total_valley_ft} ft</td></tr>
+        <tr><td><div style="width:24px;height:4px;background:#1B2838;border-radius:2px"></div></td><td>Eaves</td><td>${es.total_eave_ft} ft</td></tr>
+        <tr><td><div style="width:24px;height:4px;background:#E91E63;border-radius:2px"></div></td><td>Rakes</td><td>${es.total_rake_ft} ft</td></tr>
+        <tr><td><div style="width:24px;height:4px;background:#795548;border-radius:2px"></div></td><td>Drip Edge (Eave + Rake)</td><td>${totalDripEdge} ft</td></tr>
+        <tr><td><div style="width:24px;height:4px;background:#002B5C;border-radius:2px"></div></td><td>Perimeter</td><td>${totalPerimeterFt} ft</td></tr>
+        <tr class="row-total"><td></td><td>Total Linear Footage</td><td>${totalLinearFt} ft</td></tr>
+      </tbody>
+    </table>
+
+    <!-- Facet Breakdown Cards -->
+    <div style="font-size:12px;font-weight:800;color:#002B5C;text-transform:uppercase;letter-spacing:0.5px;padding-bottom:5px;border-bottom:2px solid #002B5C;margin:14px 0 8px">Facet Breakdown (${report.segments.length} Segments)</div>
+    <div class="p3-facet-grid">
+      ${report.segments.map((s, i) => `
+      <div class="p3-facet-card">
+        <div class="p3-facet-card-header">
+          <div class="p3-facet-dot" style="background:${facetColors[i % facetColors.length]}"></div>
+          <div class="p3-facet-name">${s.name || 'Facet ' + (i+1)}</div>
+        </div>
+        <div class="p3-facet-area">${s.true_area_sqft.toLocaleString()} <span style="font-size:10px;font-weight:600;color:#5A7A96">sq ft</span></div>
+        <div class="p3-facet-detail">Pitch: ${s.pitch_ratio} (${s.pitch_degrees}&deg;) &bull; ${s.azimuth_direction || 'N/A'}</div>
+      </div>`).join('')}
+    </div>
+
+    <!-- Penetrations & Obstructions -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="p3-pen-box">
+        <div style="font-size:11px;font-weight:800;color:#002B5C;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;padding-bottom:4px;border-bottom:2px solid #E5E7EB">Penetrations</div>
+        <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:11px;border-bottom:1px solid #F0F4F8"><span style="color:#4A5568">Pipe Boots</span><b style="color:#002B5C">${pipeBoots}</b></div>
+        <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:11px;border-bottom:1px solid #F0F4F8"><span style="color:#4A5568">Chimney</span><b style="color:#002B5C">${chimneys}</b></div>
+        <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:11px;border-bottom:1px solid #F0F4F8"><span style="color:#4A5568">Skylight</span><b style="color:#002B5C">0</b></div>
+        <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:11px"><span style="color:#4A5568">Exhaust Vents</span><b style="color:#002B5C">${exhaustVents}</b></div>
+      </div>
+      <div class="p3-pen-box">
+        <div style="font-size:11px;font-weight:800;color:#002B5C;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;padding-bottom:4px;border-bottom:2px solid #E5E7EB">Report Quality</div>
+        <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:11px;border-bottom:1px solid #F0F4F8"><span style="color:#4A5568">Data Source</span><b style="color:#002B5C">${providerLabel}</b></div>
+        <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:11px;border-bottom:1px solid #F0F4F8"><span style="color:#4A5568">Imagery Quality</span><b style="color:#002B5C">${quality.imagery_quality || 'BASE'}</b></div>
+        <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:11px;border-bottom:1px solid #F0F4F8"><span style="color:#4A5568">Confidence</span><b style="color:${confidenceColor}">${quality.confidence_score}%</b></div>
+        <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:11px"><span style="color:#4A5568">Complexity</span><b style="color:#002B5C">${mat.complexity_class.replace('_',' ')}</b></div>
+      </div>
     </div>
   </div>
 
-  <!-- Row 1: Street View (front elevation) + Overhead with overlay -->
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
-    <div style="background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.08)">
-      <div style="padding:8px 12px 4px;font-size:9px;font-weight:700;color:#1B2838;text-transform:uppercase;letter-spacing:1px">FRONT ELEVATION &mdash; STREET VIEW</div>
-      ${streetViewUrl
-        ? `<img src="${streetViewUrl}" alt="Street View" style="width:100%;height:180px;object-fit:cover" onerror="this.outerHTML='<div style=\\'width:100%;height:180px;display:flex;align-items:center;justify-content:center;background:#f0f4f8;color:#94a3b8;font-size:12px\\'>Street View not available for this location</div>'">`
-        : '<div style="width:100%;height:180px;display:flex;align-items:center;justify-content:center;background:#f0f4f8;color:#94a3b8;font-size:12px">Street View not available</div>'
-      }
-      <div style="padding:4px 12px 6px;font-size:8px;color:#64748b">Google Street View &bull; Front-facing curb appeal reference &bull; Scale 2x</div>
-    </div>
-    <div style="background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.08)">
-      <div style="padding:8px 12px 4px;font-size:9px;font-weight:700;color:#1B2838;text-transform:uppercase;letter-spacing:1px">OVERHEAD SATELLITE &mdash; MEASUREMENT VIEW</div>
-      <div style="position:relative">
-        ${overheadUrl ? `<img src="${overheadUrl}" alt="Overhead" style="width:100%;height:180px;object-fit:cover">` : '<div style="width:100%;height:180px;background:#e5e7eb;display:flex;align-items:center;justify-content:center;color:#9ca3af">No satellite imagery</div>'}
-        ${hasOverlay ? `<svg viewBox="0 0 640 640" xmlns="http://www.w3.org/2000/svg" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none">${overlaySVG}</svg>` : ''}
+  <div class="rpt-footer">
+    <span class="rpt-footer-brand">RoofReporterAI &mdash; Measurements Summary</span>
+    <span>${reportNum} &bull; Page 3 of 5</span>
+  </div>
+</div>
+
+<!-- ==================== PAGE 4: MATERIAL ORDER CALCULATION ==================== -->
+<div class="page p4">
+  <div class="rpt-header">
+    <div class="rpt-header-logo">
+      <div class="rpt-header-logo-icon">RR</div>
+      <div>
+        <div class="rpt-header-brand">MATERIAL ORDER</div>
+        <div class="rpt-header-sub">BILL OF MATERIALS &mdash; COMPLETE ROOFING PACKAGE</div>
       </div>
-      <div style="padding:4px 12px 6px;font-size:8px;color:#64748b">Zoom ${report.metadata.provider === 'google_solar_datalayers' ? '21' : '20'} &bull; 1280&times;1280px &bull; ${hasOverlay ? 'AI Overlay Active' : 'No AI Overlay'}</div>
+    </div>
+    <div class="rpt-header-meta">
+      <div><b>${fullAddress}</b></div>
+      <div>${reportNum} &bull; ${reportDate}</div>
+    </div>
+  </div>
+  <div class="rpt-addr">
+    <div class="rpt-addr-text">${fullAddress}</div>
+    <div class="rpt-addr-right">${Math.round(grossSquares)} Squares &bull; ${mat.waste_pct}% Waste</div>
+  </div>
+
+  <div class="p4-body">
+    <!-- Area Summary -->
+    <div class="p4-section">
+      <div class="p4-section-title">Area Summary</div>
+      <div class="p4-row"><span class="p4-row-label">Flat Footprint Area</span><span class="p4-row-value">${report.total_footprint_sqft.toLocaleString()} sq ft</span></div>
+      <div class="p4-row"><span class="p4-row-label">Pitch Multiplier</span><span class="p4-row-value">&times;${report.area_multiplier} (${report.roof_pitch_ratio} / ${report.roof_pitch_degrees.toFixed(1)}&deg;)</span></div>
+      <div class="p4-row"><span class="p4-row-label">True 3D Roof Area</span><span class="p4-row-value" style="color:#0091EA;font-size:13px">${report.total_true_area_sqft.toLocaleString()} sq ft</span></div>
+      <div class="p4-row"><span class="p4-row-label">Net Roofing Squares</span><span class="p4-row-value">${netSquares} squares</span></div>
+      <div class="p4-row" style="background:#EFF6FF;padding:6px 0;margin:0 -18px;padding-left:18px;padding-right:18px"><span class="p4-row-label" style="font-weight:800;color:#002B5C">Gross Squares (+${mat.waste_pct}% waste)</span><span class="p4-row-value" style="font-size:15px;font-weight:900">${Math.round(grossSquares)} squares</span></div>
+    </div>
+
+    <!-- Primary Roofing Materials -->
+    <div class="p4-section">
+      <div class="p4-section-title">Primary Roofing Materials</div>
+      <div class="p4-row"><span class="p4-row-label">Shingles (3-tab / Architectural)</span><span class="p4-row-value">${Math.round(grossSquares)} squares (${bundleCount3Tab} bundles)</span></div>
+      <div class="p4-row"><span class="p4-row-label">Synthetic Underlayment</span><span class="p4-row-value">${report.total_true_area_sqft.toLocaleString()} sq ft</span></div>
+      <div class="p4-row"><span class="p4-row-label">Ice &amp; Water Shield</span><span class="p4-row-value">${es.total_eave_ft + es.total_valley_ft} ft (eaves + valleys)</span></div>
+      <div class="p4-row"><span class="p4-row-label">Starter Strip</span><span class="p4-row-value">${starterStripFt} ft</span></div>
+    </div>
+
+    <!-- Accessories -->
+    <div class="p4-section">
+      <div class="p4-section-title">Accessories &amp; Flashing</div>
+      <div class="p4-row"><span class="p4-row-label">Ridge Cap / Hip-Ridge Shingles</span><span class="p4-row-value">${ridgeHipFt} ft</span></div>
+      <div class="p4-row"><span class="p4-row-label">Drip Edge (Eave + Rake)</span><span class="p4-row-value">${totalDripEdge} ft</span></div>
+      <div class="p4-row"><span class="p4-row-label">Valley Metal / W-Valley</span><span class="p4-row-value">${es.total_valley_ft} ft</span></div>
+      <div class="p4-row"><span class="p4-row-label">Step Flashing</span><span class="p4-row-value">${Math.round(es.total_valley_ft * 0.6)} ft</span></div>
+    </div>
+
+    <!-- Ventilation + Fasteners side by side -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="p4-section">
+        <div class="p4-section-title">Ventilation</div>
+        <div class="p4-row"><span class="p4-row-label">Ridge Vent</span><span class="p4-row-value">${es.total_ridge_ft} ft</span></div>
+        <div class="p4-row"><span class="p4-row-label">Pipe Boots</span><span class="p4-row-value">${pipeBoots}</span></div>
+        <div class="p4-row"><span class="p4-row-label">Exhaust Vents</span><span class="p4-row-value">${exhaustVents}</span></div>
+      </div>
+      <div class="p4-section">
+        <div class="p4-section-title">Fasteners &amp; Sealants</div>
+        <div class="p4-row"><span class="p4-row-label">Roofing Nails</span><span class="p4-row-value">${nailLbs} lbs</span></div>
+        <div class="p4-row"><span class="p4-row-label">Roof Cement</span><span class="p4-row-value">${cementTubes} tubes</span></div>
+        <div class="p4-row"><span class="p4-row-label">Caulking</span><span class="p4-row-value">${Math.max(2, Math.ceil(pipeBoots * 1.5))} tubes</span></div>
+      </div>
+    </div>
+
+    <!-- Cost Summary -->
+    <div class="p4-cost-bar">
+      <div class="p4-cost-box">
+        <div class="p4-cost-label">Waste Factor</div>
+        <div class="p4-cost-value">${mat.waste_pct}%</div>
+      </div>
+      <div class="p4-cost-box">
+        <div class="p4-cost-label">Complexity</div>
+        <div class="p4-cost-value" style="text-transform:uppercase">${mat.complexity_class.replace('_',' ')}</div>
+      </div>
+      <div class="p4-cost-box" style="border-color:#0091EA;background:#E8F4FD">
+        <div class="p4-cost-label" style="color:#0091EA">Est. Material Cost</div>
+        <div class="p4-cost-value" style="color:#0091EA">$${mat.total_material_cost_cad.toFixed(2)} CAD</div>
+      </div>
+    </div>
+
+    <div style="text-align:center;margin-top:12px;color:#94a3b8;font-size:8px">Quantities are estimates &mdash; verify with your supplier. Pricing subject to change.</div>
+  </div>
+
+  <div class="rpt-footer">
+    <span class="rpt-footer-brand">RoofReporterAI &mdash; Material Order Calculation</span>
+    <span>${reportNum} &bull; Page 4 of 5</span>
+  </div>
+</div>
+
+<!-- ==================== PAGE 5: COMPLETE IMAGERY GALLERY ==================== -->
+<div class="page p5">
+  <div class="rpt-header">
+    <div class="rpt-header-logo">
+      <div class="rpt-header-logo-icon">RR</div>
+      <div>
+        <div class="rpt-header-brand">IMAGERY GALLERY</div>
+        <div class="rpt-header-sub">COMPLETE SATELLITE &amp; STREET VIEW COVERAGE</div>
+      </div>
+    </div>
+    <div class="rpt-header-meta">
+      <div><b>${fullAddress}</b></div>
+      <div>${reportNum} &bull; ${reportDate}</div>
+    </div>
+  </div>
+  <div class="rpt-addr">
+    <div class="rpt-addr-text">${fullAddress}</div>
+    <div class="rpt-addr-right">${quality.imagery_quality || 'BASE'} Quality &bull; ${prop.latitude?.toFixed(6) || ''}, ${prop.longitude?.toFixed(6) || ''}</div>
+  </div>
+
+  <div class="p5-body">
+    <!-- Row 1: Street View + Overhead with overlay -->
+    <div class="p5-grid-2">
+      <div class="p5-img-card">
+        <div class="p5-img-label">Front Elevation &mdash; Street View</div>
+        ${streetViewUrl
+          ? `<img src="${streetViewUrl}" alt="Street View" style="height:180px" onerror="this.outerHTML='<div class=\\'p5-img-placeholder\\' style=\\'height:180px\\'>Street View not available for this location</div>'">`
+          : '<div class="p5-img-placeholder" style="height:180px">Street View not available</div>'
+        }
+        <div class="p5-img-sub">Google Street View &bull; Front-facing curb appeal reference</div>
+      </div>
+      <div class="p5-img-card">
+        <div class="p5-img-label">Overhead Satellite &mdash; Measurement View</div>
+        <div style="position:relative">
+          ${overheadUrl ? `<img src="${overheadUrl}" alt="Overhead" style="height:180px">` : '<div class="p5-img-placeholder" style="height:180px">No satellite imagery</div>'}
+          ${hasOverlay ? `<svg viewBox="0 0 640 640" xmlns="http://www.w3.org/2000/svg" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none">${overlaySVG}</svg>` : ''}
+        </div>
+        <div class="p5-img-sub">Zoom ${report.metadata.provider === 'google_solar_datalayers' ? '21' : '20'} &bull; 1280&times;1280px &bull; ${hasOverlay ? 'AI Overlay Active' : 'No Overlay'}</div>
+      </div>
+    </div>
+
+    <!-- Row 2: Directional Aerial Views -->
+    <div style="font-size:10px;font-weight:700;color:#002B5C;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Directional Aerial Views &mdash; 50m Offset</div>
+    <div class="p5-grid-4">
+      <div class="p5-img-card">
+        ${northUrl ? `<img src="${northUrl}" alt="North" style="height:95px">` : '<div class="p5-img-placeholder" style="height:95px">N/A</div>'}
+        <div class="p5-img-label">North 0&deg;</div>
+      </div>
+      <div class="p5-img-card">
+        ${eastUrl ? `<img src="${eastUrl}" alt="East" style="height:95px">` : '<div class="p5-img-placeholder" style="height:95px">N/A</div>'}
+        <div class="p5-img-label">East 90&deg;</div>
+      </div>
+      <div class="p5-img-card">
+        ${southUrl ? `<img src="${southUrl}" alt="South" style="height:95px">` : '<div class="p5-img-placeholder" style="height:95px">N/A</div>'}
+        <div class="p5-img-label">South 180&deg;</div>
+      </div>
+      <div class="p5-img-card">
+        ${westUrl ? `<img src="${westUrl}" alt="West" style="height:95px">` : '<div class="p5-img-placeholder" style="height:95px">N/A</div>'}
+        <div class="p5-img-label">West 270&deg;</div>
+      </div>
+    </div>
+
+    <!-- Row 3: Close-up Quadrant Views -->
+    <div style="font-size:10px;font-weight:700;color:#002B5C;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Roof Detail Quadrants &mdash; Maximum Zoom (Z22)</div>
+    <div class="p5-grid-4">
+      <div class="p5-img-card">
+        ${closeupNwUrl ? `<img src="${closeupNwUrl}" alt="NW" style="height:90px">` : '<div class="p5-img-placeholder" style="height:90px">N/A</div>'}
+        <div class="p5-img-label">NW Quadrant</div>
+      </div>
+      <div class="p5-img-card">
+        ${closeupNeUrl ? `<img src="${closeupNeUrl}" alt="NE" style="height:90px">` : '<div class="p5-img-placeholder" style="height:90px">N/A</div>'}
+        <div class="p5-img-label">NE Quadrant</div>
+      </div>
+      <div class="p5-img-card">
+        ${closeupSwUrl ? `<img src="${closeupSwUrl}" alt="SW" style="height:90px">` : '<div class="p5-img-placeholder" style="height:90px">N/A</div>'}
+        <div class="p5-img-label">SW Quadrant</div>
+      </div>
+      <div class="p5-img-card">
+        ${closeupSeUrl ? `<img src="${closeupSeUrl}" alt="SE" style="height:90px">` : '<div class="p5-img-placeholder" style="height:90px">N/A</div>'}
+        <div class="p5-img-label">SE Quadrant</div>
+      </div>
+    </div>
+
+    <!-- Row 4: Zoom progression -->
+    <div style="font-size:10px;font-weight:700;color:#002B5C;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Zoom Progression &mdash; Context to Detail</div>
+    <div class="p5-grid-4">
+      <div class="p5-img-card">
+        ${contextUrl ? `<img src="${contextUrl}" alt="Context" style="height:85px">` : '<div class="p5-img-placeholder" style="height:85px">N/A</div>'}
+        <div class="p5-img-label">Neighborhood</div>
+      </div>
+      <div class="p5-img-card">
+        ${mediumUrl ? `<img src="${mediumUrl}" alt="Medium" style="height:85px">` : '<div class="p5-img-placeholder" style="height:85px">N/A</div>'}
+        <div class="p5-img-label">Property View</div>
+      </div>
+      <div class="p5-img-card">
+        ${overheadUrl ? `<img src="${overheadUrl}" alt="Overhead" style="height:85px">` : '<div class="p5-img-placeholder" style="height:85px">N/A</div>'}
+        <div class="p5-img-label">Roof Overhead</div>
+      </div>
+      <div class="p5-img-card">
+        ${closeupUrl ? `<img src="${closeupUrl}" alt="Detail" style="height:85px">` : '<div class="p5-img-placeholder" style="height:85px">N/A</div>'}
+        <div class="p5-img-label">Max Detail (Z22)</div>
+      </div>
+    </div>
+
+    <!-- Imagery metadata -->
+    <div style="border:1px solid #ddd;border-radius:6px;padding:12px 16px;margin-top:8px">
+      <div style="font-size:10px;font-weight:800;color:#002B5C;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid #E5E7EB">Imagery Metadata</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;font-size:10px">
+        <div><div style="color:#64748b;font-size:8px;text-transform:uppercase;margin-bottom:1px">Provider</div><div style="font-weight:700;color:#1B2838">${providerLabel}</div></div>
+        <div><div style="color:#64748b;font-size:8px;text-transform:uppercase;margin-bottom:1px">Quality</div><div style="font-weight:700;color:#1B2838">${quality.imagery_quality || 'BASE'}</div></div>
+        <div><div style="color:#64748b;font-size:8px;text-transform:uppercase;margin-bottom:1px">Date</div><div style="font-weight:700;color:#1B2838">${quality.imagery_date || 'Unknown'}</div></div>
+        <div><div style="color:#64748b;font-size:8px;text-transform:uppercase;margin-bottom:1px">Confidence</div><div style="font-weight:700;color:${confidenceColor}">${quality.confidence_score}%</div></div>
+        <div><div style="color:#64748b;font-size:8px;text-transform:uppercase;margin-bottom:1px">Images</div><div style="font-weight:700;color:#1B2838">14 images (4 zoom levels)</div></div>
+        <div><div style="color:#64748b;font-size:8px;text-transform:uppercase;margin-bottom:1px">Coordinates</div><div style="font-weight:700;color:#1B2838">${prop.latitude?.toFixed(6) || 'N/A'}, ${prop.longitude?.toFixed(6) || 'N/A'}</div></div>
+      </div>
+      ${quality.field_verification_recommended ? '<div style="margin-top:6px;padding:5px 10px;background:#FFF7ED;border:1px solid #FDBA74;border-radius:4px;font-size:9px;color:#9A3412"><b>Field Verification Recommended</b> &mdash; On-site measurement verification advised.</div>' : ''}
     </div>
   </div>
 
-  <!-- Row 2: 4 Directional Aerial Views (offset satellite) -->
-  <div style="padding:6px 0 4px;font-size:9px;font-weight:700;color:#1B2838;text-transform:uppercase;letter-spacing:1.5px">DIRECTIONAL AERIAL VIEWS &mdash; 50m Offset from Roof Center</div>
-  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px">
-    <div style="background:#fff;border-radius:6px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06)">
-      ${northUrl ? `<img src="${northUrl}" alt="North" style="width:100%;height:100px;object-fit:cover">` : '<div style="height:100px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:10px">N/A</div>'}
-      <div style="padding:4px 6px;font-size:8px;font-weight:700;color:#1B2838;text-align:center">NORTH <span style="color:#94a3b8;font-weight:400">0&deg;</span></div>
-    </div>
-    <div style="background:#fff;border-radius:6px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06)">
-      ${eastUrl ? `<img src="${eastUrl}" alt="East" style="width:100%;height:100px;object-fit:cover">` : '<div style="height:100px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:10px">N/A</div>'}
-      <div style="padding:4px 6px;font-size:8px;font-weight:700;color:#1B2838;text-align:center">EAST <span style="color:#94a3b8;font-weight:400">90&deg;</span></div>
-    </div>
-    <div style="background:#fff;border-radius:6px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06)">
-      ${southUrl ? `<img src="${southUrl}" alt="South" style="width:100%;height:100px;object-fit:cover">` : '<div style="height:100px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:10px">N/A</div>'}
-      <div style="padding:4px 6px;font-size:8px;font-weight:700;color:#1B2838;text-align:center">SOUTH <span style="color:#94a3b8;font-weight:400">180&deg;</span></div>
-    </div>
-    <div style="background:#fff;border-radius:6px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06)">
-      ${westUrl ? `<img src="${westUrl}" alt="West" style="width:100%;height:100px;object-fit:cover">` : '<div style="height:100px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:10px">N/A</div>'}
-      <div style="padding:4px 6px;font-size:8px;font-weight:700;color:#1B2838;text-align:center">WEST <span style="color:#94a3b8;font-weight:400">270&deg;</span></div>
-    </div>
-  </div>
-
-  <!-- Row 3: 4 Close-up Quadrant Views (max zoom) -->
-  <div style="padding:6px 0 4px;font-size:9px;font-weight:700;color:#1B2838;text-transform:uppercase;letter-spacing:1.5px">ROOF DETAIL QUADRANTS &mdash; Maximum Zoom (Z22)</div>
-  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px">
-    <div style="background:#fff;border-radius:6px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06)">
-      ${closeupNwUrl ? `<img src="${closeupNwUrl}" alt="NW Detail" style="width:100%;height:100px;object-fit:cover">` : '<div style="height:100px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:10px">N/A</div>'}
-      <div style="padding:4px 6px;font-size:8px;font-weight:700;color:#1B2838;text-align:center">NW QUADRANT</div>
-    </div>
-    <div style="background:#fff;border-radius:6px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06)">
-      ${closeupNeUrl ? `<img src="${closeupNeUrl}" alt="NE Detail" style="width:100%;height:100px;object-fit:cover">` : '<div style="height:100px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:10px">N/A</div>'}
-      <div style="padding:4px 6px;font-size:8px;font-weight:700;color:#1B2838;text-align:center">NE QUADRANT</div>
-    </div>
-    <div style="background:#fff;border-radius:6px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06)">
-      ${closeupSwUrl ? `<img src="${closeupSwUrl}" alt="SW Detail" style="width:100%;height:100px;object-fit:cover">` : '<div style="height:100px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:10px">N/A</div>'}
-      <div style="padding:4px 6px;font-size:8px;font-weight:700;color:#1B2838;text-align:center">SW QUADRANT</div>
-    </div>
-    <div style="background:#fff;border-radius:6px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06)">
-      ${closeupSeUrl ? `<img src="${closeupSeUrl}" alt="SE Detail" style="width:100%;height:100px;object-fit:cover">` : '<div style="height:100px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:10px">N/A</div>'}
-      <div style="padding:4px 6px;font-size:8px;font-weight:700;color:#1B2838;text-align:center">SE QUADRANT</div>
-    </div>
-  </div>
-
-  <!-- Row 4: Multi-zoom comparison strip -->
-  <div style="padding:6px 0 4px;font-size:9px;font-weight:700;color:#1B2838;text-transform:uppercase;letter-spacing:1.5px">ZOOM PROGRESSION &mdash; Context → Property → Roof → Detail</div>
-  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:10px">
-    <div style="background:#fff;border-radius:6px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06)">
-      ${contextUrl ? `<img src="${contextUrl}" alt="Context" style="width:100%;height:95px;object-fit:cover">` : '<div style="height:95px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:10px">N/A</div>'}
-      <div style="padding:3px 6px;font-size:7px;color:#64748b;text-align:center">Neighborhood</div>
-    </div>
-    <div style="background:#fff;border-radius:6px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06)">
-      ${mediumUrl ? `<img src="${mediumUrl}" alt="Medium" style="width:100%;height:95px;object-fit:cover">` : '<div style="height:95px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:10px">N/A</div>'}
-      <div style="padding:3px 6px;font-size:7px;color:#64748b;text-align:center">Property View</div>
-    </div>
-    <div style="background:#fff;border-radius:6px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06)">
-      ${overheadUrl ? `<img src="${overheadUrl}" alt="Overhead" style="width:100%;height:95px;object-fit:cover">` : '<div style="height:95px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:10px">N/A</div>'}
-      <div style="padding:3px 6px;font-size:7px;color:#64748b;text-align:center">Roof Overhead</div>
-    </div>
-    <div style="background:#fff;border-radius:6px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06)">
-      ${closeupUrl ? `<img src="${closeupUrl}" alt="Detail" style="width:100%;height:95px;object-fit:cover">` : '<div style="height:95px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:10px">N/A</div>'}
-      <div style="padding:3px 6px;font-size:7px;color:#64748b;text-align:center">Max Detail (Z22)</div>
-    </div>
-  </div>
-
-  <!-- Imagery metadata summary -->
-  <div style="background:#fff;border-radius:8px;padding:14px 18px;box-shadow:0 1px 3px rgba(0,0,0,0.05)">
-    <div style="font-size:10px;font-weight:800;color:#1B2838;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;padding-bottom:4px;border-bottom:2px solid #e5e7eb">IMAGERY METADATA</div>
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;font-size:10px">
-      <div>
-        <div style="color:#64748b;font-size:8px;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:2px">Provider</div>
-        <div style="font-weight:700;color:#1B2838">${providerLabel}</div>
-      </div>
-      <div>
-        <div style="color:#64748b;font-size:8px;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:2px">Imagery Quality</div>
-        <div style="font-weight:700;color:#1B2838">${quality.imagery_quality || 'BASE'}</div>
-      </div>
-      <div>
-        <div style="color:#64748b;font-size:8px;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:2px">Imagery Date</div>
-        <div style="font-weight:700;color:#1B2838">${quality.imagery_date || 'Unknown'}</div>
-      </div>
-      <div>
-        <div style="color:#64748b;font-size:8px;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:2px">Confidence</div>
-        <div style="font-weight:700;color:${confidenceColor}">${quality.confidence_score}%</div>
-      </div>
-      <div>
-        <div style="color:#64748b;font-size:8px;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:2px">Image Count</div>
-        <div style="font-weight:700;color:#1B2838">14 images (4 zoom levels)</div>
-      </div>
-      <div>
-        <div style="color:#64748b;font-size:8px;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:2px">Coordinates</div>
-        <div style="font-weight:700;color:#1B2838">${prop.latitude?.toFixed(6) || 'N/A'}, ${prop.longitude?.toFixed(6) || 'N/A'}</div>
-      </div>
-    </div>
-    ${quality.field_verification_recommended ? '<div style="margin-top:8px;padding:6px 10px;background:#FFF7ED;border:1px solid #FDBA74;border-radius:5px;font-size:9px;color:#9A3412"><b>⚠ Field Verification Recommended</b> &mdash; Imagery quality below HIGH. On-site measurement verification advised for critical projects.</div>' : ''}
-  </div>
-
-  <div style="text-align:center;margin-top:10px;color:#94a3b8;font-size:7px">
-    &copy; ${new Date().getFullYear()} RoofReporterAI | Antigravity Gemini | ${reportNum} | v${report.report_version || '3.0'} | All imagery &copy; Google
+  <div class="rpt-footer">
+    <span class="rpt-footer-brand">RoofReporterAI &mdash; Imagery Gallery</span>
+    <span>${reportNum} &bull; Page 5 of 5 &bull; All imagery &copy; Google</span>
   </div>
 </div>
 
 <script>
-// Detect Google Street View "no imagery" placeholders (grey "Sorry" images)
-document.querySelectorAll('.p1-sv-img').forEach(function(img) {
+// Detect Google Street View "no imagery" placeholders
+document.querySelectorAll('img[alt="Street View"]').forEach(function(img) {
   img.addEventListener('load', function() {
     try {
       var c = document.createElement('canvas');
@@ -2596,7 +2610,7 @@ document.querySelectorAll('.p1-sv-img').forEach(function(img) {
       for (var i = 0; i < px.length; i += 4) {
         if (px[i] > 200 && px[i+1] > 200 && px[i+2] > 190 && Math.abs(px[i]-px[i+1]) < 15) grey++;
       }
-      if (grey >= 12) { img.style.display='none'; img.nextElementSibling.style.display='flex'; }
+      if (grey >= 12) { img.outerHTML = '<div class="p5-img-placeholder" style="height:180px">Street View not available for this location</div>'; }
     } catch(e) {}
   });
 });
@@ -2604,6 +2618,7 @@ document.querySelectorAll('.p1-sv-img').forEach(function(img) {
 </body>
 </html>`
 }
+
 
 // ============================================================
 // HELPER: Generate perimeter side data for HTML table
@@ -2815,7 +2830,7 @@ function generateSatelliteOverlaySVG(
       <feDropShadow dx="0" dy="0" stdDeviation="1.5" flood-color="#000" flood-opacity="0.5"/>
     </filter>
     <filter id="perimGlow" x="-5%" y="-5%" width="110%" height="110%">
-      <feDropShadow dx="0" dy="0" stdDeviation="3" flood-color="#00E5FF" flood-opacity="0.6"/>
+      <feDropShadow dx="0" dy="0" stdDeviation="3" flood-color="#FFD600" flood-opacity="0.5"/>
     </filter>
   </defs>`
 
@@ -2823,11 +2838,11 @@ function generateSatelliteOverlaySVG(
   // COLOR MAP for edge types
   // ====================================================================
   const edgeColors: Record<string, string> = {
-    'RIDGE': '#FF1744',   // Bold red
-    'HIP':   '#2979FF',   // Blue
-    'VALLEY':'#00E676',   // Green
-    'EAVE':  '#FF9100',   // Orange
-    'RAKE':  '#D500F9',   // Purple
+    'RIDGE': '#C62828',   // Red (EagleView style)
+    'HIP':   '#C62828',   // Red (same as ridge per EagleView)
+    'VALLEY':'#1565C0',   // Blue (EagleView style)
+    'EAVE':  '#1B2838',   // Dark/black (EagleView style)
+    'RAKE':  '#E91E63',   // Pink/red (EagleView style)
   }
   const edgeWidths: Record<string, number> = {
     'RIDGE': 3.5, 'HIP': 3, 'VALLEY': 3, 'EAVE': 2.5, 'RAKE': 2.5,
@@ -2891,14 +2906,14 @@ function generateSatelliteOverlaySVG(
     // Draw the perimeter — fill first, then each side individually
     const perimPoints = perim.map(p => `${p.x},${p.y}`).join(' ')
     // Subtle fill for the full roof outline
-    svg += `<polygon points="${perimPoints}" fill="rgba(0,229,255,0.06)" stroke="none"/>`
-    // Thin white outline (background)
-    svg += `<polygon points="${perimPoints}" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="1.5" filter="url(#perimGlow)"/>`
+    svg += `<polygon points="${perimPoints}" fill="rgba(255,214,0,0.06)" stroke="none"/>`
+    // Thin yellow outline (background) — EagleView-style roof outline
+    svg += `<polygon points="${perimPoints}" fill="none" stroke="rgba(255,214,0,0.5)" stroke-width="1.5" filter="url(#perimGlow)"/>`
 
     // Draw each perimeter side with its edge-type color
     for (let i = 0; i < n; i++) {
       const s = sides[i]
-      const color = edgeColors[s.type] || '#00E5FF'
+      const color = edgeColors[s.type] || '#FFD600'
       const width = edgeWidths[s.type] || 2.5
 
       // Background shadow line
@@ -2922,7 +2937,7 @@ function generateSatelliteOverlaySVG(
     }
     // Last corner dot
     const last = perim[0]
-    svg += `<circle cx="${last.x}" cy="${last.y}" r="3.5" fill="${edgeColors[perim[n - 1].edge_to_next] || '#00E5FF'}" stroke="#fff" stroke-width="1.2" opacity="0.95"/>`
+    svg += `<circle cx="${last.x}" cy="${last.y}" r="3.5" fill="${edgeColors[perim[n - 1].edge_to_next] || '#FFD600'}" stroke="#fff" stroke-width="1.2" opacity="0.95"/>`
   }
 
   // ====================================================================
@@ -3074,22 +3089,22 @@ function generateOverlayLegend(
   hasObstructions: boolean
 ): string {
   const items = [
-    { color: '#FF1744', label: 'Ridge', value: `${edgeSummary.total_ridge_ft} ft`, style: '' },
-    { color: '#2979FF', label: 'Hip', value: `${edgeSummary.total_hip_ft} ft`, style: '' },
-    { color: '#00E676', label: 'Valley', value: `${edgeSummary.total_valley_ft} ft`, style: 'stroke-dasharray="4,2"' },
-    { color: '#FF9100', label: 'Eave', value: `${edgeSummary.total_eave_ft} ft`, style: '' },
-    { color: '#D500F9', label: 'Rake', value: `${edgeSummary.total_rake_ft} ft`, style: '' },
-    { color: '#00E5FF', label: 'Perimeter', value: '', style: '' },
+    { color: '#C62828', label: 'Ridge', value: `${edgeSummary.total_ridge_ft} ft`, style: '' },
+    { color: '#C62828', label: 'Hip', value: `${edgeSummary.total_hip_ft} ft`, style: '' },
+    { color: '#1565C0', label: 'Valley', value: `${edgeSummary.total_valley_ft} ft`, style: 'stroke-dasharray="4,2"' },
+    { color: '#1B2838', label: 'Eave', value: `${edgeSummary.total_eave_ft} ft`, style: '' },
+    { color: '#E91E63', label: 'Rake', value: `${edgeSummary.total_rake_ft} ft`, style: '' },
+    { color: '#FFD600', label: 'Perimeter', value: '', style: '' },
   ]
 
-  let html = '<div style="display:flex;flex-wrap:wrap;gap:6px 12px;padding:6px 10px;background:rgba(0,0,0,0.80);border-radius:6px;margin-top:6px">'
+  let html = '<div style="display:flex;flex-wrap:wrap;gap:6px 12px;padding:6px 10px;background:rgba(0,43,92,0.90);border-radius:4px;margin-top:6px">'
   items.forEach(item => {
     const val = parseInt(item.value) || 0
     if (val > 0 || item.label === 'Perimeter') {
       html += `<div style="display:flex;align-items:center;gap:4px">`
       if (item.label === 'Perimeter') {
         html += `<svg width="16" height="4"><line x1="0" y1="2" x2="16" y2="2" stroke="${item.color}" stroke-width="3"/></svg>`
-        html += `<span style="color:#00E5FF;font-size:8px;font-weight:600">Perimeter</span>`
+        html += `<span style="color:#FFD600;font-size:8px;font-weight:600">Perimeter</span>`
       } else {
         html += `<svg width="16" height="4"><line x1="0" y1="2" x2="16" y2="2" stroke="${item.color}" stroke-width="2.5" ${item.style}/></svg>`
         html += `<span style="color:#fff;font-size:8px;font-weight:600">${item.label}: ${item.value}</span>`

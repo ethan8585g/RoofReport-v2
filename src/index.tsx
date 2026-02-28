@@ -13,6 +13,7 @@ import { invoiceRoutes } from './routes/invoices'
 import { stripeRoutes } from './routes/stripe'
 import { crmRoutes } from './routes/crm'
 import { propertyImageryRoutes } from './routes/property-imagery'
+import { blogRoutes } from './routes/blog'
 import type { Bindings } from './types'
 
 const app = new Hono<{ Bindings: Bindings }>()
@@ -33,6 +34,7 @@ app.route('/api/invoices', invoiceRoutes)
 app.route('/api/stripe', stripeRoutes)
 app.route('/api/crm', crmRoutes)
 app.route('/api/property-imagery', propertyImageryRoutes)
+app.route('/api/blog', blogRoutes)
 
 // Health check
 app.get('/api/health', (c) => {
@@ -210,6 +212,14 @@ app.get('/customer/invoice/:id', (c) => {
 // Pricing Page (public)
 app.get('/pricing', (c) => {
   return c.html(getPricingPageHTML())
+})
+
+// Blog Pages (public — SEO lead funnels)
+app.get('/blog', (c) => {
+  return c.html(getBlogListingHTML())
+})
+app.get('/blog/:slug', (c) => {
+  return c.html(getBlogPostHTML())
 })
 
 // Customer Order & Pay page
@@ -735,6 +745,7 @@ function getLandingPageHTML() {
         <a href="#how-it-works" class="text-brand-200 hover:text-white text-sm transition-colors">How It Works</a>
         <a href="#features" class="text-brand-200 hover:text-white text-sm transition-colors">Features</a>
         <a href="/pricing" class="text-brand-200 hover:text-white text-sm transition-colors">Pricing</a>
+        <a href="/blog" class="text-brand-200 hover:text-white text-sm transition-colors">Blog</a>
         <a href="#faq" class="text-brand-200 hover:text-white text-sm transition-colors">FAQ</a>
         <a href="/customer/login" class="bg-accent-500 hover:bg-accent-600 text-white font-semibold py-2 px-5 rounded-lg text-sm transition-all hover:scale-105 shadow-lg shadow-accent-500/25">
           <i class="fas fa-sign-in-alt mr-1"></i>Customer Login
@@ -753,6 +764,7 @@ function getLandingPageHTML() {
         <a href="#how-it-works" class="text-brand-200 hover:text-white text-sm py-2" onclick="document.getElementById('mobile-menu').classList.add('hidden')">How It Works</a>
         <a href="#features" class="text-brand-200 hover:text-white text-sm py-2" onclick="document.getElementById('mobile-menu').classList.add('hidden')">Features</a>
         <a href="/pricing" class="text-brand-200 hover:text-white text-sm py-2" onclick="document.getElementById('mobile-menu').classList.add('hidden')">Pricing</a>
+        <a href="/blog" class="text-brand-200 hover:text-white text-sm py-2" onclick="document.getElementById('mobile-menu').classList.add('hidden')">Blog</a>
         <a href="#faq" class="text-brand-200 hover:text-white text-sm py-2" onclick="document.getElementById('mobile-menu').classList.add('hidden')">FAQ</a>
         <a href="/customer/login" class="bg-accent-500 text-white font-semibold py-2.5 px-5 rounded-lg text-sm text-center mt-2"><i class="fas fa-sign-in-alt mr-1"></i>Customer Login</a>
       </div>
@@ -781,6 +793,7 @@ function getLandingPageHTML() {
             <li><a href="#features" class="hover:text-sky-600 transition-colors">Features</a></li>
             <li><a href="#pricing" class="hover:text-sky-600 transition-colors">Pricing</a></li>
             <li><a href="#how-it-works" class="hover:text-sky-600 transition-colors">How It Works</a></li>
+            <li><a href="/blog" class="hover:text-sky-600 transition-colors">Blog</a></li>
             <li><a href="/customer/login" class="hover:text-sky-600 transition-colors">Customer Login</a></li>
           </ul>
         </div>
@@ -1175,6 +1188,213 @@ function getPricingPageHTML() {
     </div>
   </main>
   <script src="/static/pricing.js"></script>
+</body>
+</html>`
+}
+
+// ============================================================
+// BLOG LISTING PAGE — Public SEO lead funnel
+// ============================================================
+function getBlogListingHTML() {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  ${getHeadTags()}
+  <title>Blog - RoofReporterAI | Roofing Industry Insights & Tips</title>
+  <meta name="description" content="Expert roofing industry insights, measurement technology tips, contractor business guides, and more from RoofReporterAI.">
+  <meta property="og:title" content="RoofReporterAI Blog - Roofing Industry Insights">
+  <meta property="og:description" content="Expert roofing industry insights, measurement technology tips, contractor business guides, and more.">
+  <meta property="og:type" content="website">
+  <link rel="canonical" href="/blog">
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <!-- Navigation -->
+  <nav class="bg-gradient-to-r from-sky-500 to-blue-600 text-white shadow-lg sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+      <a href="/" class="flex items-center gap-3">
+        <div class="w-9 h-9 bg-accent-500 rounded-lg flex items-center justify-center"><i class="fas fa-home text-white"></i></div>
+        <span class="text-white font-bold text-lg">RoofReporterAI</span>
+      </a>
+      <div class="hidden md:flex items-center gap-5">
+        <a href="/" class="text-brand-200 hover:text-white text-sm">Home</a>
+        <a href="/pricing" class="text-brand-200 hover:text-white text-sm">Pricing</a>
+        <a href="/blog" class="text-white font-semibold text-sm border-b-2 border-white pb-0.5">Blog</a>
+        <a href="/customer/login" class="bg-accent-500 hover:bg-accent-600 text-white font-semibold py-2 px-5 rounded-lg text-sm"><i class="fas fa-sign-in-alt mr-1"></i>Get Started</a>
+      </div>
+      <button class="md:hidden text-white text-xl" onclick="document.getElementById('blog-mobile-menu').classList.toggle('hidden')"><i class="fas fa-bars"></i></button>
+    </div>
+    <div id="blog-mobile-menu" class="hidden md:hidden bg-sky-600/95 backdrop-blur-md border-t border-sky-400">
+      <div class="max-w-7xl mx-auto px-4 py-4 flex flex-col gap-3">
+        <a href="/" class="text-brand-200 hover:text-white text-sm py-2">Home</a>
+        <a href="/pricing" class="text-brand-200 hover:text-white text-sm py-2">Pricing</a>
+        <a href="/blog" class="text-white font-semibold text-sm py-2">Blog</a>
+        <a href="/customer/login" class="bg-accent-500 text-white font-semibold py-2.5 px-5 rounded-lg text-sm text-center mt-2"><i class="fas fa-sign-in-alt mr-1"></i>Get Started</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero Section -->
+  <div class="bg-gradient-to-br from-sky-500 via-blue-600 to-blue-700 text-white py-16 md:py-20">
+    <div class="max-w-4xl mx-auto px-4 text-center">
+      <h1 class="text-4xl md:text-5xl font-extrabold mb-4 tracking-tight">The RoofReporterAI Blog</h1>
+      <p class="text-lg md:text-xl text-sky-100 max-w-2xl mx-auto leading-relaxed">Roofing industry insights, AI measurement technology, contractor business tips, and everything you need to grow your roofing business.</p>
+      <div class="mt-8 flex flex-wrap justify-center gap-3" id="blog-categories-hero"></div>
+    </div>
+  </div>
+
+  <!-- Search + Filter Bar -->
+  <div class="max-w-6xl mx-auto px-4 -mt-6 relative z-10 mb-8">
+    <div class="bg-white rounded-xl shadow-lg p-4 flex flex-col md:flex-row items-center gap-4">
+      <div class="flex-1 relative w-full">
+        <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
+        <input type="text" id="blog-search" placeholder="Search articles..." class="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-sky-400 focus:border-sky-400 outline-none">
+      </div>
+      <div class="flex items-center gap-2 flex-wrap" id="blog-category-filters"></div>
+    </div>
+  </div>
+
+  <!-- Blog Grid -->
+  <main class="max-w-6xl mx-auto px-4 pb-20">
+    <!-- Featured Post -->
+    <div id="blog-featured" class="mb-12"></div>
+    
+    <!-- All Posts Grid -->
+    <div id="blog-grid" class="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+      <div class="col-span-full text-center py-16">
+        <div class="animate-pulse text-gray-400"><i class="fas fa-spinner fa-spin text-3xl mb-4"></i><p class="text-sm">Loading articles...</p></div>
+      </div>
+    </div>
+    
+    <!-- Load More -->
+    <div id="blog-load-more" class="text-center mt-12 hidden">
+      <button onclick="loadMorePosts()" class="bg-white border-2 border-sky-500 text-sky-600 hover:bg-sky-50 font-semibold py-3 px-8 rounded-lg text-sm transition-all">
+        Load More Articles
+      </button>
+    </div>
+    
+    <!-- Empty State -->
+    <div id="blog-empty" class="hidden text-center py-20">
+      <i class="fas fa-newspaper text-6xl text-gray-200 mb-6"></i>
+      <h3 class="text-xl font-bold text-gray-600 mb-2">No articles yet</h3>
+      <p class="text-gray-400 text-sm">Check back soon — we're writing great content for roofing professionals!</p>
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer class="bg-slate-100 text-gray-600 border-t border-slate-200">
+    <div class="max-w-7xl mx-auto px-4 py-12">
+      <div class="flex flex-col md:flex-row items-center justify-between gap-4">
+        <div class="flex items-center gap-3">
+          <div class="w-8 h-8 bg-accent-500 rounded-lg flex items-center justify-center"><i class="fas fa-home text-white text-sm"></i></div>
+          <span class="text-gray-800 font-bold">RoofReporterAI</span>
+        </div>
+        <div class="flex items-center gap-6 text-sm">
+          <a href="/" class="hover:text-sky-600">Home</a>
+          <a href="/pricing" class="hover:text-sky-600">Pricing</a>
+          <a href="/blog" class="hover:text-sky-600 font-semibold text-sky-600">Blog</a>
+          <a href="/customer/login" class="hover:text-sky-600">Login</a>
+        </div>
+        <p class="text-xs text-gray-400">&copy; 2026 RoofReporterAI. All rights reserved.</p>
+      </div>
+    </div>
+  </footer>
+
+  <script src="/static/blog.js"></script>
+</body>
+</html>`
+}
+
+// ============================================================
+// BLOG POST PAGE — Individual article view with SEO
+// ============================================================
+function getBlogPostHTML() {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  ${getHeadTags()}
+  <title id="page-title">Blog Post - RoofReporterAI</title>
+  <meta name="description" id="meta-desc" content="">
+  <meta property="og:type" content="article">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tailwindcss/typography@0.5.0/dist/typography.min.css">
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <!-- Navigation -->
+  <nav class="bg-gradient-to-r from-sky-500 to-blue-600 text-white shadow-lg sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+      <a href="/" class="flex items-center gap-3">
+        <div class="w-9 h-9 bg-accent-500 rounded-lg flex items-center justify-center"><i class="fas fa-home text-white"></i></div>
+        <span class="text-white font-bold text-lg">RoofReporterAI</span>
+      </a>
+      <div class="hidden md:flex items-center gap-5">
+        <a href="/" class="text-brand-200 hover:text-white text-sm">Home</a>
+        <a href="/pricing" class="text-brand-200 hover:text-white text-sm">Pricing</a>
+        <a href="/blog" class="text-white font-semibold text-sm">Blog</a>
+        <a href="/customer/login" class="bg-accent-500 hover:bg-accent-600 text-white font-semibold py-2 px-5 rounded-lg text-sm"><i class="fas fa-sign-in-alt mr-1"></i>Get Started</a>
+      </div>
+      <button class="md:hidden text-white text-xl" onclick="document.getElementById('bp-mobile').classList.toggle('hidden')"><i class="fas fa-bars"></i></button>
+    </div>
+    <div id="bp-mobile" class="hidden md:hidden bg-sky-600/95 backdrop-blur-md border-t border-sky-400">
+      <div class="max-w-7xl mx-auto px-4 py-4 flex flex-col gap-3">
+        <a href="/" class="text-brand-200 hover:text-white text-sm py-2">Home</a>
+        <a href="/blog" class="text-white font-semibold text-sm py-2">Blog</a>
+        <a href="/customer/login" class="bg-accent-500 text-white font-semibold py-2.5 px-5 rounded-lg text-sm text-center mt-2"><i class="fas fa-sign-in-alt mr-1"></i>Get Started</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Breadcrumb -->
+  <div class="max-w-4xl mx-auto px-4 py-4">
+    <nav class="text-sm text-gray-500">
+      <a href="/" class="hover:text-sky-600">Home</a>
+      <span class="mx-2">/</span>
+      <a href="/blog" class="hover:text-sky-600">Blog</a>
+      <span class="mx-2">/</span>
+      <span id="breadcrumb-title" class="text-gray-700 font-medium">Loading...</span>
+    </nav>
+  </div>
+
+  <!-- Article Content -->
+  <main class="max-w-4xl mx-auto px-4 pb-20">
+    <article id="blog-post-content">
+      <div class="text-center py-16 animate-pulse text-gray-400"><i class="fas fa-spinner fa-spin text-3xl mb-4"></i><p>Loading article...</p></div>
+    </article>
+
+    <!-- Author / CTA Box -->
+    <div id="blog-cta" class="hidden mt-12 bg-gradient-to-br from-sky-50 to-blue-50 border border-sky-200 rounded-2xl p-8 text-center">
+      <h3 class="text-xl font-bold text-gray-900 mb-2">Ready to streamline your roof measurements?</h3>
+      <p class="text-gray-600 mb-6 max-w-lg mx-auto">Join hundreds of roofing professionals who save hours on every estimate with AI-powered measurement reports.</p>
+      <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
+        <a href="/customer/login" class="bg-accent-500 hover:bg-accent-600 text-white font-semibold py-3 px-8 rounded-lg transition-all hover:scale-105 shadow-lg shadow-accent-500/25"><i class="fas fa-rocket mr-2"></i>Start Free Trial</a>
+        <a href="/pricing" class="text-sky-600 hover:text-sky-700 font-semibold text-sm"><i class="fas fa-tag mr-1"></i>View Pricing</a>
+      </div>
+    </div>
+
+    <!-- Related Posts -->
+    <div id="blog-related" class="mt-16 hidden">
+      <h3 class="text-xl font-bold text-gray-900 mb-6">Related Articles</h3>
+      <div id="blog-related-grid" class="grid md:grid-cols-3 gap-6"></div>
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer class="bg-slate-100 text-gray-600 border-t border-slate-200">
+    <div class="max-w-7xl mx-auto px-4 py-12">
+      <div class="flex flex-col md:flex-row items-center justify-between gap-4">
+        <div class="flex items-center gap-3">
+          <div class="w-8 h-8 bg-accent-500 rounded-lg flex items-center justify-center"><i class="fas fa-home text-white text-sm"></i></div>
+          <span class="text-gray-800 font-bold">RoofReporterAI</span>
+        </div>
+        <div class="flex items-center gap-6 text-sm">
+          <a href="/" class="hover:text-sky-600">Home</a>
+          <a href="/blog" class="hover:text-sky-600 font-semibold text-sky-600">Blog</a>
+          <a href="/customer/login" class="hover:text-sky-600">Login</a>
+        </div>
+        <p class="text-xs text-gray-400">&copy; 2026 RoofReporterAI. All rights reserved.</p>
+      </div>
+    </div>
+  </footer>
+
+  <script src="/static/blog.js"></script>
 </body>
 </html>`
 }
