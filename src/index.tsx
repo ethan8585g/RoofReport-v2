@@ -14,6 +14,7 @@ import { stripeRoutes } from './routes/stripe'
 import { crmRoutes } from './routes/crm'
 import { propertyImageryRoutes } from './routes/property-imagery'
 import { blogRoutes } from './routes/blog'
+import { d2dRoutes } from './routes/d2d'
 import type { Bindings } from './types'
 
 const app = new Hono<{ Bindings: Bindings }>()
@@ -35,6 +36,7 @@ app.route('/api/stripe', stripeRoutes)
 app.route('/api/crm', crmRoutes)
 app.route('/api/property-imagery', propertyImageryRoutes)
 app.route('/api/blog', blogRoutes)
+app.route('/api/d2d', d2dRoutes)
 
 // Health check
 app.get('/api/health', (c) => {
@@ -244,7 +246,10 @@ app.get('/customer/invoices', (c) => c.html(getCrmSubPageHTML('invoices', 'Invoi
 app.get('/customer/proposals', (c) => c.html(getCrmSubPageHTML('proposals', 'Proposals & Estimates', 'fa-file-signature')))
 app.get('/customer/jobs', (c) => c.html(getCrmSubPageHTML('jobs', 'Job Management', 'fa-hard-hat')))
 app.get('/customer/pipeline', (c) => c.html(getCrmSubPageHTML('pipeline', 'Sales Pipeline', 'fa-funnel-dollar')))
-app.get('/customer/d2d', (c) => c.html(getCrmSubPageHTML('d2d', 'D2D Manager', 'fa-door-open')))
+app.get('/customer/d2d', (c) => {
+  const mapsKey = c.env.GOOGLE_MAPS_API_KEY || ''
+  return c.html(getD2DPageHTML(mapsKey))
+})
 
 export default app
 
@@ -1503,7 +1508,69 @@ function getBrandingSetupHTML() {
 }
 
 // ============================================================
-// CRM SUB-PAGES — Customers, Invoices, Proposals, Jobs, Pipeline, D2D
+// D2D MANAGER PAGE — Dedicated page with Google Maps
+// ============================================================
+function getD2DPageHTML(mapsApiKey: string) {
+  const mapsScript = mapsApiKey
+    ? `<script src="https://maps.googleapis.com/maps/api/js?key=${mapsApiKey}&libraries=places,drawing,geometry" async defer></script>`
+    : '<!-- Google Maps: No API key configured. -->'
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  ${getHeadTags()}
+  <title>D2D Manager - RoofReporterAI</title>
+  ${mapsScript}
+  <link rel="stylesheet" href="/static/d2d-module.css">
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <header class="bg-gradient-to-r from-sky-500 to-blue-600 text-white shadow-lg">
+    <div class="max-w-full mx-auto px-4 py-3 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <a href="/customer/dashboard" class="flex items-center space-x-3 hover:opacity-90">
+          <div class="w-10 h-10 bg-accent-500 rounded-lg flex items-center justify-center">
+            <i class="fas fa-door-open text-white text-lg"></i>
+          </div>
+          <div>
+            <h1 class="text-lg font-bold">D2D Manager</h1>
+            <p class="text-brand-200 text-xs">RoofReporterAI</p>
+          </div>
+        </a>
+      </div>
+      <nav class="flex items-center space-x-3">
+        <span id="custGreeting" class="text-brand-200 text-sm hidden"><i class="fas fa-user-circle mr-1"></i><span id="custName"></span></span>
+        <a href="/customer/dashboard" class="text-brand-200 hover:text-white text-sm"><i class="fas fa-th-large mr-1"></i>Dashboard</a>
+        <button onclick="custLogout()" class="text-brand-200 hover:text-white text-sm"><i class="fas fa-sign-out-alt mr-1"></i>Logout</button>
+      </nav>
+    </div>
+  </header>
+  <div id="d2d-app"></div>
+  <script>
+    (function() {
+      var c = localStorage.getItem('rc_customer');
+      if (!c) { window.location.href = '/customer/login'; return; }
+      try {
+        var u = JSON.parse(c);
+        var g = document.getElementById('custGreeting');
+        var n = document.getElementById('custName');
+        if (g && n) { n.textContent = u.name || u.email; g.classList.remove('hidden'); }
+      } catch(e) {}
+    })();
+    function custLogout() {
+      var token = localStorage.getItem('rc_customer_token');
+      if (token) fetch('/api/customer/logout', { method: 'POST', headers: { 'Authorization': 'Bearer ' + token } })['catch'](function(){});
+      localStorage.removeItem('rc_customer');
+      localStorage.removeItem('rc_customer_token');
+      window.location.href = '/customer/login';
+    }
+  </script>
+  <script src="/static/d2d-module.js"></script>
+</body>
+</html>`
+}
+
+// ============================================================
+// CRM SUB-PAGES — Customers, Invoices, Proposals, Jobs, Pipeline
 // ============================================================
 // ============================================================
 // PROPERTY IMAGERY PAGE — Dev-only satellite imagery PDF tool

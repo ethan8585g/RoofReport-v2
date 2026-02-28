@@ -626,17 +626,8 @@
   // MODULE: D2D (Door-to-Door)
   // ============================================================
   function initD2D() {
-    root.innerHTML = '<div class="bg-white rounded-2xl border p-12 text-center">' +
-      '<div class="w-20 h-20 bg-gradient-to-br from-gray-100 to-gray-200 rounded-full flex items-center justify-center mx-auto mb-6"><i class="fas fa-door-open text-gray-400 text-3xl"></i></div>' +
-      '<h2 class="text-2xl font-bold text-gray-800 mb-3">D2D Manager</h2>' +
-      '<p class="text-gray-500 mb-2 max-w-md mx-auto">Manage your door-to-door sales teams, territories, and canvassing routes — track knocks, appointments, and conversion rates.</p>' +
-      '<div class="inline-flex items-center gap-2 bg-blue-50 text-blue-700 px-4 py-2 rounded-full text-sm font-medium mt-4"><i class="fas fa-code-branch mr-1"></i>Coming Soon</div>' +
-      '<div class="mt-8 grid grid-cols-2 md:grid-cols-4 gap-3 max-w-2xl mx-auto">' +
-      '<div class="bg-gray-50 rounded-xl p-4 text-center"><div class="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center mx-auto mb-2"><i class="fas fa-map-marked-alt text-orange-500"></i></div><p class="text-xs font-semibold text-gray-700">Territory Maps</p></div>' +
-      '<div class="bg-gray-50 rounded-xl p-4 text-center"><div class="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center mx-auto mb-2"><i class="fas fa-clipboard-check text-blue-500"></i></div><p class="text-xs font-semibold text-gray-700">Knock Tracking</p></div>' +
-      '<div class="bg-gray-50 rounded-xl p-4 text-center"><div class="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center mx-auto mb-2"><i class="fas fa-chart-line text-green-500"></i></div><p class="text-xs font-semibold text-gray-700">Conversion Stats</p></div>' +
-      '<div class="bg-gray-50 rounded-xl p-4 text-center"><div class="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center mx-auto mb-2"><i class="fas fa-users-cog text-purple-500"></i></div><p class="text-xs font-semibold text-gray-700">Team Management</p></div>' +
-      '</div></div>';
+    // Redirect to dedicated D2D page with Google Maps
+    window.location.href = '/customer/d2d';
   }
 
 })();
