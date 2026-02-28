@@ -28,26 +28,33 @@ import { analyzeRoofGeometry } from '../services/gemini'
 // Produces 14 distinct images per report for comprehensive roof coverage
 // ============================================================
 function generateEnhancedImagery(lat: number, lng: number, apiKey: string, footprintSqft: number = 1500) {
-  // Calculate zoom based on roof size
+  // Calculate zoom based on roof size — ZOOMED OUT enough to see the ENTIRE roof
+  // plus surrounding context (driveway, yard, neighbors partially visible).
+  // Google Maps zoom reference at scale=2 (1280px):
+  //   Zoom 21 ≈ 15m across  → too close, only sees part of a roof
+  //   Zoom 20 ≈ 30m across  → small roof barely fits
+  //   Zoom 19 ≈ 60m across  → good for small residential (shows full roof + yard)
+  //   Zoom 18 ≈ 120m across → good for large commercial (shows building + parking)
+  //   Zoom 17 ≈ 240m across → neighborhood context
   const footprintM2 = footprintSqft / 10.7639
-  // Larger roofs need lower zoom to fit. Small residential at zoom 21, medium at 20, large commercial at 19
-  const roofZoom = footprintM2 > 1000 ? 19 : footprintM2 > 500 ? 20 : 21
-  const contextZoom = roofZoom - 3    // Wide neighborhood context (e.g. zoom 18)
-  const mediumZoom = roofZoom - 1     // Bridge between overhead and context
-  const closeupZoom = Math.min(roofZoom + 1, 22)  // Max Google Maps zoom is 22
+  // Lower zoom = more zoomed out. We want the FULL roof visible with context.
+  const roofZoom = footprintM2 > 1000 ? 18 : footprintM2 > 500 ? 19 : 20
+  const mediumZoom = roofZoom - 1     // Bridge: property + neighbors
+  const contextZoom = roofZoom - 3    // Wide neighborhood context
+  const closeupZoom = Math.min(roofZoom + 1, 21)  // Detail view — still shows most of roof
   
-  // Directional offset distance — larger than before so images actually show different angles.
+  // Directional offset distance — moderate so roof stays in frame.
   // At lat ~53° N (Edmonton): 1° lat ≈ 111.3 km, 1° lng ≈ 67 km
-  // We want ~50-60m offset so the center shifts noticeably off the roof
+  // 25m offset at the zoomed-out level keeps roof visible while showing direction
   const latDegPerMeter = 1 / 111320
   const lngDegPerMeter = 1 / (111320 * Math.cos(lat * Math.PI / 180))
   
-  const dirOffsetMeters = 50   // 50m offset for directional views
+  const dirOffsetMeters = 25   // 25m offset for directional views (was 50m — too far)
   const offsetLat = dirOffsetMeters * latDegPerMeter
   const offsetLng = dirOffsetMeters * lngDegPerMeter
   
-  // Quadrant close-up offset (~15m from center for corner detail)
-  const quadOffsetMeters = 15
+  // Quadrant close-up offset (~10m from center for corner detail)
+  const quadOffsetMeters = 10
   const quadLat = quadOffsetMeters * latDegPerMeter
   const quadLng = quadOffsetMeters * lngDegPerMeter
   
@@ -55,11 +62,11 @@ function generateEnhancedImagery(lat: number, lng: number, apiKey: string, footp
   const sv = `https://maps.googleapis.com/maps/api/streetview`
   
   return {
-    // ── PRIMARY: Dead-center overhead (zoom 21, 640×640 viewport, scale=2 → 1280×1280 px) ──
+    // ── PRIMARY: Dead-center overhead — zoomed out enough to see ENTIRE roof + surrounding context ──
     satellite_url: `${base}?center=${lat},${lng}&zoom=${roofZoom}&size=640x640&scale=2&maptype=satellite&key=${apiKey}`,
     satellite_overhead_url: `${base}?center=${lat},${lng}&zoom=${roofZoom}&size=640x640&scale=2&maptype=satellite&key=${apiKey}`,
     
-    // ── MEDIUM: Bridge between overhead and context (zoom-1) ──
+    // ── MEDIUM: Property view — shows full lot (zoom-1 from overhead) ──
     satellite_medium_url: `${base}?center=${lat},${lng}&zoom=${mediumZoom}&size=640x640&scale=2&maptype=satellite&key=${apiKey}`,
     
     // ── CONTEXT: Wide neighborhood view (zoom-3 from overhead) ──
@@ -70,15 +77,14 @@ function generateEnhancedImagery(lat: number, lng: number, apiKey: string, footp
     mask_url: '',
     flux_url: null as string | null,
     
-    // ── DIRECTIONAL AERIAL: Satellite images offset 50m from center in each direction ──
-    // Center shifted so the roof appears toward the opposite edge of the image,
-    // effectively giving a "looking from the north" etc. perspective
+    // ── DIRECTIONAL AERIAL: Satellite images offset 25m from center in each direction ──
+    // Uses same zoom as overhead so full roof stays visible with directional shift
     north_url: `${base}?center=${lat + offsetLat},${lng}&zoom=${roofZoom}&size=640x400&scale=2&maptype=satellite&key=${apiKey}`,
     south_url: `${base}?center=${lat - offsetLat},${lng}&zoom=${roofZoom}&size=640x400&scale=2&maptype=satellite&key=${apiKey}`,
     east_url: `${base}?center=${lat},${lng + offsetLng}&zoom=${roofZoom}&size=640x400&scale=2&maptype=satellite&key=${apiKey}`,
     west_url: `${base}?center=${lat},${lng - offsetLng}&zoom=${roofZoom}&size=640x400&scale=2&maptype=satellite&key=${apiKey}`,
     
-    // ── CLOSE-UP QUADRANTS: Max zoom (22) at 4 corners — shows shingle detail ──
+    // ── CLOSE-UP QUADRANTS: Slight zoom-in at 4 corners — shows roof detail without losing context ──
     closeup_nw_url: `${base}?center=${lat + quadLat},${lng - quadLng}&zoom=${closeupZoom}&size=400x400&scale=2&maptype=satellite&key=${apiKey}`,
     closeup_ne_url: `${base}?center=${lat + quadLat},${lng + quadLng}&zoom=${closeupZoom}&size=400x400&scale=2&maptype=satellite&key=${apiKey}`,
     closeup_sw_url: `${base}?center=${lat - quadLat},${lng - quadLng}&zoom=${closeupZoom}&size=400x400&scale=2&maptype=satellite&key=${apiKey}`,
@@ -1871,14 +1877,14 @@ function generateProfessionalReportHTML(report: RoofReport): string {
   const nailLbs = Math.ceil(grossSquares * 1.5)
   const cementTubes = Math.max(2, Math.ceil(grossSquares / 15))
   const satelliteUrl = report.imagery?.satellite_url || ''
-  // Primary overhead satellite image — zoom 21, scale=2 for max clarity
+  // Primary overhead satellite image — zoomed out to show full roof + context
   const overheadUrl = report.imagery?.satellite_overhead_url || satelliteUrl
   // Medium bridge view (zoom-1 from overhead)
   const mediumUrl = report.imagery?.satellite_medium_url || (satelliteUrl ? satelliteUrl.replace(/zoom=\d+/, (m: string) => { const z = parseInt(m.replace('zoom=','')); return `zoom=${z-1}` }) : '')
   // Wider context view (zoom-3 from overhead)
   const contextUrl = report.imagery?.satellite_context_url || (satelliteUrl ? satelliteUrl.replace(/zoom=\d+/, 'zoom=18') : '')
   // Max zoom close-up (zoom+1 from overhead, capped at 22)
-  const closeupUrl = overheadUrl ? overheadUrl.replace(/zoom=(\d+)/, (m: string, z: string) => `zoom=${Math.min(parseInt(z) + 1, 22)}`) : ''
+  const closeupUrl = overheadUrl ? overheadUrl.replace(/zoom=(\d+)/, (m: string, z: string) => `zoom=${Math.min(parseInt(z) + 1, 21)}`) : ''
   // Directional aerial satellite views (offset 50m from center)
   const northUrl = report.imagery?.north_url || ''
   const southUrl = report.imagery?.south_url || ''
@@ -2095,7 +2101,7 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
         <div class="p1-sat-container" style="height:280px">
           ${overheadUrl ? `<img src="${overheadUrl}" alt="Overhead Satellite" style="width:100%;height:280px;object-fit:cover" onerror="this.style.display='none'">` : '<div class="p5-img-placeholder" style="height:280px">Satellite imagery loading...</div>'}
           ${hasOverlay ? `<svg viewBox="0 0 640 640" xmlns="http://www.w3.org/2000/svg" style="position:absolute;top:0;left:0;width:100%;height:280px;pointer-events:none">${overlaySVG}</svg>` : ''}
-          <div class="p1-sat-label">${hasOverlay ? 'MEASURED ROOF OVERLAY' : 'OVERHEAD SATELLITE'} &mdash; Zoom ${report.metadata.provider === 'google_solar_datalayers' ? '21' : '20'}</div>
+          <div class="p1-sat-label">${hasOverlay ? 'MEASURED ROOF OVERLAY' : 'OVERHEAD SATELLITE'} &mdash; Full Roof View</div>
         </div>
         <!-- Overlay legend -->
         ${overlayLegend ? `<div style="margin-top:6px">${overlayLegend}</div>` : ''}
@@ -2508,12 +2514,12 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
           ${overheadUrl ? `<img src="${overheadUrl}" alt="Overhead" style="height:180px">` : '<div class="p5-img-placeholder" style="height:180px">No satellite imagery</div>'}
           ${hasOverlay ? `<svg viewBox="0 0 640 640" xmlns="http://www.w3.org/2000/svg" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none">${overlaySVG}</svg>` : ''}
         </div>
-        <div class="p5-img-sub">Zoom ${report.metadata.provider === 'google_solar_datalayers' ? '21' : '20'} &bull; 1280&times;1280px &bull; ${hasOverlay ? 'AI Overlay Active' : 'No Overlay'}</div>
+        <div class="p5-img-sub">Full Roof View &bull; 1280&times;1280px &bull; ${hasOverlay ? 'AI Overlay Active' : 'No Overlay'}</div>
       </div>
     </div>
 
     <!-- Row 2: Directional Aerial Views -->
-    <div style="font-size:10px;font-weight:700;color:#002B5C;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Directional Aerial Views &mdash; 50m Offset</div>
+    <div style="font-size:10px;font-weight:700;color:#002B5C;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Directional Aerial Views &mdash; 25m Offset</div>
     <div class="p5-grid-4">
       <div class="p5-img-card">
         ${northUrl ? `<img src="${northUrl}" alt="North" style="height:95px">` : '<div class="p5-img-placeholder" style="height:95px">N/A</div>'}
@@ -2534,7 +2540,7 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
     </div>
 
     <!-- Row 3: Close-up Quadrant Views -->
-    <div style="font-size:10px;font-weight:700;color:#002B5C;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Roof Detail Quadrants &mdash; Maximum Zoom (Z22)</div>
+    <div style="font-size:10px;font-weight:700;color:#002B5C;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Roof Detail Quadrants &mdash; Close-Up</div>
     <div class="p5-grid-4">
       <div class="p5-img-card">
         ${closeupNwUrl ? `<img src="${closeupNwUrl}" alt="NW" style="height:90px">` : '<div class="p5-img-placeholder" style="height:90px">N/A</div>'}
@@ -2571,7 +2577,7 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
       </div>
       <div class="p5-img-card">
         ${closeupUrl ? `<img src="${closeupUrl}" alt="Detail" style="height:85px">` : '<div class="p5-img-placeholder" style="height:85px">N/A</div>'}
-        <div class="p5-img-label">Max Detail (Z22)</div>
+        <div class="p5-img-label">Max Detail</div>
       </div>
     </div>
 
