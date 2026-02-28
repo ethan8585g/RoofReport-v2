@@ -115,7 +115,7 @@ async function validateAdminSession(db: D1Database, authHeader: string | undefin
   if (!authHeader || !authHeader.startsWith('Bearer ')) return null
   const token = authHeader.replace('Bearer ', '')
   const session = await db.prepare(
-    `SELECT s.*, u.email, u.role FROM admin_sessions s JOIN admin_users u ON s.admin_id = u.id WHERE s.token = ? AND s.expires_at > datetime('now')`
+    `SELECT s.*, u.email, u.role FROM admin_sessions s JOIN admin_users u ON s.admin_id = u.id WHERE s.session_token = ? AND s.expires_at > datetime('now')`
   ).bind(token).first()
   return session
 }

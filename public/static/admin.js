@@ -67,6 +67,7 @@ function render() {
     { id:'invoicing', label:'Invoicing', icon:'fa-file-invoice-dollar' },
     { id:'marketing', label:'Marketing', icon:'fa-bullhorn' },
     { id:'neworder', label:'New Order', icon:'fa-plus-circle' },
+    { id:'blog', label:'Blog', icon:'fa-blog' },
     { id:'activity', label:'Activity Log', icon:'fa-history' }
   ];
 
@@ -89,6 +90,7 @@ function render() {
       ${A.tab === 'invoicing' ? renderInvoicing() : ''}
       ${A.tab === 'marketing' ? renderMarketing() : ''}
       ${A.tab === 'neworder' ? renderNewOrder() : ''}
+      ${A.tab === 'blog' ? renderBlog() : ''}
       ${A.tab === 'activity' ? renderActivity() : ''}
     </div>
   `;
@@ -939,5 +941,240 @@ async function delInvoice(id) {
   try {
     const r = await fetch('/api/invoices/' + id, { method:'DELETE' });
     if (r.ok) { await loadAll(); render(); } else alert('Failed');
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+// ============================================================
+// BLOG MANAGEMENT
+// ============================================================
+let blogPosts = [];
+let blogView = 'list'; // 'list' | 'editor'
+let editingPost = null;
+
+async function loadBlogPosts() {
+  try {
+    const r = await adminFetch('/api/blog/admin/posts');
+    if (!r) return;
+    const d = await r.json();
+    blogPosts = d.posts || [];
+  } catch(e) {
+    // Table may not exist yet — try init
+    try {
+      await adminFetch('/api/blog/admin/init', { method: 'POST' });
+      const r2 = await adminFetch('/api/blog/admin/posts');
+      if (r2) { const d2 = await r2.json(); blogPosts = d2.posts || []; }
+    } catch(e2) { blogPosts = []; }
+  }
+}
+
+function renderBlog() {
+  if (blogPosts.length === 0 && blogView === 'list') {
+    loadBlogPosts().then(() => render());
+  }
+  if (blogView === 'editor') return renderBlogEditor();
+  return renderBlogList();
+}
+
+function renderBlogList() {
+  const published = blogPosts.filter(p => p.status === 'published');
+  const drafts = blogPosts.filter(p => p.status === 'draft');
+
+  return section('Blog Management', 'fa-blog', `
+    <div class="flex items-center justify-between mb-4">
+      <div class="flex items-center gap-4">
+        <span class="text-sm text-gray-500">${published.length} published · ${drafts.length} drafts</span>
+        <a href="/blog" target="_blank" class="text-sky-500 hover:text-sky-600 text-sm font-medium"><i class="fas fa-external-link-alt mr-1"></i>View Blog</a>
+      </div>
+      <button onclick="openBlogEditor(null)" class="bg-sky-500 hover:bg-sky-600 text-white font-semibold py-2 px-5 rounded-lg text-sm transition-all">
+        <i class="fas fa-plus mr-1"></i>New Post
+      </button>
+    </div>
+    ${blogPosts.length === 0 ? '<div class="text-center py-12 text-gray-400"><i class="fas fa-blog text-4xl mb-3"></i><p>No blog posts yet. Create your first post to boost SEO.</p></div>' : ''}
+    <div class="space-y-3">
+      ${blogPosts.map(p => `
+        <div class="bg-white border border-gray-200 rounded-xl p-4 flex items-center gap-4 hover:shadow-sm transition-shadow">
+          ${p.cover_image_url
+            ? '<img src="' + p.cover_image_url + '" class="w-16 h-16 rounded-lg object-cover flex-shrink-0" onerror="this.style.display=\'none\'">'
+            : '<div class="w-16 h-16 rounded-lg bg-sky-50 flex items-center justify-center flex-shrink-0"><i class="fas fa-newspaper text-sky-300 text-xl"></i></div>'
+          }
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 mb-1">
+              <h4 class="font-semibold text-gray-900 truncate">${p.title}</h4>
+              <span class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${p.status === 'published' ? 'bg-green-100 text-green-700' : p.status === 'draft' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-500'}">${p.status}</span>
+              ${p.is_featured ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-700"><i class="fas fa-star mr-0.5"></i>Featured</span>' : ''}
+            </div>
+            <div class="text-xs text-gray-400 flex items-center gap-3">
+              <span><i class="fas fa-tag mr-1"></i>${p.category || 'roofing'}</span>
+              <span><i class="far fa-eye mr-1"></i>${p.view_count || 0} views</span>
+              <span><i class="far fa-clock mr-1"></i>${p.read_time_minutes || 5} min</span>
+              <span>${p.published_at ? new Date(p.published_at).toLocaleDateString() : 'Not published'}</span>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <button onclick="openBlogEditor(${p.id})" class="text-sky-500 hover:text-sky-700 text-sm font-medium px-3 py-1.5 rounded-lg hover:bg-sky-50"><i class="fas fa-edit mr-1"></i>Edit</button>
+            ${p.status === 'published' ? '<a href="/blog/' + p.slug + '" target="_blank" class="text-gray-400 hover:text-gray-600 text-sm px-2 py-1.5 rounded-lg hover:bg-gray-50"><i class="fas fa-external-link-alt"></i></a>' : ''}
+            <button onclick="deleteBlogPost(${p.id})" class="text-red-400 hover:text-red-600 text-sm px-2 py-1.5 rounded-lg hover:bg-red-50"><i class="fas fa-trash"></i></button>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `);
+}
+
+function openBlogEditor(postId) {
+  if (postId) {
+    editingPost = blogPosts.find(p => p.id === postId) || null;
+  } else {
+    editingPost = null;
+  }
+  blogView = 'editor';
+  render();
+}
+
+function renderBlogEditor() {
+  const p = editingPost || {};
+  const isEdit = !!editingPost;
+
+  return section(isEdit ? 'Edit Post' : 'Create New Post', 'fa-edit', `
+    <div class="mb-4">
+      <button onclick="blogView='list';render()" class="text-sky-500 hover:text-sky-600 text-sm font-medium"><i class="fas fa-arrow-left mr-1"></i>Back to Posts</button>
+    </div>
+    <div class="space-y-4 max-w-4xl">
+      <div class="grid md:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-semibold text-gray-700 mb-1">Title *</label>
+          <input type="text" id="bp-title" value="${(p.title||'').replace(/"/g,'&quot;')}" placeholder="Your article title..." class="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-sky-400 focus:border-sky-400">
+        </div>
+        <div>
+          <label class="block text-sm font-semibold text-gray-700 mb-1">URL Slug</label>
+          <input type="text" id="bp-slug" value="${(p.slug||'').replace(/"/g,'&quot;')}" placeholder="auto-generated-from-title" class="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-sky-400 focus:border-sky-400">
+        </div>
+      </div>
+      <div>
+        <label class="block text-sm font-semibold text-gray-700 mb-1">Excerpt (short description for listing cards)</label>
+        <textarea id="bp-excerpt" rows="2" placeholder="Brief summary shown on the blog listing page..." class="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-sky-400 focus:border-sky-400">${p.excerpt||''}</textarea>
+      </div>
+      <div>
+        <label class="block text-sm font-semibold text-gray-700 mb-1">Content * (HTML supported)</label>
+        <textarea id="bp-content" rows="18" placeholder="Write your article content here... HTML tags are supported for rich formatting." class="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm font-mono focus:ring-2 focus:ring-sky-400 focus:border-sky-400">${(p.content||'').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea>
+        <p class="text-xs text-gray-400 mt-1"><i class="fas fa-info-circle mr-1"></i>Use HTML for formatting: &lt;h2&gt;, &lt;p&gt;, &lt;ul&gt;, &lt;blockquote&gt;, &lt;img&gt;, etc.</p>
+      </div>
+      <div class="grid md:grid-cols-3 gap-4">
+        <div>
+          <label class="block text-sm font-semibold text-gray-700 mb-1">Category</label>
+          <select id="bp-category" class="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-sky-400 focus:border-sky-400">
+            <option value="roofing" ${p.category==='roofing'?'selected':''}>Roofing</option>
+            <option value="technology" ${p.category==='technology'?'selected':''}>Technology</option>
+            <option value="business" ${p.category==='business'?'selected':''}>Business</option>
+            <option value="guides" ${p.category==='guides'?'selected':''}>Guides</option>
+            <option value="industry" ${p.category==='industry'?'selected':''}>Industry News</option>
+            <option value="tips" ${p.category==='tips'?'selected':''}>Tips & Tricks</option>
+            <option value="case-studies" ${p.category==='case-studies'?'selected':''}>Case Studies</option>
+            <option value="product" ${p.category==='product'?'selected':''}>Product Updates</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm font-semibold text-gray-700 mb-1">Cover Image URL</label>
+          <input type="text" id="bp-cover" value="${(p.cover_image_url||'').replace(/"/g,'&quot;')}" placeholder="https://..." class="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-sky-400 focus:border-sky-400">
+        </div>
+        <div>
+          <label class="block text-sm font-semibold text-gray-700 mb-1">Tags (comma-separated)</label>
+          <input type="text" id="bp-tags" value="${(p.tags||'').replace(/"/g,'&quot;')}" placeholder="roofing, measurement, AI" class="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-sky-400 focus:border-sky-400">
+        </div>
+      </div>
+      <div class="grid md:grid-cols-3 gap-4">
+        <div>
+          <label class="block text-sm font-semibold text-gray-700 mb-1">Author Name</label>
+          <input type="text" id="bp-author" value="${(p.author_name||'RoofReporterAI Team').replace(/"/g,'&quot;')}" class="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-sky-400 focus:border-sky-400">
+        </div>
+        <div>
+          <label class="block text-sm font-semibold text-gray-700 mb-1">SEO Meta Title</label>
+          <input type="text" id="bp-meta-title" value="${(p.meta_title||'').replace(/"/g,'&quot;')}" placeholder="Optional SEO title override" class="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-sky-400 focus:border-sky-400">
+        </div>
+        <div>
+          <label class="block text-sm font-semibold text-gray-700 mb-1">SEO Meta Description</label>
+          <input type="text" id="bp-meta-desc" value="${(p.meta_description||'').replace(/"/g,'&quot;')}" placeholder="Optional SEO description" class="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-sky-400 focus:border-sky-400">
+        </div>
+      </div>
+      <div class="flex items-center gap-4">
+        <label class="flex items-center gap-2 cursor-pointer">
+          <input type="checkbox" id="bp-featured" ${p.is_featured ? 'checked' : ''} class="w-4 h-4 text-sky-500 rounded">
+          <span class="text-sm text-gray-700"><i class="fas fa-star text-yellow-400 mr-1"></i>Featured Post</span>
+        </label>
+      </div>
+      <div class="flex items-center gap-3 pt-4 border-t">
+        <button onclick="saveBlogPost('draft')" class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold py-2.5 px-6 rounded-lg text-sm transition-all"><i class="fas fa-save mr-1"></i>Save as Draft</button>
+        <button onclick="saveBlogPost('published')" class="bg-green-500 hover:bg-green-600 text-white font-semibold py-2.5 px-6 rounded-lg text-sm transition-all"><i class="fas fa-paper-plane mr-1"></i>Publish</button>
+        <button onclick="blogView='list';render()" class="text-gray-500 hover:text-gray-700 text-sm ml-auto">Cancel</button>
+      </div>
+    </div>
+  `);
+}
+
+async function saveBlogPost(status) {
+  const data = {
+    title: document.getElementById('bp-title')?.value?.trim(),
+    slug: document.getElementById('bp-slug')?.value?.trim(),
+    excerpt: document.getElementById('bp-excerpt')?.value?.trim(),
+    content: document.getElementById('bp-content')?.value?.trim(),
+    cover_image_url: document.getElementById('bp-cover')?.value?.trim(),
+    category: document.getElementById('bp-category')?.value,
+    tags: document.getElementById('bp-tags')?.value?.trim(),
+    author_name: document.getElementById('bp-author')?.value?.trim(),
+    meta_title: document.getElementById('bp-meta-title')?.value?.trim(),
+    meta_description: document.getElementById('bp-meta-desc')?.value?.trim(),
+    is_featured: document.getElementById('bp-featured')?.checked,
+    status: status
+  };
+
+  if (!data.title || !data.content) {
+    alert('Title and content are required.');
+    return;
+  }
+
+  try {
+    const isEdit = !!editingPost;
+    const url = isEdit ? '/api/blog/admin/posts/' + editingPost.id : '/api/blog/admin/posts';
+    const method = isEdit ? 'PUT' : 'POST';
+
+    const r = await fetch(url, {
+      method: method,
+      headers: { 'Content-Type': 'application/json', ...Object.fromEntries(Object.entries(adminHeaders())) },
+      body: JSON.stringify(data)
+    });
+    const d = await r.json();
+
+    if (r.ok) {
+      alert(isEdit ? 'Post updated!' : 'Post created!');
+      blogView = 'list';
+      editingPost = null;
+      await loadBlogPosts();
+      render();
+    } else {
+      alert('Error: ' + (d.error || 'Failed to save'));
+    }
+  } catch(e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+function adminHeaders() {
+  const token = localStorage.getItem('rc_token');
+  return token ? { 'Authorization': 'Bearer ' + token } : {};
+}
+
+async function deleteBlogPost(id) {
+  if (!confirm('Delete this blog post permanently?')) return;
+  try {
+    const r = await fetch('/api/blog/admin/posts/' + id, {
+      method: 'DELETE',
+      headers: adminHeaders()
+    });
+    if (r.ok) {
+      await loadBlogPosts();
+      render();
+    } else {
+      alert('Failed to delete post');
+    }
   } catch(e) { alert('Error: ' + e.message); }
 }
