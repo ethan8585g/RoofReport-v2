@@ -74,6 +74,104 @@ app.get('/api/health', (c) => {
   })
 })
 
+// Diagnostic: Test Google Solar API connectivity
+app.get('/api/health/solar', async (c) => {
+  try {
+    const solarKey = c.env.GOOGLE_SOLAR_API_KEY
+    const mapsKey = c.env.GOOGLE_MAPS_API_KEY
+    const results: any = {
+      timestamp: new Date().toISOString(),
+      keys_configured: {
+        solar_api_key: !!solarKey,
+        solar_key_prefix: solarKey ? solarKey.substring(0, 8) + '...' : null,
+        maps_api_key: !!mapsKey,
+        maps_key_prefix: mapsKey ? mapsKey.substring(0, 8) + '...' : null
+      },
+      tests: {}
+    }
+
+    // Test 1: Solar buildingInsights API (Calgary downtown)
+    if (solarKey) {
+      try {
+        const biUrl = `https://solar.googleapis.com/v1/buildingInsights:findClosest?location.latitude=51.0447&location.longitude=-114.0719&requiredQuality=HIGH&key=${solarKey}`
+        const biResp = await fetch(biUrl)
+        if (biResp.ok) {
+          const biData: any = await biResp.json()
+          results.tests.building_insights = {
+            status: 'ok',
+            http_status: biResp.status,
+            roof_area_m2: biData.solarPotential?.wholeRoofStats?.areaMeters2 || 0,
+            segments: biData.solarPotential?.roofSegmentStats?.length || 0,
+            imagery_quality: biData.imageryQuality || 'unknown'
+          }
+        } else {
+          const errText = await biResp.text()
+          results.tests.building_insights = {
+            status: 'error',
+            http_status: biResp.status,
+            error: errText.substring(0, 500),
+            fix: biResp.status === 403
+              ? 'API key may have IP/referrer restrictions. Cloudflare Workers have no static IP — remove all restrictions from the key in Google Cloud Console.'
+              : biResp.status === 400
+              ? 'Bad request — check if Solar API is enabled in Google Cloud Console.'
+              : 'Check API key and billing in Google Cloud Console.'
+          }
+        }
+      } catch (e: any) {
+        results.tests.building_insights = { status: 'network_error', error: e.message }
+      }
+
+      // Test 2: Solar DataLayers API
+      try {
+        const dlUrl = `https://solar.googleapis.com/v1/dataLayers:get?location.latitude=51.0447&location.longitude=-114.0719&radiusMeters=50&view=FULL_LAYERS&requiredQuality=HIGH&pixelSizeMeters=0.5&key=${solarKey}`
+        const dlResp = await fetch(dlUrl)
+        if (dlResp.ok) {
+          const dlData: any = await dlResp.json()
+          results.tests.data_layers = {
+            status: 'ok',
+            http_status: dlResp.status,
+            has_dsm: !!dlData.dsmUrl,
+            has_mask: !!dlData.maskUrl,
+            has_rgb: !!dlData.rgbUrl,
+            imagery_quality: dlData.imageryQuality || 'unknown'
+          }
+        } else {
+          const errText = await dlResp.text()
+          results.tests.data_layers = { status: 'error', http_status: dlResp.status, error: errText.substring(0, 500) }
+        }
+      } catch (e: any) {
+        results.tests.data_layers = { status: 'network_error', error: e.message }
+      }
+    } else {
+      results.tests.building_insights = { status: 'skipped', reason: 'GOOGLE_SOLAR_API_KEY not configured' }
+      results.tests.data_layers = { status: 'skipped', reason: 'GOOGLE_SOLAR_API_KEY not configured' }
+    }
+
+    // Test 3: Maps Geocoding API
+    if (mapsKey || solarKey) {
+      try {
+        const geoKey = mapsKey || solarKey
+        const geoResp = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=Calgary+AB+Canada&key=${geoKey}`)
+        const geoData: any = await geoResp.json()
+        results.tests.geocoding = {
+          status: geoData.status === 'OK' ? 'ok' : 'error',
+          api_status: geoData.status,
+          error_message: geoData.error_message || null
+        }
+      } catch (e: any) {
+        results.tests.geocoding = { status: 'network_error', error: e.message }
+      }
+    }
+
+    const allOk = Object.values(results.tests).every((t: any) => t.status === 'ok')
+    results.overall = allOk ? 'all_apis_working' : 'some_issues_detected'
+
+    return c.json(results)
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500)
+  }
+})
+
 // Diagnostic: Test Gemini API connectivity (service account → access token → API key)
 app.get('/api/health/gemini', async (c) => {
   try {
