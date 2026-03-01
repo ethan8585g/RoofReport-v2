@@ -263,6 +263,9 @@ app.get('/', (c) => {
   return c.html(getLandingPageHTML())
 })
 
+// /order redirect — users may type /order directly
+app.get('/order', (c) => c.redirect('/customer/order'))
+
 // Order Form page (new route)
 app.get('/order/new', (c) => {
   const mapsKey = c.env.GOOGLE_MAPS_API_KEY || ''

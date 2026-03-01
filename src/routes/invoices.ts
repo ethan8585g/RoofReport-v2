@@ -1,7 +1,16 @@
 import { Hono } from 'hono'
 import type { Bindings } from '../types'
+import { validateAdminSession } from './auth'
 
 export const invoiceRoutes = new Hono<{ Bindings: Bindings }>()
+
+// Admin auth middleware
+invoiceRoutes.use('/*', async (c, next) => {
+  const admin = await validateAdminSession(c.env.DB, c.req.header('Authorization'))
+  if (!admin) return c.json({ error: 'Admin authentication required' }, 401)
+  c.set('admin' as any, admin)
+  return next()
+})
 
 // Generate invoice number
 function generateInvoiceNumber(): string {

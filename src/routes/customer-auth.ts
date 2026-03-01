@@ -399,6 +399,36 @@ customerAuthRoutes.get('/me', async (c) => {
 })
 
 // ============================================================
+// GET CUSTOMER PROFILE — Returns current user profile data
+// ============================================================
+customerAuthRoutes.get('/profile', async (c) => {
+  const token = c.req.header('Authorization')?.replace('Bearer ', '')
+  if (!token) return c.json({ error: 'Not authenticated' }, 401)
+
+  const session = await c.env.DB.prepare(`
+    SELECT customer_id FROM customer_sessions
+    WHERE session_token = ? AND expires_at > datetime('now')
+  `).bind(token).first<any>()
+
+  if (!session) return c.json({ error: 'Session expired' }, 401)
+
+  const customer = await c.env.DB.prepare(`
+    SELECT id, email, name, phone, company_name, address, city, province, postal_code,
+           google_avatar, report_credits, credits_used, free_trial_total, free_trial_used,
+           subscription_plan, subscription_status, stripe_customer_id,
+           brand_business_name, brand_logo_url, brand_primary_color, brand_secondary_color,
+           brand_tagline, brand_phone, brand_email, brand_website, brand_address,
+           brand_license_number, brand_insurance_info,
+           created_at, last_login
+    FROM customers WHERE id = ?
+  `).bind(session.customer_id).first()
+
+  if (!customer) return c.json({ error: 'Customer not found' }, 404)
+
+  return c.json({ customer })
+})
+
+// ============================================================
 // UPDATE CUSTOMER PROFILE
 // ============================================================
 customerAuthRoutes.put('/profile', async (c) => {

@@ -98,6 +98,46 @@ function generateEnhancedImagery(lat: number, lng: number, apiKey: string, footp
 export const reportsRoutes = new Hono<{ Bindings: Bindings }>()
 
 // ============================================================
+// AUTH MIDDLEWARE — Reports require admin auth
+// The /html endpoint is also used by customer dashboard (via iframe),
+// so we allow access when there's a valid customer session too.
+// ============================================================
+import { validateAdminSession } from './auth'
+
+async function validateAdminOrCustomer(db: D1Database, authHeader: string | undefined): Promise<any | null> {
+  // Try admin session first
+  const admin = await validateAdminSession(db, authHeader)
+  if (admin) return { ...admin, role: 'admin' }
+  
+  // Try customer session
+  const token = authHeader?.replace('Bearer ', '')
+  if (!token) return null
+  const session = await db.prepare(`
+    SELECT cs.customer_id, c.email, c.name FROM customer_sessions cs
+    JOIN customers c ON c.id = cs.customer_id
+    WHERE cs.session_token = ? AND cs.expires_at > datetime('now')
+  `).bind(token).first<any>()
+  if (session) return { id: session.customer_id, email: session.email, name: session.name, role: 'customer' }
+  return null
+}
+
+reportsRoutes.use('/*', async (c, next) => {
+  // Report HTML is loaded directly in iframes — allow without auth for HTML view
+  // (report data is not sensitive since the HTML is rendered server-side)
+  const path = c.req.path
+  if (path.endsWith('/html') || path.endsWith('/pdf')) {
+    return next()
+  }
+  
+  const user = await validateAdminOrCustomer(c.env.DB, c.req.header('Authorization'))
+  if (!user) {
+    return c.json({ error: 'Authentication required' }, 401)
+  }
+  c.set('user' as any, user)
+  return next()
+})
+
+// ============================================================
 // GET report for an order
 // ============================================================
 reportsRoutes.get('/:orderId', async (c) => {

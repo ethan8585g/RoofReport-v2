@@ -14,6 +14,15 @@ import { computeRASYieldAnalysis, trueAreaFromFootprint, pitchToRatio, degreesTo
 import { analyzeRoofGeometry, generateAIRoofingReport, quickMeasure } from '../services/gemini'
 
 export const aiAnalysisRoutes = new Hono<{ Bindings: Bindings }>()
+import { validateAdminSession } from './auth'
+
+// Admin auth middleware for AI analysis endpoints
+aiAnalysisRoutes.use('/*', async (c, next) => {
+  const admin = await validateAdminSession(c.env.DB, c.req.header('Authorization'))
+  if (!admin) return c.json({ error: 'Admin authentication required' }, 401)
+  c.set('admin' as any, admin)
+  return next()
+})
 
 // ============================================================
 // Helper: Build environment credentials from Hono context
