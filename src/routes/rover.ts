@@ -30,7 +30,7 @@ ABOUT ROOFREPORTERAI:
 - Professional AI-powered roof measurement reports from satellite imagery
 - Powered by Google's Solar API — real satellite data, not estimates
 - Reports include: true 3D roof area, pitch analysis, segment breakdown, edge measurements (ridge, hip, valley, eave, rake), full material Bill of Materials (BOM) with Alberta pricing, solar potential analysis
-- Reports are generated instantly — as fast as 10 minutes
+- Reports arrive in less than 1 minute, guaranteed
 - Based in Alberta, Canada — serving roofing professionals across Canada
 
 PRICING:
@@ -58,7 +58,7 @@ WHO IT'S FOR:
 COMMON QUESTIONS TO HANDLE:
 - "How accurate is it?" → Google Solar API with HIGH quality imagery, typically within 2-5% of manual measurements
 - "What areas do you cover?" → Most Canadian addresses with Google Solar API coverage. Best coverage in urban Alberta, BC, Ontario, Quebec
-- "How fast?" → Reports generated instantly, typically within 10 minutes
+- "How fast?" → Reports arrive in less than 1 minute, guaranteed
 - "Can I try it free?" → YES! 3 free reports on signup, no credit card needed
 - "What's in the report?" → True 3D area, pitch, segments, edge breakdown, material BOM, solar potential, satellite imagery
 - "How much?" → $8 CAD per report after free trial. Volume discounts available.

@@ -90,7 +90,7 @@ function renderHero() {
               </div>
               <div class="flex items-center gap-2">
                 <i class="fas fa-check-circle text-green-400"></i>
-                <span class="text-gray-300">As fast as <strong class="text-white">10 min</strong> delivery</span>
+                <span class="text-gray-300">Reports in <strong class="text-white">under 1 min</strong>, guaranteed</span>
               </div>
               <div class="flex items-center gap-2">
                 <i class="fas fa-check-circle text-green-400"></i>
