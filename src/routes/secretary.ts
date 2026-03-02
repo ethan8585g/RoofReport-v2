@@ -15,26 +15,30 @@
 
 import { Hono } from 'hono'
 import type { Bindings } from '../types'
+import { isDevAccount } from './customer-auth'
 
 export const secretaryRoutes = new Hono<{ Bindings: Bindings }>()
 
 // ============================================================
 // AUTH MIDDLEWARE — Customer must be logged in
 // ============================================================
-async function getCustomerId(c: any): Promise<number | null> {
+async function getCustomerInfo(c: any): Promise<{ id: number; email: string } | null> {
   const auth = c.req.header('Authorization')
   if (!auth?.startsWith('Bearer ')) return null
   const token = auth.slice(7)
   const session = await c.env.DB.prepare(
-    `SELECT customer_id FROM customer_sessions WHERE session_token = ? AND expires_at > datetime('now')`
+    `SELECT cs.customer_id, cu.email FROM customer_sessions cs JOIN customers cu ON cu.id = cs.customer_id WHERE cs.session_token = ? AND cs.expires_at > datetime('now')`
   ).bind(token).first<any>()
-  return session?.customer_id || null
+  if (!session?.customer_id) return null
+  return { id: session.customer_id, email: session.email || '' }
 }
 
 secretaryRoutes.use('/*', async (c, next) => {
-  const customerId = await getCustomerId(c)
-  if (!customerId) return c.json({ error: 'Authentication required' }, 401)
-  c.set('customerId' as any, customerId)
+  const info = await getCustomerInfo(c)
+  if (!info) return c.json({ error: 'Authentication required' }, 401)
+  c.set('customerId' as any, info.id)
+  c.set('customerEmail' as any, info.email)
+  c.set('isDev' as any, isDevAccount(info.email))
   return next()
 })
 
@@ -234,6 +238,7 @@ secretaryRoutes.post('/verify-session', async (c) => {
 // ============================================================
 secretaryRoutes.get('/status', async (c) => {
   const customerId = c.get('customerId' as any) as number
+  const isDev = c.get('isDev' as any) as boolean
 
   const sub = await c.env.DB.prepare(
     `SELECT * FROM secretary_subscriptions WHERE customer_id = ? AND status IN ('active', 'pending', 'past_due') ORDER BY id DESC LIMIT 1`
@@ -251,14 +256,18 @@ secretaryRoutes.get('/status', async (c) => {
     `SELECT COUNT(*) as total FROM secretary_call_logs WHERE customer_id = ?`
   ).bind(customerId).first<any>()
 
+  // Dev account gets free access — treat as active subscription
+  const hasActive = isDev ? true : sub?.status === 'active'
+
   return c.json({
-    subscription: sub || null,
-    has_active_subscription: sub?.status === 'active',
+    subscription: isDev ? { status: 'active', is_dev_grant: true } : (sub || null),
+    has_active_subscription: hasActive,
     config: config || null,
     directories: dirs.results || [],
     total_calls: callCount?.total || 0,
     is_configured: !!(config?.business_phone && config?.greeting_script),
     is_active: config?.is_active === 1,
+    is_dev: isDev,
   })
 })
 
@@ -366,12 +375,15 @@ secretaryRoutes.get('/directories', async (c) => {
 // ============================================================
 secretaryRoutes.post('/toggle', async (c) => {
   const customerId = c.get('customerId' as any) as number
+  const isDev = c.get('isDev' as any) as boolean
 
-  // Verify active subscription
-  const sub = await c.env.DB.prepare(
-    `SELECT status FROM secretary_subscriptions WHERE customer_id = ? AND status = 'active' ORDER BY id DESC LIMIT 1`
-  ).bind(customerId).first<any>()
-  if (!sub) return c.json({ error: 'Active subscription required' }, 403)
+  // Verify active subscription (dev accounts bypass)
+  if (!isDev) {
+    const sub = await c.env.DB.prepare(
+      `SELECT status FROM secretary_subscriptions WHERE customer_id = ? AND status = 'active' ORDER BY id DESC LIMIT 1`
+    ).bind(customerId).first<any>()
+    if (!sub) return c.json({ error: 'Active subscription required' }, 403)
+  }
 
   const config = await c.env.DB.prepare(
     `SELECT id, is_active, business_phone, greeting_script FROM secretary_config WHERE customer_id = ?`
