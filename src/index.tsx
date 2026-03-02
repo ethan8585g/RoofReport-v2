@@ -16,6 +16,7 @@ import { propertyImageryRoutes } from './routes/property-imagery'
 import { blogRoutes } from './routes/blog'
 import { d2dRoutes } from './routes/d2d'
 import { secretaryRoutes } from './routes/secretary'
+import { roverRoutes } from './routes/rover'
 import type { Bindings } from './types'
 
 const app = new Hono<{ Bindings: Bindings }>()
@@ -39,6 +40,7 @@ app.route('/api/property-imagery', propertyImageryRoutes)
 app.route('/api/blog', blogRoutes)
 app.route('/api/d2d', d2dRoutes)
 app.route('/api/secretary', secretaryRoutes)
+app.route('/api/rover', roverRoutes)
 
 // Health check
 app.get('/api/health', (c) => {
@@ -69,6 +71,8 @@ app.get('/api/health', (c) => {
       LIVEKIT_SIP_URI: !!(c.env as any).LIVEKIT_SIP_URI,
       TWILIO_ACCOUNT_SID: !!(c.env as any).TWILIO_ACCOUNT_SID,
       TWILIO_AUTH_TOKEN: !!(c.env as any).TWILIO_AUTH_TOKEN,
+      OPENAI_API_KEY: !!(c.env as any).OPENAI_API_KEY,
+      OPENAI_BASE_URL: !!(c.env as any).OPENAI_BASE_URL,
       DB: !!c.env.DB
     },
     vertex_ai: {
@@ -409,6 +413,11 @@ function getHeadTags() {
   ${getTailwindConfig()}
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <link rel="stylesheet" href="/static/style.css">`
+}
+
+// Rover chatbot widget script tag — inject on public pages only
+function getRoverWidget() {
+  return `<script src="/static/rover-widget.js" defer></script>`
 }
 
 function getMainPageHTML(mapsApiKey: string) {
@@ -955,6 +964,7 @@ function getLandingPageHTML() {
     });
   </script>
   <script src="/static/landing.js"></script>
+  ${getRoverWidget()}
 </body>
 </html>`
 }
@@ -1175,6 +1185,7 @@ function getCustomerLoginHTML() {
       } catch(e) { err.textContent = 'Network error.'; err.classList.remove('hidden'); }
     }
   </script>
+  ${getRoverWidget()}
 </body>
 </html>`
 }
@@ -1231,6 +1242,7 @@ function getCustomerDashboardHTML() {
     }
   </script>
   <script src="/static/customer-dashboard.js"></script>
+  ${getRoverWidget()}
 </body>
 </html>`
 }
@@ -1308,6 +1320,7 @@ function getPricingPageHTML() {
     </div>
   </main>
   <script src="/static/pricing.js"></script>
+  ${getRoverWidget()}
 </body>
 </html>`
 }
@@ -1420,6 +1433,7 @@ function getBlogListingHTML() {
   </footer>
 
   <script src="/static/blog.js"></script>
+  ${getRoverWidget()}
 </body>
 </html>`
 }
@@ -1515,6 +1529,7 @@ function getBlogPostHTML() {
   </footer>
 
   <script src="/static/blog.js"></script>
+  ${getRoverWidget()}
 </body>
 </html>`
 }
@@ -1560,6 +1575,7 @@ function getCustomerOrderPageHTML(mapsApiKey: string) {
     })();
   </script>
   <script src="/static/customer-order.js"></script>
+  ${getRoverWidget()}
 </body>
 </html>`
 }

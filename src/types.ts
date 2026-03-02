@@ -73,6 +73,11 @@ export type Bindings = {
   // Get from: console.twilio.com → Account Info
   TWILIO_ACCOUNT_SID: string    // e.g. "AC..."
   TWILIO_AUTH_TOKEN: string     // Account auth token
+
+  // OpenAI-compatible API — Rover AI Chatbot
+  // Used via GenSpark proxy for AI-powered chat responses
+  OPENAI_API_KEY: string        // GenSpark LLM proxy key
+  OPENAI_BASE_URL: string       // e.g. "https://www.genspark.ai/api/llm_proxy/v1"
 }
 
 // ============================================================

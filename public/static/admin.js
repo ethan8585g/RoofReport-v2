@@ -66,6 +66,7 @@ function render() {
     { id:'sales', label:'Sales & Orders', icon:'fa-chart-line' },
     { id:'invoicing', label:'Invoicing', icon:'fa-file-invoice-dollar' },
     { id:'marketing', label:'Marketing', icon:'fa-bullhorn' },
+    { id:'rover', label:'Rover Chat', icon:'fa-robot' },
     { id:'neworder', label:'New Order', icon:'fa-plus-circle' },
     { id:'blog', label:'Blog', icon:'fa-blog' },
     { id:'activity', label:'Activity Log', icon:'fa-history' }
@@ -89,6 +90,7 @@ function render() {
       ${A.tab === 'sales' ? renderSales() : ''}
       ${A.tab === 'invoicing' ? renderInvoicing() : ''}
       ${A.tab === 'marketing' ? renderMarketing() : ''}
+      ${A.tab === 'rover' ? renderRover() : ''}
       ${A.tab === 'neworder' ? renderNewOrder() : ''}
       ${A.tab === 'blog' ? renderBlog() : ''}
       ${A.tab === 'activity' ? renderActivity() : ''}
@@ -1175,6 +1177,396 @@ async function deleteBlogPost(id) {
       render();
     } else {
       alert('Failed to delete post');
+    }
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+// ============================================================
+// ROVER AI CHATBOT — Admin Review Panel
+// ============================================================
+let roverStats = null;
+let roverConversations = [];
+let roverPage = 1;
+let roverTotal = 0;
+let roverFilter = '';
+let roverLeadFilter = '';
+let roverSearch = '';
+let roverViewingConvo = null;
+let roverViewingMessages = [];
+
+async function loadRoverData() {
+  try {
+    const [statsRes, convosRes] = await Promise.all([
+      adminFetch('/api/rover/admin/stats'),
+      adminFetch('/api/rover/admin/conversations?page=' + roverPage + '&limit=15' +
+        (roverFilter ? '&status=' + roverFilter : '') +
+        (roverLeadFilter ? '&lead_status=' + roverLeadFilter : '') +
+        (roverSearch ? '&search=' + encodeURIComponent(roverSearch) : ''))
+    ]);
+    if (statsRes) roverStats = await statsRes.json();
+    if (convosRes) {
+      const cd = await convosRes.json();
+      roverConversations = cd.conversations || [];
+      roverTotal = cd.total || 0;
+    }
+  } catch(e) {
+    console.error('Rover load error:', e);
+    roverStats = { stats: {}, token_stats: {}, recent: [] };
+    roverConversations = [];
+  }
+}
+
+function renderRover() {
+  if (!roverStats) {
+    loadRoverData().then(() => render());
+    return '<div class="text-center py-12"><div class="w-8 h-8 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto"></div><p class="text-gray-400 mt-3 text-sm">Loading Rover data...</p></div>';
+  }
+
+  if (roverViewingConvo) return renderRoverConvoDetail();
+
+  const s = roverStats.stats || {};
+  const ts = roverStats.token_stats || {};
+
+  return `
+    <!-- Rover Stats -->
+    <div class="grid grid-cols-2 lg:grid-cols-6 gap-4 mb-6">
+      ${mc('Total Chats', s.total_conversations || 0, 'fa-comments', 'blue')}
+      ${mc('Active Now', s.active_conversations || 0, 'fa-circle text-green-500', 'green')}
+      ${mc('Today', s.today_conversations || 0, 'fa-calendar-day', 'indigo')}
+      ${mc('This Week', s.week_conversations || 0, 'fa-calendar-week', 'purple')}
+      ${mc('Qualified Leads', s.qualified_leads || 0, 'fa-star', 'amber')}
+      ${mc('Emails Collected', s.emails_collected || 0, 'fa-envelope', 'red')}
+    </div>
+
+    <div class="grid lg:grid-cols-3 gap-6 mb-6">
+      <!-- Performance -->
+      ${section('Chat Performance', 'fa-chart-bar', `
+        <div class="grid grid-cols-2 gap-3">
+          <div class="p-3 bg-blue-50 rounded-xl text-center">
+            <p class="text-xs text-gray-500">Total Messages</p>
+            <p class="text-xl font-black text-blue-600">${s.total_messages || 0}</p>
+          </div>
+          <div class="p-3 bg-green-50 rounded-xl text-center">
+            <p class="text-xs text-gray-500">Avg Messages/Chat</p>
+            <p class="text-xl font-black text-green-600">${(s.avg_messages_per_conversation || 0).toFixed(1)}</p>
+          </div>
+          <div class="p-3 bg-amber-50 rounded-xl text-center">
+            <p class="text-xs text-gray-500">Total Tokens</p>
+            <p class="text-xl font-black text-amber-600">${((ts.total_tokens || 0) / 1000).toFixed(1)}K</p>
+          </div>
+          <div class="p-3 bg-purple-50 rounded-xl text-center">
+            <p class="text-xs text-gray-500">Avg Response</p>
+            <p class="text-xl font-black text-purple-600">${Math.round(ts.avg_response_time || 0)}ms</p>
+          </div>
+        </div>
+      `)}
+
+      <!-- Lead Funnel -->
+      ${section('Lead Funnel', 'fa-funnel-dollar', `
+        <div class="space-y-3">
+          ${[
+            { label: 'Total Visitors', val: s.total_conversations || 0, color: 'blue', pct: 100 },
+            { label: 'Qualified Leads', val: s.qualified_leads || 0, color: 'amber', pct: s.total_conversations > 0 ? Math.round((s.qualified_leads || 0) / s.total_conversations * 100) : 0 },
+            { label: 'Converted', val: s.converted_leads || 0, color: 'green', pct: s.total_conversations > 0 ? Math.round((s.converted_leads || 0) / s.total_conversations * 100) : 0 },
+            { label: 'Emails Captured', val: s.emails_collected || 0, color: 'red', pct: s.total_conversations > 0 ? Math.round((s.emails_collected || 0) / s.total_conversations * 100) : 0 },
+            { label: 'Phones Captured', val: s.phones_collected || 0, color: 'indigo', pct: s.total_conversations > 0 ? Math.round((s.phones_collected || 0) / s.total_conversations * 100) : 0 }
+          ].map(f => `
+            <div>
+              <div class="flex justify-between text-sm mb-1">
+                <span class="text-gray-600">${f.label}</span>
+                <span class="font-bold">${f.val} <span class="text-gray-400 font-normal">(${f.pct}%)</span></span>
+              </div>
+              <div class="w-full bg-gray-100 rounded-full h-2">
+                <div class="bg-${f.color}-500 h-2 rounded-full" style="width:${f.pct}%"></div>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      `)}
+
+      <!-- Quick View Recent -->
+      ${section('Recent Conversations', 'fa-clock', `
+        <div class="space-y-2">
+          ${(roverStats.recent || []).slice(0, 5).map(r => `
+            <div class="flex items-center justify-between py-2 border-b border-gray-50 cursor-pointer hover:bg-blue-50 rounded-lg px-2 -mx-2 transition-colors" onclick="viewRoverConvo(${r.id})">
+              <div class="flex items-center gap-2">
+                <div class="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-xs font-bold text-blue-600">
+                  ${r.visitor_name ? r.visitor_name[0].toUpperCase() : '?'}
+                </div>
+                <div>
+                  <p class="text-sm font-medium text-gray-800">${r.visitor_name || r.visitor_email || 'Anonymous Visitor'}</p>
+                  <p class="text-xs text-gray-400">${r.message_count} msgs · ${r.summary ? r.summary.substring(0, 50) + '...' : 'No summary'}</p>
+                </div>
+              </div>
+              <div class="text-right">
+                ${roverLeadBadge(r.lead_status)}
+                <p class="text-xs text-gray-400 mt-1">${fmtDateTime(r.last_message_at)}</p>
+              </div>
+            </div>
+          `).join('')}
+          ${(roverStats.recent || []).length === 0 ? '<p class="text-gray-400 text-sm text-center py-4">No conversations yet. Rover is ready to chat!</p>' : ''}
+        </div>
+      `)}
+    </div>
+
+    <!-- Filters + Full Conversation List -->
+    ${section('All Conversations (' + roverTotal + ')', 'fa-comments', `
+      <div class="flex flex-wrap items-center gap-3 mb-4">
+        <div class="flex items-center gap-2">
+          <select onchange="roverFilter=this.value;roverPage=1;loadRoverData().then(()=>render())" class="border border-gray-200 rounded-lg px-3 py-2 text-sm">
+            <option value="" ${roverFilter===''?'selected':''}>All Status</option>
+            <option value="active" ${roverFilter==='active'?'selected':''}>Active</option>
+            <option value="ended" ${roverFilter==='ended'?'selected':''}>Ended</option>
+            <option value="flagged" ${roverFilter==='flagged'?'selected':''}>Flagged</option>
+          </select>
+          <select onchange="roverLeadFilter=this.value;roverPage=1;loadRoverData().then(()=>render())" class="border border-gray-200 rounded-lg px-3 py-2 text-sm">
+            <option value="" ${roverLeadFilter===''?'selected':''}>All Leads</option>
+            <option value="new" ${roverLeadFilter==='new'?'selected':''}>New</option>
+            <option value="qualified" ${roverLeadFilter==='qualified'?'selected':''}>Qualified</option>
+            <option value="contacted" ${roverLeadFilter==='contacted'?'selected':''}>Contacted</option>
+            <option value="converted" ${roverLeadFilter==='converted'?'selected':''}>Converted</option>
+          </select>
+        </div>
+        <div class="flex-1 relative">
+          <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
+          <input type="text" value="${roverSearch}" placeholder="Search by name, email, or summary..." 
+            onkeyup="if(event.key==='Enter'){roverSearch=this.value;roverPage=1;loadRoverData().then(()=>render())}"
+            class="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-400">
+        </div>
+        <button onclick="roverSearch='';roverFilter='';roverLeadFilter='';roverPage=1;loadRoverData().then(()=>render())" class="text-gray-400 hover:text-gray-600 text-sm px-3 py-2">
+          <i class="fas fa-times mr-1"></i>Clear
+        </button>
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-gray-50">
+            <tr>
+              <th class="px-3 py-2 text-left text-xs font-semibold text-gray-500">Visitor</th>
+              <th class="px-3 py-2 text-left text-xs font-semibold text-gray-500">Contact</th>
+              <th class="px-3 py-2 text-center text-xs font-semibold text-gray-500">Messages</th>
+              <th class="px-3 py-2 text-center text-xs font-semibold text-gray-500">Lead</th>
+              <th class="px-3 py-2 text-left text-xs font-semibold text-gray-500">Summary</th>
+              <th class="px-3 py-2 text-left text-xs font-semibold text-gray-500">Page</th>
+              <th class="px-3 py-2 text-left text-xs font-semibold text-gray-500">Time</th>
+              <th class="px-3 py-2 text-left text-xs font-semibold text-gray-500">Actions</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-50">
+            ${roverConversations.map(c => `
+              <tr class="hover:bg-blue-50/40 transition-colors cursor-pointer" onclick="viewRoverConvo(${c.id})">
+                <td class="px-3 py-2">
+                  <div class="flex items-center gap-2">
+                    <div class="w-7 h-7 ${c.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'} rounded-full flex items-center justify-center text-xs font-bold">
+                      ${c.visitor_name ? c.visitor_name[0].toUpperCase() : (c.status === 'active' ? '●' : '?')}
+                    </div>
+                    <div>
+                      <p class="text-sm font-medium text-gray-800">${c.visitor_name || 'Anonymous'}</p>
+                      ${c.visitor_company ? '<p class="text-xs text-gray-400">' + c.visitor_company + '</p>' : ''}
+                    </div>
+                  </div>
+                </td>
+                <td class="px-3 py-2 text-xs text-gray-500">
+                  ${c.visitor_email ? '<i class="fas fa-envelope text-blue-400 mr-1"></i>' + c.visitor_email : ''}
+                  ${c.visitor_phone ? '<br><i class="fas fa-phone text-green-400 mr-1"></i>' + c.visitor_phone : ''}
+                  ${!c.visitor_email && !c.visitor_phone ? '<span class="text-gray-300">No contact</span>' : ''}
+                </td>
+                <td class="px-3 py-2 text-center">
+                  <span class="inline-flex items-center justify-center w-7 h-7 bg-blue-100 text-blue-700 rounded-full text-xs font-bold">${c.message_count || 0}</span>
+                </td>
+                <td class="px-3 py-2 text-center">
+                  ${roverLeadBadge(c.lead_status)}
+                  ${c.lead_score > 0 ? '<span class="block text-[10px] text-gray-400 mt-0.5">' + c.lead_score + '/100</span>' : ''}
+                </td>
+                <td class="px-3 py-2 text-xs text-gray-600 max-w-[200px] truncate">${c.summary || c.first_user_message || '<span class="text-gray-300">-</span>'}</td>
+                <td class="px-3 py-2 text-xs text-gray-400">${c.page_url || '/'}</td>
+                <td class="px-3 py-2 text-xs text-gray-400">${fmtDateTime(c.last_message_at || c.created_at)}</td>
+                <td class="px-3 py-2">
+                  <div class="flex gap-1" onclick="event.stopPropagation()">
+                    <button onclick="viewRoverConvo(${c.id})" class="p-1 text-gray-400 hover:text-blue-600" title="View"><i class="fas fa-eye"></i></button>
+                    <button onclick="deleteRoverConvo(${c.id})" class="p-1 text-gray-400 hover:text-red-600" title="Delete"><i class="fas fa-trash"></i></button>
+                  </div>
+                </td>
+              </tr>
+            `).join('')}
+            ${roverConversations.length === 0 ? '<tr><td colspan="8" class="px-3 py-12 text-center text-gray-400"><i class="fas fa-robot text-4xl mb-3 block"></i>No conversations yet.<br><span class="text-xs">Rover is live and ready to chat with visitors!</span></td></tr>' : ''}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Pagination -->
+      ${roverTotal > 15 ? `
+        <div class="flex items-center justify-between mt-4 pt-4 border-t">
+          <span class="text-xs text-gray-400">Page ${roverPage} of ${Math.ceil(roverTotal / 15)}</span>
+          <div class="flex gap-2">
+            <button ${roverPage <= 1 ? 'disabled' : ''} onclick="roverPage--;loadRoverData().then(()=>render())" class="px-3 py-1.5 border rounded-lg text-sm ${roverPage <= 1 ? 'text-gray-300' : 'text-gray-600 hover:bg-gray-50'}">Prev</button>
+            <button ${roverPage >= Math.ceil(roverTotal / 15) ? 'disabled' : ''} onclick="roverPage++;loadRoverData().then(()=>render())" class="px-3 py-1.5 border rounded-lg text-sm ${roverPage >= Math.ceil(roverTotal / 15) ? 'text-gray-300' : 'text-gray-600 hover:bg-gray-50'}">Next</button>
+          </div>
+        </div>
+      ` : ''}
+    `)}
+  `;
+}
+
+function roverLeadBadge(status) {
+  const m = {
+    'new': 'bg-gray-100 text-gray-600',
+    'qualified': 'bg-amber-100 text-amber-700',
+    'contacted': 'bg-blue-100 text-blue-700',
+    'converted': 'bg-green-100 text-green-700',
+    'spam': 'bg-red-100 text-red-600'
+  };
+  return '<span class="px-2 py-0.5 ' + (m[status] || m['new']) + ' rounded-full text-[10px] font-bold uppercase">' + (status || 'new') + '</span>';
+}
+
+async function viewRoverConvo(id) {
+  try {
+    const res = await adminFetch('/api/rover/admin/conversations/' + id);
+    if (!res) return;
+    const data = await res.json();
+    roverViewingConvo = data.conversation;
+    roverViewingMessages = data.messages || [];
+    render();
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+function renderRoverConvoDetail() {
+  const c = roverViewingConvo;
+  if (!c) return '';
+
+  return `
+    <div class="mb-4">
+      <button onclick="roverViewingConvo=null;render()" class="text-sky-500 hover:text-sky-600 text-sm font-medium"><i class="fas fa-arrow-left mr-1"></i>Back to All Conversations</button>
+    </div>
+
+    <div class="grid lg:grid-cols-3 gap-6">
+      <!-- Left: Conversation Messages -->
+      <div class="lg:col-span-2">
+        ${section('Conversation #' + c.id, 'fa-comments', `
+          <div class="space-y-3 max-h-[500px] overflow-y-auto pr-2">
+            ${roverViewingMessages.map(m => `
+              <div class="flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}">
+                <div class="${m.role === 'user' ? 'bg-blue-500 text-white rounded-t-xl rounded-bl-xl' : 'bg-gray-100 text-gray-800 rounded-t-xl rounded-br-xl'} px-4 py-3 max-w-[80%]">
+                  <p class="text-sm leading-relaxed">${(m.content || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\\n/g, '<br>')}</p>
+                  <div class="flex items-center gap-2 mt-1">
+                    <span class="text-[10px] ${m.role === 'user' ? 'text-blue-200' : 'text-gray-400'}">${fmtDateTime(m.created_at)}</span>
+                    ${m.tokens_used > 0 ? '<span class="text-[10px] ' + (m.role === 'user' ? 'text-blue-200' : 'text-gray-400') + '">' + m.tokens_used + ' tokens</span>' : ''}
+                    ${m.response_time_ms > 0 ? '<span class="text-[10px] ' + (m.role === 'user' ? 'text-blue-200' : 'text-gray-400') + '">' + m.response_time_ms + 'ms</span>' : ''}
+                  </div>
+                </div>
+              </div>
+            `).join('')}
+            ${roverViewingMessages.length === 0 ? '<p class="text-center text-gray-400 py-8">No messages in this conversation</p>' : ''}
+          </div>
+        `)}
+      </div>
+
+      <!-- Right: Visitor Details & Actions -->
+      <div>
+        ${section('Visitor Info', 'fa-user', `
+          <div class="space-y-3">
+            <div>
+              <p class="text-xs text-gray-400 uppercase font-semibold">Name</p>
+              <p class="text-sm font-medium text-gray-800">${c.visitor_name || '<span class="text-gray-300">Not provided</span>'}</p>
+            </div>
+            <div>
+              <p class="text-xs text-gray-400 uppercase font-semibold">Email</p>
+              <p class="text-sm font-medium text-gray-800">${c.visitor_email ? '<a href="mailto:' + c.visitor_email + '" class="text-blue-600 hover:underline">' + c.visitor_email + '</a>' : '<span class="text-gray-300">Not provided</span>'}</p>
+            </div>
+            <div>
+              <p class="text-xs text-gray-400 uppercase font-semibold">Phone</p>
+              <p class="text-sm font-medium text-gray-800">${c.visitor_phone || '<span class="text-gray-300">Not provided</span>'}</p>
+            </div>
+            <div>
+              <p class="text-xs text-gray-400 uppercase font-semibold">Company</p>
+              <p class="text-sm font-medium text-gray-800">${c.visitor_company || '<span class="text-gray-300">Not provided</span>'}</p>
+            </div>
+            <div class="pt-2 border-t">
+              <p class="text-xs text-gray-400 uppercase font-semibold">Page</p>
+              <p class="text-sm text-gray-600">${c.page_url || '/'}</p>
+            </div>
+            <div>
+              <p class="text-xs text-gray-400 uppercase font-semibold">Status</p>
+              <p class="text-sm">${roverLeadBadge(c.lead_status)} <span class="text-gray-400 text-xs ml-1">Score: ${c.lead_score || 0}/100</span></p>
+            </div>
+            <div>
+              <p class="text-xs text-gray-400 uppercase font-semibold">Started</p>
+              <p class="text-sm text-gray-600">${fmtDateTime(c.created_at)}</p>
+            </div>
+            <div>
+              <p class="text-xs text-gray-400 uppercase font-semibold">Last Message</p>
+              <p class="text-sm text-gray-600">${fmtDateTime(c.last_message_at)}</p>
+            </div>
+            ${c.summary ? '<div class="pt-2 border-t"><p class="text-xs text-gray-400 uppercase font-semibold">AI Summary</p><p class="text-sm text-gray-600 italic">' + c.summary + '</p></div>' : ''}
+          </div>
+        `)}
+
+        ${section('Admin Actions', 'fa-cog', `
+          <div class="space-y-3">
+            <div>
+              <label class="block text-xs font-semibold text-gray-500 mb-1">Lead Status</label>
+              <select id="rover-lead-status" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+                <option value="new" ${c.lead_status==='new'?'selected':''}>New</option>
+                <option value="qualified" ${c.lead_status==='qualified'?'selected':''}>Qualified</option>
+                <option value="contacted" ${c.lead_status==='contacted'?'selected':''}>Contacted</option>
+                <option value="converted" ${c.lead_status==='converted'?'selected':''}>Converted</option>
+                <option value="spam" ${c.lead_status==='spam'?'selected':''}>Spam</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-gray-500 mb-1">Tags</label>
+              <input type="text" id="rover-tags" value="${(c.tags||'').replace(/"/g,'&quot;')}" placeholder="pricing, estimate, urgent" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-gray-500 mb-1">Admin Notes</label>
+              <textarea id="rover-notes" rows="3" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="Add your notes...">${(c.admin_notes||'').replace(/</g,'&lt;')}</textarea>
+            </div>
+            <button onclick="saveRoverConvoUpdate(${c.id})" class="w-full py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700">
+              <i class="fas fa-save mr-1"></i>Save Changes
+            </button>
+          </div>
+        `)}
+      </div>
+    </div>
+  `;
+}
+
+async function saveRoverConvoUpdate(id) {
+  try {
+    const res = await fetch('/api/rover/admin/conversations/' + id, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...adminHeaders() },
+      body: JSON.stringify({
+        lead_status: document.getElementById('rover-lead-status')?.value,
+        tags: document.getElementById('rover-tags')?.value,
+        admin_notes: document.getElementById('rover-notes')?.value
+      })
+    });
+    if (res.ok) {
+      alert('Saved!');
+      // Refresh
+      roverStats = null;
+      viewRoverConvo(id);
+    } else {
+      alert('Failed to save');
+    }
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function deleteRoverConvo(id) {
+  if (!confirm('Delete this conversation permanently?')) return;
+  try {
+    const res = await fetch('/api/rover/admin/conversations/' + id, {
+      method: 'DELETE',
+      headers: adminHeaders()
+    });
+    if (res.ok) {
+      roverStats = null;
+      roverViewingConvo = null;
+      await loadRoverData();
+      render();
+    } else {
+      alert('Failed to delete');
     }
   } catch(e) { alert('Error: ' + e.message); }
 }
