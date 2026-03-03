@@ -45,7 +45,15 @@
   function api(method, path, body) {
     var opts = { method: method, headers: authHeaders() };
     if (body) opts.body = JSON.stringify(body);
-    return fetch('/api/d2d' + path, opts).then(function(r) { return r.json(); });
+    return fetch('/api/d2d' + path, opts).then(function(r) {
+      if (!r.ok) {
+        console.error('[D2D] API error:', method, path, 'status:', r.status);
+        return r.text().then(function(txt) {
+          try { return JSON.parse(txt); } catch(e) { return { error: 'Server error (' + r.status + '): ' + txt.substring(0, 100) }; }
+        });
+      }
+      return r.json();
+    });
   }
 
   // --- Toast ---
@@ -791,8 +799,9 @@
           btn.disabled = false;
           btn.innerHTML = '<i class="fas fa-save mr-1"></i>Save Turf';
         }
-      }).catch(function() {
-        toast('Network error', 'error');
+      }).catch(function(err) {
+        console.error('[D2D] Turf save error:', err);
+        toast('Network error: ' + (err.message || 'Unknown'), 'error');
         btn.disabled = false;
         btn.innerHTML = '<i class="fas fa-save mr-1"></i>Save Turf';
       });
@@ -920,8 +929,9 @@
           btn.disabled = false;
           btn.innerHTML = '<i class="fas fa-map-pin mr-1"></i>Save Pin';
         }
-      }).catch(function() {
-        toast('Network error', 'error');
+      }).catch(function(err) {
+        console.error('[D2D] Pin save error:', err);
+        toast('Network error: ' + (err.message || 'Unknown'), 'error');
         btn.disabled = false;
         btn.innerHTML = '<i class="fas fa-map-pin mr-1"></i>Save Pin';
       });
