@@ -611,6 +611,22 @@ adminRoutes.post('/init-db', async (c) => {
       'CREATE INDEX IF NOT EXISTS idx_crm_job_checklist_job ON crm_job_checklist(job_id)'
     ]
 
+    // Migration 0013: Email verification codes table
+    await c.env.DB.prepare(`
+      CREATE TABLE IF NOT EXISTS email_verification_codes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email TEXT NOT NULL,
+        code TEXT NOT NULL,
+        verification_token TEXT,
+        used INTEGER DEFAULT 0,
+        verified_at TEXT,
+        expires_at TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now'))
+      )
+    `).run()
+    try { await c.env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_verification_codes_email ON email_verification_codes(email)').run() } catch(e) {}
+    try { await c.env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_verification_codes_token ON email_verification_codes(verification_token)').run() } catch(e) {}
+
     // Migration 0012: Proposal view tracking columns
     const proposalTrackingCols = [
       'view_count INTEGER DEFAULT 0',

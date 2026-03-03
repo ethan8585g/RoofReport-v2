@@ -75,28 +75,56 @@ crmRoutes.get('/customers/:id', async (c) => {
 crmRoutes.post('/customers', async (c) => {
   const ownerId = await getOwnerId(c)
   if (!ownerId) return c.json({ error: 'Not authenticated' }, 401)
-  const { name, email, phone, company, address, city, province, postal_code, notes, tags } = await c.req.json()
-  if (!name) return c.json({ error: 'Customer name is required' }, 400)
+  try {
+    const { name, email, phone, company, address, city, province, postal_code, notes, tags } = await c.req.json()
+    if (!name) return c.json({ error: 'Customer name is required' }, 400)
 
-  const result = await c.env.DB.prepare(`
-    INSERT INTO crm_customers (owner_id, name, email, phone, company, address, city, province, postal_code, notes, tags)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).bind(ownerId, name, email || null, phone || null, company || null, address || null, city || null, province || null, postal_code || null, notes || null, tags || null).run()
+    const result = await c.env.DB.prepare(`
+      INSERT INTO crm_customers (owner_id, name, email, phone, company, address, city, province, postal_code, notes, tags)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(ownerId, name, email || null, phone || null, company || null, address || null, city || null, province || null, postal_code || null, notes || null, tags || null).run()
 
-  return c.json({ success: true, id: result.meta.last_row_id })
+    // Verify the insert succeeded by reading back
+    if (!result.meta.last_row_id) {
+      return c.json({ error: 'Database insert failed — no row created. Please try again.' }, 500)
+    }
+
+    const saved = await c.env.DB.prepare(
+      'SELECT id, name, email FROM crm_customers WHERE id = ? AND owner_id = ?'
+    ).bind(result.meta.last_row_id, ownerId).first()
+
+    if (!saved) {
+      return c.json({ error: 'Data was not persisted. Please contact support.' }, 500)
+    }
+
+    return c.json({ success: true, id: result.meta.last_row_id, verified: true })
+  } catch (err: any) {
+    console.error('[CRM] Customer create failed:', err.message)
+    return c.json({ error: 'Failed to save customer: ' + err.message }, 500)
+  }
 })
 
 // UPDATE customer
 crmRoutes.put('/customers/:id', async (c) => {
   const ownerId = await getOwnerId(c)
   if (!ownerId) return c.json({ error: 'Not authenticated' }, 401)
-  const id = c.req.param('id')
-  const body = await c.req.json()
-  await c.env.DB.prepare(`
-    UPDATE crm_customers SET name=?, email=?, phone=?, company=?, address=?, city=?, province=?, postal_code=?, notes=?, tags=?, status=?, updated_at=datetime('now')
-    WHERE id = ? AND owner_id = ?
-  `).bind(body.name, body.email || null, body.phone || null, body.company || null, body.address || null, body.city || null, body.province || null, body.postal_code || null, body.notes || null, body.tags || null, body.status || 'active', id, ownerId).run()
-  return c.json({ success: true })
+  try {
+    const id = c.req.param('id')
+    const body = await c.req.json()
+    const result = await c.env.DB.prepare(`
+      UPDATE crm_customers SET name=?, email=?, phone=?, company=?, address=?, city=?, province=?, postal_code=?, notes=?, tags=?, status=?, updated_at=datetime('now')
+      WHERE id = ? AND owner_id = ?
+    `).bind(body.name, body.email || null, body.phone || null, body.company || null, body.address || null, body.city || null, body.province || null, body.postal_code || null, body.notes || null, body.tags || null, body.status || 'active', id, ownerId).run()
+
+    if (!result.meta.changes || result.meta.changes === 0) {
+      return c.json({ error: 'No customer found or no changes made.' }, 404)
+    }
+
+    return c.json({ success: true, verified: true })
+  } catch (err: any) {
+    console.error('[CRM] Customer update failed:', err.message)
+    return c.json({ error: 'Failed to update customer: ' + err.message }, 500)
+  }
 })
 
 // DELETE customer
@@ -152,33 +180,42 @@ crmRoutes.get('/invoices/:id', async (c) => {
 crmRoutes.post('/invoices', async (c) => {
   const ownerId = await getOwnerId(c)
   if (!ownerId) return c.json({ error: 'Not authenticated' }, 401)
-  const { crm_customer_id, items, due_date, notes, terms, tax_rate } = await c.req.json()
-  if (!crm_customer_id) return c.json({ error: 'Customer is required' }, 400)
+  try {
+    const { crm_customer_id, items, due_date, notes, terms, tax_rate } = await c.req.json()
+    if (!crm_customer_id) return c.json({ error: 'Customer is required' }, 400)
 
-  const taxR = tax_rate || 5.0
-  let subtotal = 0
-  if (items && items.length > 0) { for (const it of items) subtotal += (it.quantity || 1) * (it.unit_price || 0) }
-  // taxR is a percentage (e.g. 5.0 = 5% GST) — proper rounding to cents
-  const taxAmt = Math.round(subtotal * (taxR / 100) * 100) / 100
-  const total = Math.round((subtotal + taxAmt) * 100) / 100
-  const invNum = genInvoiceNum()
+    const taxR = tax_rate || 5.0
+    let subtotal = 0
+    if (items && items.length > 0) { for (const it of items) subtotal += (it.quantity || 1) * (it.unit_price || 0) }
+    // taxR is a percentage (e.g. 5.0 = 5% GST) — proper rounding to cents
+    const taxAmt = Math.round(subtotal * (taxR / 100) * 100) / 100
+    const total = Math.round((subtotal + taxAmt) * 100) / 100
+    const invNum = genInvoiceNum()
 
-  const result = await c.env.DB.prepare(`
-    INSERT INTO crm_invoices (owner_id, crm_customer_id, invoice_number, subtotal, tax_rate, tax_amount, total, due_date, notes, terms, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')
-  `).bind(ownerId, crm_customer_id, invNum, subtotal, taxR, taxAmt, total, due_date || null, notes || null, terms || 'Payment due within 30 days.').run()
+    const result = await c.env.DB.prepare(`
+      INSERT INTO crm_invoices (owner_id, crm_customer_id, invoice_number, subtotal, tax_rate, tax_amount, total, due_date, notes, terms, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')
+    `).bind(ownerId, crm_customer_id, invNum, subtotal, taxR, taxAmt, total, due_date || null, notes || null, terms || 'Payment due within 30 days.').run()
 
-  const invoiceId = result.meta.last_row_id
-  if (items && items.length > 0) {
-    for (let i = 0; i < items.length; i++) {
-      const it = items[i]
-      const amt = (it.quantity || 1) * (it.unit_price || 0)
-      await c.env.DB.prepare(
-        'INSERT INTO crm_invoice_items (invoice_id, description, quantity, unit_price, amount, sort_order) VALUES (?,?,?,?,?,?)'
-      ).bind(invoiceId, it.description || '', it.quantity || 1, it.unit_price || 0, amt, i).run()
+    const invoiceId = result.meta.last_row_id
+    if (!invoiceId) {
+      return c.json({ error: 'Failed to create invoice — database write failed.' }, 500)
     }
+
+    if (items && items.length > 0) {
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i]
+        const amt = (it.quantity || 1) * (it.unit_price || 0)
+        await c.env.DB.prepare(
+          'INSERT INTO crm_invoice_items (invoice_id, description, quantity, unit_price, amount, sort_order) VALUES (?,?,?,?,?,?)'
+        ).bind(invoiceId, it.description || '', it.quantity || 1, it.unit_price || 0, amt, i).run()
+      }
+    }
+    return c.json({ success: true, id: invoiceId, invoice_number: invNum })
+  } catch (err: any) {
+    console.error('[CRM] Invoice create failed:', err.message)
+    return c.json({ error: 'Failed to save invoice: ' + err.message }, 500)
   }
-  return c.json({ success: true, id: invoiceId, invoice_number: invNum })
 })
 
 crmRoutes.put('/invoices/:id', async (c) => {

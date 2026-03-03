@@ -1170,26 +1170,60 @@ function getCustomerLoginHTML() {
           </button>
         </div>
 
-        <!-- Register Form -->
+        <!-- Register Form - Step 1: Email Verification -->
         <div id="custRegForm" class="hidden">
-          <div class="space-y-3">
-            <div class="grid grid-cols-2 gap-3">
-              <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">Full Name *</label>
-                <input type="text" id="custRegName" placeholder="John Smith" class="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500">
+          <!-- Step 1: Verify Email -->
+          <div id="regStep1">
+            <div class="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-xl">
+              <p class="text-sm text-blue-800"><i class="fas fa-shield-alt mr-1"></i> <strong>Email verification required.</strong> We'll send a 6-digit code to confirm your email.</p>
+            </div>
+            <div class="space-y-3">
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 mb-1">Full Name *</label>
+                  <input type="text" id="custRegName" placeholder="John Smith" class="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500">
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 mb-1">Company</label>
+                  <input type="text" id="custRegCompany" placeholder="Smith Roofing" class="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500">
+                </div>
               </div>
               <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">Company</label>
-                <input type="text" id="custRegCompany" placeholder="Smith Roofing" class="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500">
+                <label class="block text-sm font-medium text-gray-700 mb-1">Email *</label>
+                <div class="flex gap-2">
+                  <input type="email" id="custRegEmail" placeholder="you@company.com" class="flex-1 px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500">
+                  <button onclick="sendVerifyCode()" id="sendCodeBtn" class="px-4 py-2.5 bg-sky-600 hover:bg-sky-700 text-white font-semibold rounded-xl text-sm whitespace-nowrap transition-all">
+                    <i class="fas fa-paper-plane mr-1"></i>Send Code
+                  </button>
+                </div>
               </div>
             </div>
-            <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">Email *</label>
-              <input type="email" id="custRegEmail" placeholder="you@company.com" class="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500">
+            <div id="regStep1Error" class="hidden mt-3 p-3 bg-red-50 text-red-700 rounded-lg text-sm"></div>
+            <div id="regStep1Success" class="hidden mt-3 p-3 bg-green-50 text-green-700 rounded-lg text-sm"></div>
+          </div>
+
+          <!-- Step 2: Enter Code + Complete Registration (shown after code sent) -->
+          <div id="regStep2" class="hidden">
+            <div class="mb-4 p-3 bg-green-50 border border-green-200 rounded-xl">
+              <p class="text-sm text-green-800"><i class="fas fa-envelope-open-text mr-1"></i> Code sent to <strong id="regSentEmail"></strong>. Enter it below.</p>
             </div>
-            <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">Phone</label>
-              <input type="tel" id="custRegPhone" placeholder="(780) 555-1234" class="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500">
+            <div class="space-y-3">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Verification Code *</label>
+                <div class="flex gap-2 items-center">
+                  <input type="text" id="custRegCode" placeholder="123456" maxlength="6" class="w-40 px-4 py-2.5 border border-gray-300 rounded-xl text-sm text-center font-mono text-lg tracking-widest focus:ring-2 focus:ring-brand-500" oninput="this.value=this.value.replace(/[^0-9]/g,'')">
+                  <button onclick="verifyCodeStep()" id="verifyCodeBtn" class="px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-xl text-sm transition-all">
+                    <i class="fas fa-check mr-1"></i>Verify
+                  </button>
+                  <button onclick="sendVerifyCode()" class="px-3 py-2.5 text-sky-600 hover:text-sky-800 text-sm font-medium">Resend</button>
+                </div>
+              </div>
+              <div id="regCodeVerified" class="hidden p-3 bg-green-100 border border-green-300 rounded-xl">
+                <p class="text-sm text-green-800 font-semibold"><i class="fas fa-check-circle mr-1"></i> Email verified! Complete your details below.</p>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+                <input type="tel" id="custRegPhone" placeholder="(780) 555-1234" class="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500">
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">Password *</label>
@@ -1201,9 +1235,13 @@ function getCustomerLoginHTML() {
             </div>
           </div>
           <div id="custRegError" class="hidden mt-4 p-3 bg-red-50 text-red-700 rounded-lg text-sm"></div>
-          <button onclick="doCustRegister()" class="w-full mt-5 py-3 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-xl transition-all hover:scale-[1.02] shadow-lg shadow-brand-500/25">
+          <div id="regStep2Fields" class="hidden">
+          <button onclick="doCustRegister()" id="regSubmitBtn" class="w-full mt-5 py-3 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-xl transition-all hover:scale-[1.02] shadow-lg shadow-brand-500/25 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
             <i class="fas fa-user-plus mr-2"></i>Create Account
           </button>
+          </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -1265,6 +1303,82 @@ function getCustomerLoginHTML() {
       } catch(e) { err.textContent = 'Network error.'; err.classList.remove('hidden'); }
     }
 
+    var _regVerificationToken = null;
+
+    async function sendVerifyCode() {
+      const email = document.getElementById('custRegEmail').value.trim();
+      const name = document.getElementById('custRegName').value.trim();
+      const err = document.getElementById('regStep1Error');
+      const suc = document.getElementById('regStep1Success');
+      const btn = document.getElementById('sendCodeBtn');
+      err.classList.add('hidden'); suc.classList.add('hidden');
+
+      if (!name) { err.textContent = 'Please enter your name first.'; err.classList.remove('hidden'); return; }
+      if (!email) { err.textContent = 'Please enter your email address.'; err.classList.remove('hidden'); return; }
+      if (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) { err.textContent = 'Please enter a valid email address.'; err.classList.remove('hidden'); return; }
+
+      btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>Sending...';
+      try {
+        const res = await fetch('/api/customer/send-verification', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          suc.textContent = data.message || 'Code sent! Check your inbox.';
+          suc.classList.remove('hidden');
+          document.getElementById('regStep2').classList.remove('hidden');
+          document.getElementById('regSentEmail').textContent = email;
+          document.getElementById('custRegCode').focus();
+          // Disable email field after sending
+          document.getElementById('custRegEmail').readOnly = true;
+          document.getElementById('custRegEmail').classList.add('bg-gray-100');
+          // Start 60s cooldown
+          var cd = 60;
+          btn.disabled = true;
+          var iv = setInterval(function() { cd--; btn.innerHTML = '<i class=\"fas fa-clock mr-1\"></i>' + cd + 's'; if (cd <= 0) { clearInterval(iv); btn.disabled = false; btn.innerHTML = '<i class=\"fas fa-paper-plane mr-1\"></i>Resend'; } }, 1000);
+        } else {
+          err.textContent = data.error || 'Failed to send code.';
+          err.classList.remove('hidden');
+          btn.disabled = false; btn.innerHTML = '<i class="fas fa-paper-plane mr-1"></i>Send Code';
+        }
+      } catch(e) { err.textContent = 'Network error. Please try again.'; err.classList.remove('hidden'); btn.disabled = false; btn.innerHTML = '<i class="fas fa-paper-plane mr-1"></i>Send Code'; }
+    }
+
+    async function verifyCodeStep() {
+      const email = document.getElementById('custRegEmail').value.trim();
+      const code = document.getElementById('custRegCode').value.trim();
+      const err = document.getElementById('custRegError');
+      const btn = document.getElementById('verifyCodeBtn');
+      err.classList.add('hidden');
+
+      if (!code || code.length !== 6) { err.textContent = 'Please enter the 6-digit code.'; err.classList.remove('hidden'); return; }
+
+      btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>Verifying...';
+      try {
+        const res = await fetch('/api/customer/verify-code', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, code })
+        });
+        const data = await res.json();
+        if (res.ok && data.verified) {
+          _regVerificationToken = data.verification_token;
+          document.getElementById('regCodeVerified').classList.remove('hidden');
+          document.getElementById('regStep2Fields').classList.remove('hidden');
+          document.getElementById('regSubmitBtn').disabled = false;
+          document.getElementById('custRegCode').readOnly = true;
+          document.getElementById('custRegCode').classList.add('bg-green-50', 'border-green-400');
+          btn.innerHTML = '<i class="fas fa-check mr-1"></i>Verified'; btn.disabled = true;
+          btn.classList.remove('bg-green-600', 'hover:bg-green-700');
+          btn.classList.add('bg-green-400', 'cursor-default');
+        } else {
+          err.textContent = data.error || 'Invalid code. Please try again.';
+          err.classList.remove('hidden');
+          btn.disabled = false; btn.innerHTML = '<i class="fas fa-check mr-1"></i>Verify';
+        }
+      } catch(e) { err.textContent = 'Network error.'; err.classList.remove('hidden'); btn.disabled = false; btn.innerHTML = '<i class="fas fa-check mr-1"></i>Verify'; }
+    }
+
     async function doCustRegister() {
       const name = document.getElementById('custRegName').value.trim();
       const company = document.getElementById('custRegCompany').value.trim();
@@ -1277,11 +1391,12 @@ function getCustomerLoginHTML() {
       if (!name || !email || !password) { err.textContent = 'Name, email, and password required.'; err.classList.remove('hidden'); return; }
       if (password.length < 6) { err.textContent = 'Password must be at least 6 characters.'; err.classList.remove('hidden'); return; }
       if (password !== confirm) { err.textContent = 'Passwords do not match.'; err.classList.remove('hidden'); return; }
+      if (!_regVerificationToken) { err.textContent = 'Please verify your email first.'; err.classList.remove('hidden'); return; }
       try {
         const res = await fetch('/api/customer/register', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password, name, phone, company_name: company })
+          body: JSON.stringify({ email, password, name, phone, company_name: company, verification_token: _regVerificationToken })
         });
         const data = await res.json();
         if (res.ok && data.success) {

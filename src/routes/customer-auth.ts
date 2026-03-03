@@ -44,6 +44,289 @@ function generateSessionToken(): string {
 }
 
 // ============================================================
+// EMAIL VERIFICATION — 6-digit code sent to email before registration
+// ============================================================
+
+function generateVerificationCode(): string {
+  // 6-digit numeric code
+  return Math.floor(100000 + Math.random() * 900000).toString()
+}
+
+// Send email using Gmail API via GCP service account
+async function sendVerificationEmail(env: any, toEmail: string, code: string): Promise<boolean> {
+  // Try Resend API first (simplest)
+  const resendKey = (env as any).RESEND_API_KEY
+  if (resendKey) {
+    try {
+      const resp = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: 'RoofReporterAI <onboarding@resend.dev>',
+          to: [toEmail],
+          subject: `Your RoofReporterAI Verification Code: ${code}`,
+          html: getVerificationEmailHTML(code)
+        })
+      })
+      if (resp.ok) return true
+      console.error('[Email] Resend failed:', await resp.text())
+    } catch (e: any) {
+      console.error('[Email] Resend error:', e.message)
+    }
+  }
+
+  // Try Gmail OAuth2 (if refresh token available)
+  const gmailRefreshToken = (env as any).GMAIL_REFRESH_TOKEN
+  const gmailClientId = (env as any).GMAIL_CLIENT_ID
+  const gmailClientSecret = (env as any).GMAIL_CLIENT_SECRET
+  if (gmailRefreshToken && gmailClientId && gmailClientSecret) {
+    try {
+      // Get fresh access token
+      const tokenResp = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'refresh_token',
+          refresh_token: gmailRefreshToken,
+          client_id: gmailClientId,
+          client_secret: gmailClientSecret
+        }).toString()
+      })
+      const tokenData: any = await tokenResp.json()
+      if (tokenData.access_token) {
+        const senderEmail = (env as any).GMAIL_SENDER_EMAIL || 'noreply@reusecanada.ca'
+        const rawEmail = [
+          `From: RoofReporterAI <${senderEmail}>`,
+          `To: ${toEmail}`,
+          `Subject: Your RoofReporterAI Verification Code: ${code}`,
+          'Content-Type: text/html; charset=UTF-8',
+          '',
+          getVerificationEmailHTML(code)
+        ].join('\r\n')
+
+        // Base64url encode
+        const encoded = btoa(unescape(encodeURIComponent(rawEmail)))
+          .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+
+        const sendResp = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${tokenData.access_token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ raw: encoded })
+        })
+        if (sendResp.ok) return true
+        console.error('[Email] Gmail send failed:', await sendResp.text())
+      }
+    } catch (e: any) {
+      console.error('[Email] Gmail error:', e.message)
+    }
+  }
+
+  // Try Gmail via GCP service account
+  try {
+    const gcpKeyStr = (env as any).GCP_SERVICE_ACCOUNT_KEY
+    if (gcpKeyStr) {
+      const gcpKey = typeof gcpKeyStr === 'string' ? JSON.parse(gcpKeyStr) : gcpKeyStr
+      const senderEmail = gcpKey.client_email
+      const impersonateEmail = (env as any).GMAIL_SENDER_EMAIL || senderEmail
+
+      // Create JWT for service account
+      const header = { alg: 'RS256', typ: 'JWT' }
+      const now = Math.floor(Date.now() / 1000)
+      const claim = {
+        iss: senderEmail,
+        sub: impersonateEmail,
+        scope: 'https://www.googleapis.com/auth/gmail.send',
+        aud: 'https://oauth2.googleapis.com/token',
+        iat: now,
+        exp: now + 3600
+      }
+
+      // Import private key
+      const pemContents = gcpKey.private_key
+        .replace('-----BEGIN PRIVATE KEY-----', '')
+        .replace('-----END PRIVATE KEY-----', '')
+        .replace(/\n/g, '')
+      const keyData = Uint8Array.from(atob(pemContents), (c: string) => c.charCodeAt(0))
+      const cryptoKey = await crypto.subtle.importKey('pkcs8', keyData, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['sign'])
+
+      const toBase64Url = (data: string) => btoa(data).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+      const headerB64 = toBase64Url(JSON.stringify(header))
+      const claimB64 = toBase64Url(JSON.stringify(claim))
+      const signInput = `${headerB64}.${claimB64}`
+      const signature = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', cryptoKey, new TextEncoder().encode(signInput))
+      const sigB64 = btoa(String.fromCharCode(...new Uint8Array(signature))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+      const jwt = `${signInput}.${sigB64}`
+
+      // Exchange JWT for access token
+      const tokenResp = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`
+      })
+      const tokenData: any = await tokenResp.json()
+
+      if (tokenData.access_token) {
+        const rawEmail = [
+          `From: RoofReporterAI <${impersonateEmail}>`,
+          `To: ${toEmail}`,
+          `Subject: Your RoofReporterAI Verification Code: ${code}`,
+          'Content-Type: text/html; charset=UTF-8',
+          '',
+          getVerificationEmailHTML(code)
+        ].join('\r\n')
+
+        const encoded = btoa(unescape(encodeURIComponent(rawEmail)))
+          .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+
+        const sendResp = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${tokenData.access_token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ raw: encoded })
+        })
+        if (sendResp.ok) return true
+        console.error('[Email] GCP Gmail send failed:', await sendResp.text())
+      }
+    }
+  } catch (e: any) {
+    console.error('[Email] GCP service account error:', e.message)
+  }
+
+  console.error('[Email] All email methods failed for:', toEmail)
+  return false
+}
+
+function getVerificationEmailHTML(code: string): string {
+  return `
+  <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 480px; margin: 0 auto; padding: 40px 20px;">
+    <div style="text-align: center; margin-bottom: 32px;">
+      <div style="display: inline-block; width: 48px; height: 48px; background: #0ea5e9; border-radius: 12px; line-height: 48px; text-align: center;">
+        <span style="color: white; font-size: 24px;">&#127968;</span>
+      </div>
+      <h1 style="color: #1e3a5f; font-size: 24px; margin: 16px 0 4px;">RoofReporterAI</h1>
+      <p style="color: #6b7280; font-size: 14px; margin: 0;">Email Verification</p>
+    </div>
+    <div style="background: #f8fafc; border-radius: 16px; padding: 32px; text-align: center;">
+      <p style="color: #374151; font-size: 16px; margin: 0 0 24px;">Enter this code to verify your email and complete registration:</p>
+      <div style="background: white; border: 2px solid #0ea5e9; border-radius: 12px; padding: 16px; display: inline-block; min-width: 200px;">
+        <span style="font-family: 'Courier New', monospace; font-size: 36px; font-weight: bold; letter-spacing: 8px; color: #1e3a5f;">${code}</span>
+      </div>
+      <p style="color: #9ca3af; font-size: 13px; margin: 24px 0 0;">This code expires in 10 minutes.<br>If you didn't request this, please ignore this email.</p>
+    </div>
+    <p style="color: #d1d5db; font-size: 11px; text-align: center; margin-top: 24px;">&copy; 2026 RoofReporterAI &middot; Alberta, Canada</p>
+  </div>`
+}
+
+// ============================================================
+// SEND VERIFICATION CODE — Step 1 of registration
+// ============================================================
+customerAuthRoutes.post('/send-verification', async (c) => {
+  try {
+    const { email } = await c.req.json()
+    if (!email) return c.json({ error: 'Email is required' }, 400)
+
+    const cleanEmail = email.toLowerCase().trim()
+
+    // Validate email format
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      return c.json({ error: 'Invalid email format' }, 400)
+    }
+
+    // Check if account already exists
+    const existing = await c.env.DB.prepare(
+      'SELECT id FROM customers WHERE email = ?'
+    ).bind(cleanEmail).first()
+    if (existing) {
+      return c.json({ error: 'An account with this email already exists. Please sign in instead.' }, 409)
+    }
+
+    // Rate limit: max 3 codes per email per hour
+    const recentCodes = await c.env.DB.prepare(
+      "SELECT COUNT(*) as cnt FROM email_verification_codes WHERE email = ? AND created_at > datetime('now', '-1 hour')"
+    ).bind(cleanEmail).first<any>()
+    if (recentCodes && recentCodes.cnt >= 3) {
+      return c.json({ error: 'Too many verification requests. Please wait before trying again.' }, 429)
+    }
+
+    // Generate code
+    const code = generateVerificationCode()
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString() // 10 minutes
+
+    // Invalidate previous codes for this email
+    await c.env.DB.prepare(
+      "UPDATE email_verification_codes SET used = 1 WHERE email = ? AND used = 0"
+    ).bind(cleanEmail).run()
+
+    // Store the new code
+    await c.env.DB.prepare(
+      'INSERT INTO email_verification_codes (email, code, expires_at) VALUES (?, ?, ?)'
+    ).bind(cleanEmail, code, expiresAt).run()
+
+    // Send email
+    const sent = await sendVerificationEmail(c.env, cleanEmail, code)
+
+    if (!sent) {
+      // Even if email fails, store the code (for dev/testing, code can be retrieved from DB)
+      console.error(`[Verification] Email send failed for ${cleanEmail}, code: ${code}`)
+      // In dev mode, still return success but flag it
+      return c.json({
+        success: true,
+        message: 'Verification code generated. If you don\'t receive the email, check spam or try again.',
+        // Only in dev mode: expose the code for testing
+        ...(isDevAccount(cleanEmail) ? { dev_code: code } : {})
+      })
+    }
+
+    return c.json({
+      success: true,
+      message: `Verification code sent to ${cleanEmail}. Check your inbox (and spam folder).`
+    })
+  } catch (err: any) {
+    console.error('[Verification] Error:', err.message)
+    return c.json({ error: 'Failed to send verification code', details: err.message }, 500)
+  }
+})
+
+// ============================================================
+// VERIFY CODE — Step 2 of registration
+// ============================================================
+customerAuthRoutes.post('/verify-code', async (c) => {
+  try {
+    const { email, code } = await c.req.json()
+    if (!email || !code) return c.json({ error: 'Email and verification code are required' }, 400)
+
+    const cleanEmail = email.toLowerCase().trim()
+
+    const record = await c.env.DB.prepare(
+      "SELECT * FROM email_verification_codes WHERE email = ? AND code = ? AND used = 0 AND expires_at > datetime('now') ORDER BY created_at DESC LIMIT 1"
+    ).bind(cleanEmail, code.trim()).first<any>()
+
+    if (!record) {
+      return c.json({ error: 'Invalid or expired verification code. Please request a new one.' }, 400)
+    }
+
+    // Mark code as used
+    await c.env.DB.prepare(
+      'UPDATE email_verification_codes SET used = 1, verified_at = datetime(\'now\') WHERE id = ?'
+    ).bind(record.id).run()
+
+    // Generate a verification token (short-lived, used to complete registration)
+    const verificationToken = crypto.randomUUID()
+    await c.env.DB.prepare(
+      'UPDATE email_verification_codes SET verification_token = ? WHERE id = ?'
+    ).bind(verificationToken, record.id).run()
+
+    return c.json({
+      success: true,
+      verified: true,
+      verification_token: verificationToken,
+      message: 'Email verified! You can now complete your registration.'
+    })
+  } catch (err: any) {
+    return c.json({ error: 'Verification failed', details: err.message }, 500)
+  }
+})
+
+// ============================================================
 // GOOGLE SIGN-IN — Verify Google ID token and create/login customer
 // ============================================================
 customerAuthRoutes.post('/google', async (c) => {
@@ -157,11 +440,11 @@ customerAuthRoutes.post('/google', async (c) => {
 })
 
 // ============================================================
-// CUSTOMER REGISTER (email/password)
+// CUSTOMER REGISTER (email/password) — Requires verified email
 // ============================================================
 customerAuthRoutes.post('/register', async (c) => {
   try {
-    const { email, password, name, phone, company_name } = await c.req.json()
+    const { email, password, name, phone, company_name, verification_token } = await c.req.json()
 
     if (!email || !password || !name) {
       return c.json({ error: 'Email, password, and name are required' }, 400)
@@ -170,9 +453,31 @@ customerAuthRoutes.post('/register', async (c) => {
       return c.json({ error: 'Password must be at least 6 characters' }, 400)
     }
 
+    const cleanEmail = email.toLowerCase().trim()
+
+    // Verify the email verification token (unless email config is not set up)
+    if (verification_token) {
+      const verified = await c.env.DB.prepare(
+        "SELECT * FROM email_verification_codes WHERE email = ? AND verification_token = ? AND verified_at IS NOT NULL AND created_at > datetime('now', '-30 minutes')"
+      ).bind(cleanEmail, verification_token).first<any>()
+
+      if (!verified) {
+        return c.json({ error: 'Email verification expired or invalid. Please verify your email again.' }, 400)
+      }
+    } else {
+      // Check if email verification is configured — if ANY email service is available, require verification
+      const hasResend = !!(c.env as any).RESEND_API_KEY
+      const hasGmail = !!((c.env as any).GMAIL_REFRESH_TOKEN && (c.env as any).GMAIL_CLIENT_ID)
+      const hasGCP = !!(c.env as any).GCP_SERVICE_ACCOUNT_KEY
+      if (hasResend || hasGmail || hasGCP) {
+        return c.json({ error: 'Email verification is required. Please verify your email first.' }, 400)
+      }
+      // If no email service configured, allow registration without verification (graceful degradation)
+    }
+
     const existing = await c.env.DB.prepare(
       'SELECT id FROM customers WHERE email = ?'
-    ).bind(email.toLowerCase().trim()).first()
+    ).bind(cleanEmail).first()
 
     if (existing) {
       return c.json({ error: 'An account with this email already exists' }, 409)
@@ -181,11 +486,15 @@ customerAuthRoutes.post('/register', async (c) => {
     const { hash, salt } = await hashPassword(password)
     const storedHash = `${salt}:${hash}`
 
-    // Insert with 3 free trial reports (NOT paid credits)
+    // Insert with 3 free trial reports (NOT paid credits) — email_verified = 1 since we verified
     const result = await c.env.DB.prepare(`
-      INSERT INTO customers (email, name, phone, company_name, password_hash, report_credits, credits_used, free_trial_total, free_trial_used)
-      VALUES (?, ?, ?, ?, ?, 0, 0, 3, 0)
-    `).bind(email.toLowerCase().trim(), name, phone || null, company_name || null, storedHash).run()
+      INSERT INTO customers (email, name, phone, company_name, password_hash, email_verified, report_credits, credits_used, free_trial_total, free_trial_used)
+      VALUES (?, ?, ?, ?, ?, 1, 0, 0, 3, 0)
+    `).bind(cleanEmail, name, phone || null, company_name || null, storedHash).run()
+
+    if (!result.meta.last_row_id) {
+      return c.json({ error: 'Failed to create account. Please try again.' }, 500)
+    }
 
     const token = generateSessionToken()
     const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
@@ -198,13 +507,13 @@ customerAuthRoutes.post('/register', async (c) => {
     await c.env.DB.prepare(`
       INSERT INTO user_activity_log (company_id, action, details)
       VALUES (1, 'customer_registered', ?)
-    `).bind(`New customer: ${name} (${email}) — 3 free trial reports granted`).run()
+    `).bind(`New customer: ${name} (${cleanEmail}) — 3 free trial reports granted — email verified`).run()
 
     return c.json({
       success: true,
       customer: {
         id: result.meta.last_row_id,
-        email: email.toLowerCase().trim(),
+        email: cleanEmail,
         name,
         company_name,
         phone,

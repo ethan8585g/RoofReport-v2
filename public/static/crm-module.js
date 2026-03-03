@@ -93,7 +93,7 @@
     fetch('/api/customer/orders', { headers: authHeadersOnly() })
       .then(function(r) { return r.json(); })
       .then(function(data) {
-        var orders = (data.orders || []).filter(function(o) { return o.report_status === 'completed' || o.status === 'completed'; });
+        var orders = (data.orders || []).filter(function(o) { return o.report_status === 'completed' || o.status === 'completed' || o.status === 'processing'; });
         renderReports(orders);
       })
       .catch(function() { root.innerHTML = '<p class="text-red-500">Failed to load reports.</p>'; });
@@ -186,10 +186,25 @@
     showModal('Add New Customer', customerFormHTML(), function() {
       var data = getCustomerFormData();
       if (!data.name) { toast('Customer name is required.', 'error'); return; }
+      var saveBtn = document.querySelector('.modal-confirm-btn') || document.querySelector('[onclick]');
       fetch('/api/crm/customers', { method: 'POST', headers: authHeaders(), body: JSON.stringify(data) })
-        .then(function(r) { return r.json(); })
-        .then(function(res) { if (res.success) { closeModal(); toast('Customer added!'); loadCustomers(); } else { toast(res.error || 'Failed', 'error'); } })
-        .catch(function() { toast('Network error', 'error'); });
+        .then(function(r) {
+          if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || 'Server error (' + r.status + ')'); });
+          return r.json();
+        })
+        .then(function(res) {
+          if (res.success) {
+            closeModal();
+            toast('Customer saved successfully!' + (res.verified ? ' (Verified in database)' : ''), 'success');
+            loadCustomers();
+          } else {
+            toast(res.error || 'Failed to save customer.', 'error');
+          }
+        })
+        .catch(function(err) {
+          toast('Save failed: ' + (err.message || 'Network error. Check your connection.'), 'error');
+          console.error('[CRM] Customer save error:', err);
+        });
     }, 'Add Customer');
   };
 
@@ -202,10 +217,26 @@
           var fd = getCustomerFormData();
           if (!fd.name) { toast('Name required', 'error'); return; }
           fetch('/api/crm/customers/' + id, { method: 'PUT', headers: authHeaders(), body: JSON.stringify(fd) })
-            .then(function(r) { return r.json(); })
-            .then(function(res) { if (res.success) { closeModal(); toast('Customer updated!'); loadCustomers(); } else { toast(res.error || 'Failed', 'error'); } });
+            .then(function(r) {
+              if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || 'Server error'); });
+              return r.json();
+            })
+            .then(function(res) {
+              if (res.success) {
+                closeModal();
+                toast('Customer updated successfully!', 'success');
+                loadCustomers();
+              } else {
+                toast(res.error || 'Failed to update.', 'error');
+              }
+            })
+            .catch(function(err) {
+              toast('Update failed: ' + (err.message || 'Network error'), 'error');
+              console.error('[CRM] Customer update error:', err);
+            });
         }, 'Save Changes');
-      });
+      })
+      .catch(function(err) { toast('Failed to load customer details.', 'error'); });
   };
 
   window._crmViewCustomer = function(id) {
