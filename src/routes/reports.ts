@@ -173,15 +173,16 @@ reportsRoutes.get('/:orderId/html', async (c) => {
 
     if (!report) return c.json({ error: 'Report not found' }, 404)
 
-    if (report.professional_report_html) {
-      return c.html(report.professional_report_html)
-    }
-
-    // Generate from raw data if HTML not yet saved
+    // Always regenerate from raw data to ensure latest 9-page template is used
     if (report.api_response_raw) {
       const data = JSON.parse(report.api_response_raw) as RoofReport
       const html = generateProfessionalReportHTML(data)
       return c.html(html)
+    }
+
+    // Fallback to stored HTML only when raw data is not available
+    if (report.professional_report_html) {
+      return c.html(report.professional_report_html)
     }
 
     return c.json({ error: 'Report data not available' }, 404)
@@ -935,10 +936,13 @@ reportsRoutes.get('/:orderId/pdf', async (c) => {
 
     if (!report) return c.json({ error: 'Report not found' }, 404)
 
-    let html = report.professional_report_html
-    if (!html && report.api_response_raw) {
+    let html = ''
+    // Always regenerate from raw data to ensure latest 9-page template
+    if (report.api_response_raw) {
       const data = JSON.parse(report.api_response_raw) as RoofReport
       html = generateProfessionalReportHTML(data)
+    } else if (report.professional_report_html) {
+      html = report.professional_report_html
     }
     if (!html) return c.json({ error: 'Report HTML not available' }, 404)
 
@@ -1072,11 +1076,13 @@ reportsRoutes.post('/:orderId/email', async (c) => {
       return c.json({ error: 'No recipient email. Provide to_email in request body or ensure order has homeowner/requester email.' }, 400)
     }
 
-    // Get HTML report
-    let reportHtml = order.professional_report_html
-    if (!reportHtml && order.api_response_raw) {
+    // Get HTML report - always regenerate from raw data to ensure latest 9-page template
+    let reportHtml = ''
+    if (order.api_response_raw) {
       const data = JSON.parse(order.api_response_raw) as RoofReport
       reportHtml = generateProfessionalReportHTML(data)
+    } else if (order.professional_report_html) {
+      reportHtml = order.professional_report_html
     }
     if (!reportHtml) {
       return c.json({ error: 'Report not yet generated. Call POST /api/reports/:orderId/generate first.' }, 400)
@@ -1200,16 +1206,22 @@ function buildEmailWrapper(reportHtml: string, address: string, reportNum: strin
   <div style="background:#fff;padding:28px;border:1px solid #e5e7eb;border-top:none">
     <p style="font-size:15px;color:#1a1a2e;margin:0 0 16px">Hello,</p>
     <p style="font-size:14px;color:#374151;line-height:1.6;margin:0 0 16px">
-      Your professional 3-page roof measurement report for <strong>${address}</strong> is ready.
+      Your professional 9-page roof measurement report for <strong>${address}</strong> is ready.
       Report number: <strong>${reportNum}</strong>.
     </p>
     <p style="font-size:14px;color:#374151;line-height:1.6;margin:0 0 20px">
       The full report includes:
     </p>
     <ul style="font-size:13px;color:#374151;line-height:1.8;margin:0 0 24px;padding-left:20px">
-      <li><strong>Page 1:</strong> Roof Measurement Dashboard - aerial views, total area, pitch, squares, linear measurements</li>
-      <li><strong>Page 2:</strong> Material Order Calculation - shingles, accessories, ventilation, fasteners</li>
-      <li><strong>Page 3:</strong> Detailed Measurements - facet breakdown, roof diagram</li>
+      <li><strong>Page 1:</strong> Cover &mdash; Key Measurements &amp; Property Summary</li>
+      <li><strong>Page 2:</strong> Top View &mdash; Aerial Satellite Image with Overlay</li>
+      <li><strong>Page 3:</strong> Side Views &mdash; Directional Aerial (N/S/E/W)</li>
+      <li><strong>Page 4:</strong> Close-Up Detail &mdash; Quadrant Views &amp; Property Context</li>
+      <li><strong>Page 5:</strong> Length Diagram &mdash; Segment Lengths &amp; Edge Types</li>
+      <li><strong>Page 6:</strong> Pitch Diagram &mdash; Roof Pitch by Facet</li>
+      <li><strong>Page 7:</strong> Area Diagram &mdash; Facet Areas in Square Feet</li>
+      <li><strong>Page 8:</strong> Report Summary &mdash; Complexity &amp; Waste Calculation</li>
+      <li><strong>Page 9:</strong> Totals &amp; Materials &mdash; Complete Material Order</li>
     </ul>
 
     <div style="text-align:center;margin:24px 0">
@@ -1323,7 +1335,7 @@ async function sendGmailEmail(serviceAccountJson: string, to: string, subject: s
     'Content-Type: text/plain; charset=UTF-8',
     'Content-Transfer-Encoding: 7bit',
     '',
-    `Your professional roof measurement report is ready. View this email in an HTML-capable client to see the full 3-page report including measurements and material calculations.`,
+    `Your professional roof measurement report is ready. View this email in an HTML-capable client to see the full 9-page report including measurements and material calculations.`,
     '',
     `--${boundary}`,
     'Content-Type: text/html; charset=UTF-8',
@@ -1452,7 +1464,7 @@ async function sendGmailOAuth2(
     'Content-Type: text/plain; charset=UTF-8',
     'Content-Transfer-Encoding: 7bit',
     '',
-    'Your professional roof measurement report is ready. View this email in an HTML-capable client to see the full 3-page report.',
+    'Your professional roof measurement report is ready. View this email in an HTML-capable client to see the full 9-page report.',
     '',
     `--${boundary}`,
     'Content-Type: text/html; charset=UTF-8',
@@ -1916,7 +1928,7 @@ function computeEdgeSummary(edges: EdgeMeasurement[]) {
 }
 
 // ============================================================
-// PROFESSIONAL 3-PAGE REPORT HTML GENERATOR
+// PROFESSIONAL 9-PAGE REPORT HTML GENERATOR
 // Matches RoofReporterAI branded templates:
 //   Page 1: Dark theme Roof Measurement Dashboard
 //   Page 2: Light theme Material Order Calculation
@@ -1944,8 +1956,8 @@ function generateProfessionalReportHTML(report: RoofReport): string {
   const cementTubes = Math.max(2, Math.ceil(grossSquares / 15))
   const satelliteUrl = report.imagery?.satellite_url || ''
   const overheadUrl = report.imagery?.satellite_overhead_url || satelliteUrl
-  const mediumUrl = report.imagery?.medium_url || ''
-  const contextUrl = report.imagery?.context_url || ''
+  const mediumUrl = (report.imagery as any)?.satellite_medium_url || report.imagery?.medium_url || ''
+  const contextUrl = (report.imagery as any)?.satellite_context_url || report.imagery?.context_url || ''
   const northUrl = report.imagery?.north_url || ''
   const southUrl = report.imagery?.south_url || ''
   const eastUrl = report.imagery?.east_url || ''
@@ -1955,10 +1967,10 @@ function generateProfessionalReportHTML(report: RoofReport): string {
   const maskOverlayUrl = (report.imagery as any)?.mask_overlay_url || ''
   const fluxHeatmapUrl = (report.imagery as any)?.flux_heatmap_url || ''
   const fluxData = (report as any).flux_analysis || null
-  const nwUrl = (report.imagery as any)?.nw_closeup_url || ''
-  const neUrl = (report.imagery as any)?.ne_closeup_url || ''
-  const swUrl = (report.imagery as any)?.sw_closeup_url || ''
-  const seUrl = (report.imagery as any)?.se_closeup_url || ''
+  const nwUrl = (report.imagery as any)?.closeup_nw_url || (report.imagery as any)?.nw_closeup_url || ''
+  const neUrl = (report.imagery as any)?.closeup_ne_url || (report.imagery as any)?.ne_closeup_url || ''
+  const swUrl = (report.imagery as any)?.closeup_sw_url || (report.imagery as any)?.sw_closeup_url || ''
+  const seUrl = (report.imagery as any)?.closeup_se_url || (report.imagery as any)?.se_closeup_url || ''
   const facetColors = ['#4A90D9','#E8634A','#5CB85C','#F5A623','#9B59B6','#E84393','#2ECC71','#F39C12','#3498DB','#8E44AD','#E67E22','#27AE60']
 
   // Generate satellite overlay SVG from AI geometry
@@ -2042,7 +2054,7 @@ function generateProfessionalReportHTML(report: RoofReport): string {
   const ftr = (pageNum: number) => `
   <div style="position:absolute;bottom:0;left:0;right:0;background:#f7f8fa;border-top:1px solid #dde;padding:5px 32px;display:flex;justify-content:space-between;font-size:7.5px;color:#888">
     <span style="font-weight:600;color:#003366">RoofReporterAI</span>
-    <span>Report: ${reportNum} &bull; Page ${pageNum} of 8 &bull; &copy; ${new Date().getFullYear()} RoofReporterAI. All imagery &copy; Google.</span>
+    <span>Report: ${reportNum} &bull; Page ${pageNum} of 9 &bull; &copy; ${new Date().getFullYear()} RoofReporterAI. All imagery &copy; Google.</span>
   </div>`
 
   return `<!DOCTYPE html>
@@ -2153,11 +2165,12 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
       ${[
         ['Images &mdash; Top View', '2'],
         ['Images &mdash; Side Views (Directional Aerial)', '3'],
-        ['Length Diagram', '4'],
-        ['Pitch Diagram', '5'],
-        ['Area Diagram', '6'],
-        ['Report Summary', '7'],
-        ['All Structures Totals &amp; Materials', '8']
+        ['Close-Up Detail &amp; Property Context', '4'],
+        ['Length Diagram', '5'],
+        ['Pitch Diagram', '6'],
+        ['Area Diagram', '7'],
+        ['Report Summary', '8'],
+        ['All Structures Totals &amp; Materials', '9']
       ].map(([title, pg], i) => `<div style="display:flex;justify-content:space-between;padding:6px 14px;font-size:10px;${i % 2 === 0 ? 'background:#f8f9fb' : 'background:#fff'};border-bottom:1px solid #eef0f4"><span style="font-weight:600;color:#1a1a2e">${title}</span><span style="color:#003366;font-weight:700">${pg}</span></div>`).join('')}
     </div>
 
@@ -2256,7 +2269,77 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
   ${ftr(3)}
 </div>
 
-<!-- ==================== PAGE 4: LENGTH DIAGRAM ==================== -->
+<!-- ==================== PAGE 4: CLOSE-UP DETAIL & PROPERTY CONTEXT ==================== -->
+<div class="page">
+  ${hdr('CLOSE-UP DETAIL', 'Roof Quadrant Views &amp; Property Context')}
+  <div style="padding:14px 32px 50px">
+    <div style="font-size:10px;color:#4a5568;font-style:italic;margin-bottom:10px">Close-up quadrant satellite views for detailed inspection of roof sections, plus wider property context imagery.</div>
+
+    <!-- Quadrant close-ups: NW / NE -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+      <div class="ic">
+        ${img(nwUrl, 'Northwest Quadrant', '180px')}
+        <div class="ic-label">Northwest Quadrant</div>
+      </div>
+      <div class="ic">
+        ${img(neUrl, 'Northeast Quadrant', '180px')}
+        <div class="ic-label">Northeast Quadrant</div>
+      </div>
+    </div>
+
+    <!-- Quadrant close-ups: SW / SE -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+      <div class="ic">
+        ${img(swUrl, 'Southwest Quadrant', '180px')}
+        <div class="ic-label">Southwest Quadrant</div>
+      </div>
+      <div class="ic">
+        ${img(seUrl, 'Southeast Quadrant', '180px')}
+        <div class="ic-label">Southeast Quadrant</div>
+      </div>
+    </div>
+
+    <!-- Property Context & Medium Views -->
+    <div style="font-size:10px;font-weight:800;color:#003366;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Property Context</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+      <div class="ic">
+        ${img(mediumUrl, 'Property View', '195px')}
+        <div class="ic-label">Property &amp; Lot View</div>
+      </div>
+      <div class="ic">
+        ${img(contextUrl, 'Neighborhood Context', '195px')}
+        <div class="ic-label">Neighborhood Context</div>
+      </div>
+    </div>
+
+    <!-- Quick reference bar -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:8px">
+      <div style="text-align:center;padding:6px 4px;background:#f4f7fb;border:1px solid #d5dae3;border-radius:4px">
+        <div style="font-size:7px;color:#6b7a8d;font-weight:700;text-transform:uppercase">Total Area</div>
+        <div style="font-size:14px;font-weight:900;color:#003366">${report.total_true_area_sqft.toLocaleString()}</div>
+        <div style="font-size:7px;color:#6b7a8d">sq ft</div>
+      </div>
+      <div style="text-align:center;padding:6px 4px;background:#f4f7fb;border:1px solid #d5dae3;border-radius:4px">
+        <div style="font-size:7px;color:#6b7a8d;font-weight:700;text-transform:uppercase">Facets</div>
+        <div style="font-size:14px;font-weight:900;color:#003366">${report.segments.length}</div>
+        <div style="font-size:7px;color:#6b7a8d">planes</div>
+      </div>
+      <div style="text-align:center;padding:6px 4px;background:#f4f7fb;border:1px solid #d5dae3;border-radius:4px">
+        <div style="font-size:7px;color:#6b7a8d;font-weight:700;text-transform:uppercase">Pitch</div>
+        <div style="font-size:14px;font-weight:900;color:#003366">${predominantPitch}</div>
+        <div style="font-size:7px;color:#6b7a8d">predominant</div>
+      </div>
+      <div style="text-align:center;padding:6px 4px;background:#f4f7fb;border:1px solid #d5dae3;border-radius:4px">
+        <div style="font-size:7px;color:#6b7a8d;font-weight:700;text-transform:uppercase">Squares</div>
+        <div style="font-size:14px;font-weight:900;color:#003366">${grossSquares}</div>
+        <div style="font-size:7px;color:#6b7a8d">gross</div>
+      </div>
+    </div>
+  </div>
+  ${ftr(4)}
+</div>
+
+<!-- ==================== PAGE 5: LENGTH DIAGRAM ==================== -->
 <div class="page">
   ${hdr('LENGTH DIAGRAM', 'Segment Lengths &amp; Edge Types')}
   <div style="padding:14px 32px 50px">
@@ -2275,13 +2358,13 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
     <!-- Roof diagram with overlay or generated diagram -->
     <div style="text-align:center;border:1px solid #d5dae3;border-radius:4px;overflow:hidden;background:#fff">
       ${hasOverlay ? `
-        <div style="position:relative;width:100%;padding-bottom:100%">
+        <div style="position:relative;width:100%;padding-bottom:60%">
           ${overheadUrl ? `<img src="${overheadUrl}" alt="Roof" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;display:block;opacity:0.85">` : ''}
           <svg viewBox="0 0 640 640" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none">${overlaySVG}</svg>
         </div>
       ` : `
-        <div style="padding:20px">
-          <svg viewBox="0 0 500 280" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-height:320px">${generateRoofDiagramSVG(report.segments, facetColors)}</svg>
+        <div style="padding:12px">
+          <svg viewBox="0 0 500 280" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-height:250px">${generateRoofDiagramSVG(report.segments, facetColors)}</svg>
         </div>
       `}
     </div>
@@ -2297,20 +2380,20 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
     </div>
 
     <!-- Edge Details Table -->
-    <div style="margin-top:10px">
+    <div style="margin-top:8px;max-height:260px;overflow:hidden">
       <table class="ev-tbl">
         <thead><tr><th>Edge Type</th><th>Label</th><th style="text-align:center">Plan Length (ft)</th><th>True Length (ft)</th></tr></thead>
         <tbody>
-          ${report.edges.map(e => `<tr><td style="text-transform:capitalize;font-weight:600">${e.edge_type}</td><td>${e.label}</td><td style="text-align:center">${e.plan_length_ft}</td><td>${e.true_length_ft}</td></tr>`).join('')}
-          <tr class="row-total"><td colspan="2">Total</td><td style="text-align:center">${Math.round(report.edges.reduce((s, e) => s + e.plan_length_ft, 0))}</td><td>${Math.round(report.edges.reduce((s, e) => s + e.true_length_ft, 0))}</td></tr>
+          ${report.edges.slice(0, 14).map(e => `<tr><td style="text-transform:capitalize;font-weight:600">${e.edge_type}</td><td>${e.label}</td><td style="text-align:center">${e.plan_length_ft}</td><td>${e.true_length_ft}</td></tr>`).join('')}
+          <tr class="row-total"><td colspan="2">Total (${report.edges.length} edges)</td><td style="text-align:center">${Math.round(report.edges.reduce((s, e) => s + e.plan_length_ft, 0))}</td><td>${Math.round(report.edges.reduce((s, e) => s + e.true_length_ft, 0))}</td></tr>
         </tbody>
       </table>
     </div>
   </div>
-  ${ftr(4)}
+  ${ftr(5)}
 </div>
 
-<!-- ==================== PAGE 5: PITCH DIAGRAM ==================== -->
+<!-- ==================== PAGE 6: PITCH DIAGRAM ==================== -->
 <div class="page">
   ${hdr('PITCH DIAGRAM', 'Roof Pitch by Facet')}
   <div style="padding:14px 32px 50px">
@@ -2323,8 +2406,8 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
     </div>
 
     <!-- Roof diagram with pitch overlay — use AI geometry when available -->
-    <div style="text-align:center;border:1px solid #d5dae3;border-radius:4px;overflow:hidden;background:#fff;padding:16px">
-      <svg viewBox="0 0 500 350" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-height:320px">${generatePitchDiagramSVG(report.ai_geometry, report.segments, facetColors)}</svg>
+    <div style="text-align:center;border:1px solid #d5dae3;border-radius:4px;overflow:hidden;background:#fff;padding:12px">
+      <svg viewBox="0 0 500 350" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-height:260px">${generatePitchDiagramSVG(report.ai_geometry, report.segments, facetColors)}</svg>
     </div>
 
     <!-- Pitch Breakdown Table -->
@@ -2359,10 +2442,10 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
       </div>
     </div>
   </div>
-  ${ftr(5)}
+  ${ftr(6)}
 </div>
 
-<!-- ==================== PAGE 6: AREA DIAGRAM ==================== -->
+<!-- ==================== PAGE 7: AREA DIAGRAM ==================== -->
 <div class="page">
   ${hdr('AREA DIAGRAM', 'Facet Areas in Square Feet')}
   <div style="padding:14px 32px 50px">
@@ -2404,10 +2487,10 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
       </tbody>
     </table>
   </div>
-  ${ftr(6)}
+  ${ftr(7)}
 </div>
 
-<!-- ==================== PAGE 7: REPORT SUMMARY ==================== -->
+<!-- ==================== PAGE 8: REPORT SUMMARY ==================== -->
 <div class="page">
   ${hdr('REPORT SUMMARY', 'Areas per Pitch, Complexity &amp; Waste Calculation')}
   <div style="padding:14px 32px 50px">
@@ -2457,10 +2540,10 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
       </div>
     </div>
   </div>
-  ${ftr(7)}
+  ${ftr(8)}
 </div>
 
-<!-- ==================== PAGE 8: ALL STRUCTURES TOTALS & MATERIALS ==================== -->
+<!-- ==================== PAGE 9: ALL STRUCTURES TOTALS & MATERIALS ==================== -->
 <div class="page">
   ${hdr('ALL STRUCTURES TOTALS', 'Lengths, Areas, Pitches &amp; Material Order')}
   <div style="padding:14px 32px 50px">
@@ -2525,7 +2608,7 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
       </div>
     </div>
   </div>
-  ${ftr(8)}
+  ${ftr(9)}
 </div>
 
 <!-- ==================== LEGAL DISCLAIMER ==================== -->
