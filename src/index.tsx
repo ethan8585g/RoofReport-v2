@@ -17,6 +17,7 @@ import { blogRoutes } from './routes/blog'
 import { d2dRoutes } from './routes/d2d'
 import { secretaryRoutes } from './routes/secretary'
 import { roverRoutes } from './routes/rover'
+import { emailOutreachRoutes } from './routes/email-outreach'
 import type { Bindings } from './types'
 
 const app = new Hono<{ Bindings: Bindings }>()
@@ -41,6 +42,7 @@ app.route('/api/blog', blogRoutes)
 app.route('/api/d2d', d2dRoutes)
 app.route('/api/secretary', secretaryRoutes)
 app.route('/api/rover', roverRoutes)
+app.route('/api/email-outreach', emailOutreachRoutes)
 
 // Health check
 app.get('/api/health', (c) => {
@@ -904,6 +906,10 @@ function getSuperAdminDashboardHTML() {
           <i class="fas fa-bullhorn w-5 text-center"></i>
           <span class="label text-sm font-medium">Sales & Marketing</span>
         </div>
+        <div class="sa-nav-item rounded-xl px-4 py-3 flex items-center gap-3 text-gray-400" onclick="saSetView('email-outreach')">
+          <i class="fas fa-envelope-open-text w-5 text-center"></i>
+          <span class="label text-sm font-medium">Email Outreach</span>
+        </div>
         <div class="border-t border-gray-800 my-3"></div>
         <a href="/admin" class="sa-nav-item rounded-xl px-4 py-3 flex items-center gap-3 text-gray-400 no-underline">
           <i class="fas fa-tachometer-alt w-5 text-center"></i>
@@ -957,6 +963,7 @@ function getSuperAdminDashboardHTML() {
     }
   </script>
   <script src="/static/super-admin-dashboard.js"></script>
+  <script src="/static/email-outreach.js"></script>
 </body>
 </html>`
 }

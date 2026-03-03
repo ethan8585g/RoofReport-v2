@@ -65,6 +65,14 @@ async function loadView(view) {
         const mktRes = await saFetch('/api/admin/superadmin/marketing');
         if (mktRes) SA.data.marketing = await mktRes.json();
         break;
+      case 'email-outreach':
+        // Handled by email-outreach.js module
+        if (typeof window.loadEmailOutreach === 'function') {
+          SA.loading = false;
+          window.loadEmailOutreach();
+          return;
+        }
+        break;
     }
   } catch (e) {
     console.error('Load error:', e);
@@ -152,6 +160,7 @@ function renderContent() {
     case 'orders': root.innerHTML = renderOrdersView(); break;
     case 'signups': root.innerHTML = renderSignupsView(); break;
     case 'marketing': root.innerHTML = renderMarketingView(); break;
+    case 'email-outreach': break; // Handled by email-outreach.js
     default: root.innerHTML = renderUsersView();
   }
 }
