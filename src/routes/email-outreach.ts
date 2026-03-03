@@ -5,10 +5,16 @@ import { validateAdminSession, requireSuperadmin } from './auth'
 export const emailOutreachRoutes = new Hono<{ Bindings: Bindings }>()
 
 // ============================================================
-// AUTH MIDDLEWARE — Superadmin only
+// AUTH MIDDLEWARE — Superadmin only (skip for public /unsubscribe)
 // ============================================================
 emailOutreachRoutes.use('/*', async (c, next) => {
-  const admin = await validateAdminSession(c.env.DB, c.req.header('Authorization'))
+  // Public endpoints that don't require auth
+  if (c.req.path.includes('/unsubscribe/')) {
+    return next()
+  }
+  // Support token in query string (for download/export endpoints)
+  const authHeader = c.req.header('Authorization') || (c.req.query('token') ? `Bearer ${c.req.query('token')}` : undefined)
+  const admin = await validateAdminSession(c.env.DB, authHeader)
   if (!admin || !requireSuperadmin(admin)) {
     return c.json({ error: 'Superadmin access required' }, 403)
   }
@@ -476,6 +482,15 @@ emailOutreachRoutes.post('/campaigns/:id/send', async (c) => {
           .replace(/\{\{email\}\}/g, ct.email)
           .replace(/\{\{first_name\}\}/g, (ct.contact_name || '').split(' ')[0] || '')
 
+        // Append CAN-SPAM compliant footer with unsubscribe link
+        const unsubUrl = `https://roofreporterai.com/api/email-outreach/unsubscribe/${encodeURIComponent(ct.email)}`
+        html += `
+<div style="margin-top:32px;padding-top:16px;border-top:1px solid #e5e7eb;font-size:11px;color:#9ca3af;text-align:center;font-family:-apple-system,BlinkMacSystemFont,sans-serif">
+  <p style="margin:4px 0">Reuse Canada Ltd. &bull; Alberta, Canada</p>
+  <p style="margin:4px 0">You are receiving this because you are listed as a roofing industry contact.</p>
+  <p style="margin:4px 0"><a href="${unsubUrl}" style="color:#6b7280;text-decoration:underline">Unsubscribe</a> from future emails</p>
+</div>`
+
         let sent = false
 
         // Method 1: Resend API
@@ -758,6 +773,316 @@ emailOutreachRoutes.get('/stats', async (c) => {
     `).first()
 
     return c.json(stats)
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500)
+  }
+})
+
+// ============================================================
+// DE-DUPLICATION — Find & remove duplicate emails across lists
+// ============================================================
+emailOutreachRoutes.get('/dedup/preview', async (c) => {
+  await ensureTables(c.env.DB)
+  try {
+    const dupes = await c.env.DB.prepare(`
+      SELECT email, COUNT(*) as count,
+        GROUP_CONCAT(DISTINCT list_id) as list_ids,
+        GROUP_CONCAT(id) as contact_ids
+      FROM email_contacts
+      WHERE status = 'active'
+      GROUP BY LOWER(email)
+      HAVING COUNT(*) > 1
+      ORDER BY count DESC
+      LIMIT 500
+    `).all()
+
+    const totalDupes = dupes.results?.reduce((sum: number, d: any) => sum + (d.count - 1), 0) || 0
+
+    return c.json({
+      duplicates: dupes.results,
+      total_duplicate_entries: totalDupes,
+      unique_duplicate_emails: dupes.results?.length || 0
+    })
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500)
+  }
+})
+
+emailOutreachRoutes.post('/dedup/clean', async (c) => {
+  await ensureTables(c.env.DB)
+  try {
+    // Keep oldest entry for each email, delete duplicates
+    const result = await c.env.DB.prepare(`
+      DELETE FROM email_contacts
+      WHERE id NOT IN (
+        SELECT MIN(id) FROM email_contacts
+        GROUP BY LOWER(email)
+      )
+    `).run()
+
+    // Refresh all list counts
+    await c.env.DB.prepare(`
+      UPDATE email_lists SET
+        contact_count = (SELECT COUNT(*) FROM email_contacts WHERE list_id = email_lists.id),
+        updated_at = datetime('now')
+    `).run()
+
+    return c.json({ success: true, removed: result.meta.changes || 0 })
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500)
+  }
+})
+
+// ============================================================
+// CSV FILE UPLOAD — Parse uploaded CSV file
+// ============================================================
+emailOutreachRoutes.post('/lists/:id/upload-csv', async (c) => {
+  try {
+    const listId = parseInt(c.req.param('id'))
+    const formData = await c.req.formData()
+    const file = formData.get('file')
+    if (!file || !(file instanceof File)) {
+      return c.json({ error: 'CSV file is required' }, 400)
+    }
+
+    const text = await file.text()
+    const lines = text.trim().split('\n').map(l => l.trim()).filter(l => l)
+    if (lines.length < 2) return c.json({ error: 'CSV must have header + at least 1 row' }, 400)
+
+    // Parse header — support common separators
+    const sep = lines[0].includes('\t') ? '\t' : ','
+    const header = lines[0].toLowerCase().split(sep).map(h => h.trim().replace(/^"|"$/g, ''))
+
+    const emailIdx = header.findIndex(h => h === 'email' || h === 'e-mail' || h === 'email_address')
+    if (emailIdx === -1) return c.json({ error: 'CSV must have an "email" column' }, 400)
+
+    const fieldMap: Record<string, number> = {
+      company_name: header.findIndex(h => h.includes('company') || h.includes('business')),
+      contact_name: header.findIndex(h => h === 'name' || h === 'contact_name' || h === 'contact' || h === 'full_name'),
+      phone: header.findIndex(h => h.includes('phone') || h.includes('tel')),
+      city: header.findIndex(h => h === 'city' || h === 'town'),
+      province: header.findIndex(h => h === 'province' || h === 'state' || h === 'prov'),
+      website: header.findIndex(h => h.includes('website') || h.includes('url') || h.includes('web'))
+    }
+
+    let imported = 0, skipped = 0, errors = 0
+
+    for (let i = 1; i < lines.length; i++) {
+      // Handle quoted CSV fields
+      const cols = lines[i].split(sep).map(c => c.trim().replace(/^"|"$/g, ''))
+      const email = (cols[emailIdx] || '').toLowerCase().trim()
+      if (!email || !email.includes('@')) { skipped++; continue }
+
+      try {
+        const params: any[] = [
+          listId, email,
+          fieldMap.company_name >= 0 ? cols[fieldMap.company_name] || '' : '',
+          fieldMap.contact_name >= 0 ? cols[fieldMap.contact_name] || '' : '',
+          fieldMap.phone >= 0 ? cols[fieldMap.phone] || '' : '',
+          fieldMap.city >= 0 ? cols[fieldMap.city] || '' : '',
+          fieldMap.province >= 0 ? cols[fieldMap.province] || '' : '',
+          fieldMap.website >= 0 ? cols[fieldMap.website] || '' : '',
+          'csv_upload'
+        ]
+        await c.env.DB.prepare(`
+          INSERT OR IGNORE INTO email_contacts (list_id, email, company_name, contact_name, phone, city, province, website, source)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).bind(...params).run()
+        imported++
+      } catch { errors++ }
+    }
+
+    await c.env.DB.prepare("UPDATE email_lists SET contact_count = (SELECT COUNT(*) FROM email_contacts WHERE list_id = ?), updated_at = datetime('now') WHERE id = ?").bind(listId, listId).run()
+
+    return c.json({ success: true, imported, skipped, errors, total: lines.length - 1, filename: file.name })
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500)
+  }
+})
+
+// ============================================================
+// UNSUBSCRIBE — Public endpoint (no auth required)
+// ============================================================
+emailOutreachRoutes.get('/unsubscribe/:email', async (c) => {
+  const email = decodeURIComponent(c.req.param('email')).toLowerCase().trim()
+  try {
+    await ensureTables(c.env.DB)
+    await c.env.DB.prepare(
+      "UPDATE email_contacts SET status = 'unsubscribed', updated_at = datetime('now') WHERE LOWER(email) = ?"
+    ).bind(email).run()
+  } catch {}
+
+  return c.html(`<!DOCTYPE html>
+<html><head><title>Unsubscribed</title><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{font-family:-apple-system,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;background:#f9fafb;margin:0}
+.card{background:#fff;border-radius:16px;padding:48px;max-width:480px;text-align:center;box-shadow:0 4px 24px rgba(0,0,0,0.08)}
+h1{color:#111;font-size:24px;margin-bottom:8px}p{color:#6b7280;font-size:14px;line-height:1.6}
+.check{width:64px;height:64px;background:#dcfce7;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 20px;font-size:28px}</style>
+</head><body><div class="card"><div class="check">✓</div><h1>You've been unsubscribed</h1>
+<p><strong>${email}</strong> has been removed from our mailing list.</p>
+<p>You will no longer receive marketing emails from RoofReporterAI.</p>
+<p style="color:#9ca3af;font-size:12px;margin-top:24px">If this was a mistake, contact reports@reusecanada.ca</p>
+</div></body></html>`)
+})
+
+// ============================================================
+// CAMPAIGN ANALYTICS — Detailed deliverability stats
+// ============================================================
+emailOutreachRoutes.get('/analytics', async (c) => {
+  await ensureTables(c.env.DB)
+  try {
+    // Campaign performance summary
+    const campaigns = await c.env.DB.prepare(`
+      SELECT
+        ec.id, ec.name, ec.subject, ec.status, ec.created_at, ec.completed_at,
+        ec.total_recipients, ec.sent_count, ec.failed_count, ec.open_count, ec.click_count,
+        ec.bounce_count, ec.unsubscribe_count,
+        CASE WHEN ec.sent_count > 0 THEN ROUND(CAST(ec.open_count AS REAL) / ec.sent_count * 100, 1) ELSE 0 END as open_rate,
+        CASE WHEN ec.sent_count > 0 THEN ROUND(CAST(ec.click_count AS REAL) / ec.sent_count * 100, 1) ELSE 0 END as click_rate,
+        CASE WHEN ec.sent_count > 0 THEN ROUND(CAST(ec.bounce_count AS REAL) / ec.sent_count * 100, 1) ELSE 0 END as bounce_rate
+      FROM email_campaigns ec
+      WHERE ec.status IN ('completed', 'sending')
+      ORDER BY ec.completed_at DESC
+      LIMIT 20
+    `).all()
+
+    // Overall metrics
+    const overall = await c.env.DB.prepare(`
+      SELECT
+        COALESCE(SUM(sent_count), 0) as total_sent,
+        COALESCE(SUM(open_count), 0) as total_opens,
+        COALESCE(SUM(click_count), 0) as total_clicks,
+        COALESCE(SUM(bounce_count), 0) as total_bounces,
+        COALESCE(SUM(unsubscribe_count), 0) as total_unsubs,
+        CASE WHEN SUM(sent_count) > 0 THEN ROUND(CAST(SUM(open_count) AS REAL) / SUM(sent_count) * 100, 1) ELSE 0 END as avg_open_rate,
+        CASE WHEN SUM(sent_count) > 0 THEN ROUND(CAST(SUM(click_count) AS REAL) / SUM(sent_count) * 100, 1) ELSE 0 END as avg_click_rate,
+        CASE WHEN SUM(sent_count) > 0 THEN ROUND(CAST(SUM(bounce_count) AS REAL) / SUM(sent_count) * 100, 1) ELSE 0 END as avg_bounce_rate
+      FROM email_campaigns WHERE status IN ('completed', 'sending')
+    `).first()
+
+    // Recent send activity (last 30 days grouped by date)
+    const dailyActivity = await c.env.DB.prepare(`
+      SELECT DATE(sent_at) as day,
+        COUNT(*) as sent,
+        SUM(CASE WHEN status IN ('sent','delivered','opened','clicked') THEN 1 ELSE 0 END) as delivered,
+        SUM(CASE WHEN status IN ('opened','clicked') THEN 1 ELSE 0 END) as opened,
+        SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
+      FROM email_send_log
+      WHERE sent_at >= datetime('now', '-30 days')
+      GROUP BY DATE(sent_at)
+      ORDER BY day DESC
+    `).all()
+
+    // Top bounced contacts
+    const topBounced = await c.env.DB.prepare(`
+      SELECT email, company_name, bounce_count, sends_count, status
+      FROM email_contacts
+      WHERE bounce_count > 0
+      ORDER BY bounce_count DESC
+      LIMIT 20
+    `).all()
+
+    return c.json({
+      campaigns: campaigns.results,
+      overall,
+      daily_activity: dailyActivity.results,
+      top_bounced: topBounced.results
+    })
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500)
+  }
+})
+
+// ============================================================
+// SCHEDULE CAMPAIGN — Set future send time
+// ============================================================
+emailOutreachRoutes.put('/campaigns/:id/schedule', async (c) => {
+  try {
+    const id = parseInt(c.req.param('id'))
+    const { scheduled_at } = await c.req.json()
+
+    const campaign = await c.env.DB.prepare('SELECT status FROM email_campaigns WHERE id = ?').bind(id).first<any>()
+    if (!campaign) return c.json({ error: 'Campaign not found' }, 404)
+    if (!['draft', 'scheduled'].includes(campaign.status)) return c.json({ error: 'Can only schedule draft or scheduled campaigns' }, 400)
+
+    if (scheduled_at) {
+      await c.env.DB.prepare(`
+        UPDATE email_campaigns SET status = 'scheduled', scheduled_at = ?, updated_at = datetime('now')
+        WHERE id = ?
+      `).bind(scheduled_at, id).run()
+      return c.json({ success: true, status: 'scheduled', scheduled_at })
+    } else {
+      // Cancel scheduling — revert to draft
+      await c.env.DB.prepare(`
+        UPDATE email_campaigns SET status = 'draft', scheduled_at = NULL, updated_at = datetime('now')
+        WHERE id = ?
+      `).bind(id).run()
+      return c.json({ success: true, status: 'draft' })
+    }
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500)
+  }
+})
+
+// ============================================================
+// EDIT CONTACT — Update contact details
+// ============================================================
+emailOutreachRoutes.put('/contacts/:id', async (c) => {
+  try {
+    const id = parseInt(c.req.param('id'))
+    const { email, company_name, contact_name, phone, city, province, website, status, notes, tags } = await c.req.json()
+
+    const fields: string[] = []
+    const values: any[] = []
+    if (email !== undefined) { fields.push('email = ?'); values.push(email.toLowerCase().trim()) }
+    if (company_name !== undefined) { fields.push('company_name = ?'); values.push(company_name) }
+    if (contact_name !== undefined) { fields.push('contact_name = ?'); values.push(contact_name) }
+    if (phone !== undefined) { fields.push('phone = ?'); values.push(phone) }
+    if (city !== undefined) { fields.push('city = ?'); values.push(city) }
+    if (province !== undefined) { fields.push('province = ?'); values.push(province) }
+    if (website !== undefined) { fields.push('website = ?'); values.push(website) }
+    if (status !== undefined) { fields.push('status = ?'); values.push(status) }
+    if (notes !== undefined) { fields.push('notes = ?'); values.push(notes) }
+    if (tags !== undefined) { fields.push('tags = ?'); values.push(tags) }
+
+    if (fields.length === 0) return c.json({ error: 'No fields to update' }, 400)
+
+    fields.push("updated_at = datetime('now')")
+    values.push(id)
+
+    await c.env.DB.prepare(`UPDATE email_contacts SET ${fields.join(', ')} WHERE id = ?`).bind(...values).run()
+    return c.json({ success: true })
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500)
+  }
+})
+
+// ============================================================
+// EXPORT CONTACTS — Download contacts as CSV
+// ============================================================
+emailOutreachRoutes.get('/lists/:id/export', async (c) => {
+  try {
+    const listId = parseInt(c.req.param('id'))
+    const list = await c.env.DB.prepare('SELECT name FROM email_lists WHERE id = ?').bind(listId).first<any>()
+    const contacts = await c.env.DB.prepare(`
+      SELECT email, company_name, contact_name, phone, city, province, website, status, sends_count, opens_count, clicks_count, source, created_at
+      FROM email_contacts WHERE list_id = ? ORDER BY email
+    `).bind(listId).all()
+
+    const header = 'email,company_name,contact_name,phone,city,province,website,status,sends,opens,clicks,source,created_at'
+    const rows = (contacts.results || []).map((c: any) =>
+      [c.email, c.company_name, c.contact_name, c.phone, c.city, c.province, c.website, c.status, c.sends_count, c.opens_count, c.clicks_count, c.source, c.created_at]
+        .map(v => `"${(v || '').toString().replace(/"/g, '""')}"`)
+        .join(',')
+    )
+    const csv = [header, ...rows].join('\n')
+
+    return new Response(csv, {
+      headers: {
+        'Content-Type': 'text/csv',
+        'Content-Disposition': `attachment; filename="${(list?.name || 'contacts').replace(/[^a-zA-Z0-9]/g, '_')}_export.csv"`
+      }
+    })
   } catch (err: any) {
     return c.json({ error: err.message }, 500)
   }
