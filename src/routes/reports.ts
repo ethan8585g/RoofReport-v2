@@ -42,14 +42,14 @@ function generateEnhancedImagery(lat: number, lng: number, apiKey: string, footp
   const contextZoom = roofZoom - 3    // Wide neighborhood context
   const closeupZoom = Math.min(roofZoom + 1, 21)  // Detail: shingle-level view
   
-  // Directional offset distance — moderate so roof stays in frame.
+  // Geo-math for offsets
   // At lat ~53° N (Edmonton): 1° lat ≈ 111.3 km, 1° lng ≈ 67 km
-  // 25m offset at the zoomed-out level keeps roof visible while showing direction
   const latDegPerMeter = 1 / 111320
   const lngDegPerMeter = 1 / (111320 * Math.cos(lat * Math.PI / 180))
   
-  // Directional offset: 15m shifts the view slightly while keeping roof centered
-  const dirOffsetMeters = 15
+  // Directional offset: 8m (reduced from 15m) + zoom out 1 level = full roof always visible
+  const dirZoom = mediumZoom  // One zoom level out from overhead so roof doesn't get cropped
+  const dirOffsetMeters = 8
   const offsetLat = dirOffsetMeters * latDegPerMeter
   const offsetLng = dirOffsetMeters * lngDegPerMeter
   
@@ -76,12 +76,12 @@ function generateEnhancedImagery(lat: number, lng: number, apiKey: string, footp
     mask_url: '',
     flux_url: null as string | null,
     
-    // ── DIRECTIONAL AERIAL: Satellite images offset 25m from center in each direction ──
-    // Uses same zoom as overhead so full roof stays visible with directional shift
-    north_url: `${base}?center=${lat + offsetLat},${lng}&zoom=${roofZoom}&size=640x400&scale=2&maptype=satellite&key=${apiKey}`,
-    south_url: `${base}?center=${lat - offsetLat},${lng}&zoom=${roofZoom}&size=640x400&scale=2&maptype=satellite&key=${apiKey}`,
-    east_url: `${base}?center=${lat},${lng + offsetLng}&zoom=${roofZoom}&size=640x400&scale=2&maptype=satellite&key=${apiKey}`,
-    west_url: `${base}?center=${lat},${lng - offsetLng}&zoom=${roofZoom}&size=640x400&scale=2&maptype=satellite&key=${apiKey}`,
+    // ── DIRECTIONAL AERIAL: Satellite images offset from center in each direction ──
+    // Uses dirZoom (mediumZoom = one notch out) so full roof stays visible with directional shift
+    north_url: `${base}?center=${lat + offsetLat},${lng}&zoom=${dirZoom}&size=640x400&scale=2&maptype=satellite&key=${apiKey}`,
+    south_url: `${base}?center=${lat - offsetLat},${lng}&zoom=${dirZoom}&size=640x400&scale=2&maptype=satellite&key=${apiKey}`,
+    east_url: `${base}?center=${lat},${lng + offsetLng}&zoom=${dirZoom}&size=640x400&scale=2&maptype=satellite&key=${apiKey}`,
+    west_url: `${base}?center=${lat},${lng - offsetLng}&zoom=${dirZoom}&size=640x400&scale=2&maptype=satellite&key=${apiKey}`,
     
     // ── CLOSE-UP QUADRANTS: Slight zoom-in at 4 corners — shows roof detail without losing context ──
     closeup_nw_url: `${base}?center=${lat + quadLat},${lng - quadLng}&zoom=${closeupZoom}&size=400x400&scale=2&maptype=satellite&key=${apiKey}`,
@@ -2261,7 +2261,7 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
 <div class="page">
   ${hdr('ROOF DETECTION &amp; SOLAR ANALYSIS', 'DataLayers GeoTIFF Visualization')}
   <div style="padding:14px 32px 50px">
-    <div style="font-size:10px;color:#4a5568;font-style:italic;margin-bottom:10px">These images are generated from Google Solar API DataLayers GeoTIFF data, showing algorithmic roof detection and annual solar exposure analysis.</div>
+    <div style="font-size:10px;color:#4a5568;font-style:italic;margin-bottom:10px">These images are generated from Google Solar API DataLayers GeoTIFF data (50m radius around the property). The <strong>target property is in the center</strong> of each image. Blue-highlighted areas show detected building roofs; dark areas are ground/non-roof surfaces.</div>
 
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
       <!-- RGB Aerial (Mask-Cropped) -->
@@ -2359,10 +2359,12 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
     </div>
 
     <!-- Roof diagram with overlay or generated diagram -->
-    <div style="position:relative;text-align:center;border:1px solid #d5dae3;border-radius:4px;overflow:hidden;background:#fff">
+    <div style="text-align:center;border:1px solid #d5dae3;border-radius:4px;overflow:hidden;background:#fff">
       ${hasOverlay ? `
-        ${overheadUrl ? `<img src="${overheadUrl}" alt="Roof" style="width:100%;max-height:340px;object-fit:cover;display:block;opacity:0.85">` : ''}
-        <svg viewBox="0 0 640 640" xmlns="http://www.w3.org/2000/svg" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none">${overlaySVG}</svg>
+        <div style="position:relative;width:100%;padding-bottom:100%">
+          ${overheadUrl ? `<img src="${overheadUrl}" alt="Roof" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;display:block;opacity:0.85">` : ''}
+          <svg viewBox="0 0 640 640" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none">${overlaySVG}</svg>
+        </div>
       ` : `
         <div style="padding:20px">
           <svg viewBox="0 0 500 280" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-height:320px">${generateRoofDiagramSVG(report.segments, facetColors)}</svg>
@@ -2406,9 +2408,9 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
       <div style="display:flex;align-items:center;gap:5px"><span style="width:18px;height:14px;background:#eeeeee;border:1px solid #bdbdbd;display:inline-block;border-radius:2px"></span><span style="font-weight:600">Flat / Low Pitch (&lt; 3/12)</span></div>
     </div>
 
-    <!-- Roof diagram with pitch overlay -->
+    <!-- Roof diagram with pitch overlay — use AI geometry when available -->
     <div style="text-align:center;border:1px solid #d5dae3;border-radius:4px;overflow:hidden;background:#fff;padding:16px">
-      <svg viewBox="0 0 500 280" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-height:300px">${generateRoofDiagramSVG(report.segments, facetColors)}</svg>
+      <svg viewBox="0 0 500 350" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-height:320px">${generatePitchDiagramSVG(report.ai_geometry, report.segments, facetColors)}</svg>
     </div>
 
     <!-- Pitch Breakdown Table -->
@@ -3151,6 +3153,117 @@ function generateOverlayLegend(
   }
   html += '</div>'
   return html
+}
+
+// ============================================================
+// Generate PITCH DIAGRAM SVG — uses actual AI geometry (perimeter + facets)
+// Falls back to generic diagram if no AI geometry available
+// ============================================================
+function generatePitchDiagramSVG(
+  aiGeometry: AIMeasurementAnalysis | null | undefined,
+  segments: RoofSegment[],
+  colors: string[]
+): string {
+  if (segments.length === 0) return '<text x="250" y="175" text-anchor="middle" fill="#999" font-size="14">No segment data</text>'
+
+  // If we have AI geometry with facets, use the REAL roof shape
+  if (aiGeometry?.facets && aiGeometry.facets.length >= 2) {
+    return generatePitchDiagramFromAI(aiGeometry, segments, colors)
+  }
+
+  // Fallback to generic proportional diagram
+  return generateRoofDiagramSVG(segments, colors)
+}
+
+function generatePitchDiagramFromAI(
+  aiGeometry: AIMeasurementAnalysis,
+  segments: RoofSegment[],
+  colors: string[]
+): string {
+  const facets = aiGeometry.facets
+  const perimeter = aiGeometry.perimeter || []
+
+  // Find bounding box of all geometry (from facets + perimeter)
+  let minX = 640, maxX = 0, minY = 640, maxY = 0
+  const allPoints: { x: number; y: number }[] = []
+
+  if (perimeter.length >= 3) {
+    perimeter.forEach(p => { allPoints.push(p); minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y) })
+  }
+  facets.forEach(f => f.points?.forEach(p => { allPoints.push(p); minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y) }))
+
+  if (allPoints.length < 3) return '<text x="250" y="175" text-anchor="middle" fill="#999" font-size="14">Insufficient geometry data</text>'
+
+  // Map 640x640 pixel coordinates to SVG viewBox (500x350) with padding
+  const pad = 40
+  const svgW = 500, svgH = 350
+  const drawW = svgW - pad * 2
+  const drawH = svgH - pad * 2 - 30 // leave room for bottom label
+  const geoW = maxX - minX || 1
+  const geoH = maxY - minY || 1
+  const scale = Math.min(drawW / geoW, drawH / geoH)
+  const offsetX = pad + (drawW - geoW * scale) / 2
+  const offsetY = pad + (drawH - geoH * scale) / 2
+
+  function tx(x: number) { return offsetX + (x - minX) * scale }
+  function ty(y: number) { return offsetY + (y - minY) * scale }
+
+  let svg = ''
+
+  // Pitch color function: blue if >= 3/12 (14°), grey if flat
+  function pitchColor(pitchDeg: number, baseColor: string): string {
+    if (pitchDeg >= 14) return baseColor  // >= 3/12 gets the assigned color
+    return '#e0e0e0'  // flat/low pitch gets grey
+  }
+
+  // Match facets to segments by index (Gemini facets correspond to Solar API segments)
+  facets.forEach((facet, i) => {
+    if (!facet.points || facet.points.length < 3) return
+    const seg = segments[i] || segments[segments.length - 1] // fallback to last if overflow
+
+    const points = facet.points.map(p => `${tx(p.x).toFixed(1)},${ty(p.y).toFixed(1)}`).join(' ')
+    const fillColor = pitchColor(seg.pitch_degrees, colors[i % colors.length])
+
+    // Facet fill
+    svg += `<polygon points="${points}" fill="${fillColor}" fill-opacity="0.55" stroke="#002F6C" stroke-width="1.5"/>`
+
+    // Label at centroid
+    const cx = facet.points.reduce((s, p) => s + tx(p.x), 0) / facet.points.length
+    const cy = facet.points.reduce((s, p) => s + ty(p.y), 0) / facet.points.length
+
+    svg += `<text x="${cx.toFixed(1)}" y="${(cy - 6).toFixed(1)}" text-anchor="middle" font-size="10" font-weight="800" fill="#002F6C">${seg.true_area_sqft.toLocaleString()} sq ft</text>`
+    svg += `<text x="${cx.toFixed(1)}" y="${(cy + 6).toFixed(1)}" text-anchor="middle" font-size="8.5" fill="#335C8A" font-weight="600">${seg.pitch_ratio} &middot; ${seg.azimuth_direction}</text>`
+  })
+
+  // Draw perimeter outline if available
+  if (perimeter.length >= 3) {
+    const perimPoints = perimeter.map(p => `${tx(p.x).toFixed(1)},${ty(p.y).toFixed(1)}`).join(' ')
+    svg += `<polygon points="${perimPoints}" fill="none" stroke="#002F6C" stroke-width="2"/>`
+  }
+
+  // Draw internal lines (ridge, hip, valley) from AI geometry
+  if (aiGeometry.lines && aiGeometry.lines.length > 0) {
+    const lineColors: Record<string, string> = { 'RIDGE': '#E53935', 'HIP': '#F9A825', 'VALLEY': '#1565C0' }
+    const lineWidths: Record<string, number> = { 'RIDGE': 3, 'HIP': 2, 'VALLEY': 2 }
+    aiGeometry.lines.forEach(line => {
+      if (line.type === 'EAVE' || line.type === 'RAKE') return // perimeter-only
+      const color = lineColors[line.type] || '#002F6C'
+      const width = lineWidths[line.type] || 1.5
+      const dash = line.type === 'VALLEY' ? ' stroke-dasharray="6,3"' : ''
+      svg += `<line x1="${tx(line.start.x).toFixed(1)}" y1="${ty(line.start.y).toFixed(1)}" x2="${tx(line.end.x).toFixed(1)}" y2="${ty(line.end.y).toFixed(1)}" stroke="${color}" stroke-width="${width}"${dash}/>`
+    })
+  }
+
+  // Direction compass
+  svg += `<text x="250" y="20" text-anchor="middle" font-size="11" font-weight="700" fill="#002F6C">N</text>`
+  svg += `<polygon points="250,23 246,30 254,30" fill="#002F6C"/>`
+
+  // Total area label at bottom
+  const totalArea = segments.reduce((s, seg) => s + seg.true_area_sqft, 0)
+  const totalFootprint = segments.reduce((s, seg) => s + seg.footprint_area_sqft, 0)
+  svg += `<text x="250" y="${svgH - 8}" text-anchor="middle" font-size="9" font-weight="700" fill="#003366">Total: ${totalArea.toLocaleString()} sq ft &middot; ${segments.length} facets &middot; Footprint: ${totalFootprint.toLocaleString()} sq ft</text>`
+
+  return svg
 }
 
 // Generate SVG roof diagram from segments — proportional to actual measurements
