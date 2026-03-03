@@ -2042,7 +2042,7 @@ function generateProfessionalReportHTML(report: RoofReport): string {
   const ftr = (pageNum: number) => `
   <div style="position:absolute;bottom:0;left:0;right:0;background:#f7f8fa;border-top:1px solid #dde;padding:5px 32px;display:flex;justify-content:space-between;font-size:7.5px;color:#888">
     <span style="font-weight:600;color:#003366">RoofReporterAI</span>
-    <span>Report: ${reportNum} &bull; Page ${pageNum} of 9 &bull; &copy; ${new Date().getFullYear()} RoofReporterAI. All imagery &copy; Google.</span>
+    <span>Report: ${reportNum} &bull; Page ${pageNum} of 8 &bull; &copy; ${new Date().getFullYear()} RoofReporterAI. All imagery &copy; Google.</span>
   </div>`
 
   return `<!DOCTYPE html>
@@ -2153,12 +2153,11 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
       ${[
         ['Images &mdash; Top View', '2'],
         ['Images &mdash; Side Views (Directional Aerial)', '3'],
-        ['Roof Detection &amp; Solar Analysis', '4'],
-        ['Length Diagram', '5'],
-        ['Pitch Diagram', '6'],
-        ['Area Diagram', '7'],
-        ['Report Summary', '8'],
-        ['All Structures Totals &amp; Materials', '9']
+        ['Length Diagram', '4'],
+        ['Pitch Diagram', '5'],
+        ['Area Diagram', '6'],
+        ['Report Summary', '7'],
+        ['All Structures Totals &amp; Materials', '8']
       ].map(([title, pg], i) => `<div style="display:flex;justify-content:space-between;padding:6px 14px;font-size:10px;${i % 2 === 0 ? 'background:#f8f9fb' : 'background:#fff'};border-bottom:1px solid #eef0f4"><span style="font-weight:600;color:#1a1a2e">${title}</span><span style="color:#003366;font-weight:700">${pg}</span></div>`).join('')}
     </div>
 
@@ -2257,92 +2256,7 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
   ${ftr(3)}
 </div>
 
-<!-- ==================== PAGE 4: ROOF DETECTION & SOLAR ANALYSIS ==================== -->
-<div class="page">
-  ${hdr('ROOF DETECTION &amp; SOLAR ANALYSIS', 'DataLayers GeoTIFF Visualization')}
-  <div style="padding:14px 32px 50px">
-    <div style="font-size:10px;color:#4a5568;font-style:italic;margin-bottom:10px">These images are generated from Google Solar API DataLayers GeoTIFF data (50m radius around the property). The <strong>target property is in the center</strong> of each image. Blue-highlighted areas show detected building roofs; dark areas are ground/non-roof surfaces.</div>
-
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
-      <!-- RGB Aerial (Mask-Cropped) -->
-      <div class="ic">
-        ${rgbAerialUrl ? `<img src="${rgbAerialUrl}" alt="RGB Aerial (Cropped)" style="width:100%;height:260px;object-fit:contain;background:#1a1a2e;display:block">` :
-          `<div style="height:260px;background:#1a1a2e;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:10px;text-align:center;padding:16px">RGB Aerial crop not available<br><span style="font-size:8px;color:#6b7a8d">Image may be too large for processing</span></div>`}
-        <div class="ic-label">High-Res Aerial (Roof-Cropped via Mask)</div>
-      </div>
-
-      <!-- Mask Overlay -->
-      <div class="ic">
-        ${maskOverlayUrl ? `<img src="${maskOverlayUrl}" alt="Mask Overlay" style="width:100%;height:260px;object-fit:contain;background:#1a1a2e;display:block">` :
-          `<div style="height:260px;background:#1a1a2e;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:10px">Mask overlay not available</div>`}
-        <div class="ic-label">Roof Pixel Detection (DSM + Mask Overlay)</div>
-      </div>
-    </div>
-
-    <!-- Mask Legend -->
-    <div style="display:flex;gap:16px;margin-bottom:14px;font-size:8.5px;padding:6px 12px;background:#f4f6f9;border:1px solid #d5dae3;border-radius:4px">
-      <div style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:14px;background:#2a7fff;display:inline-block;border-radius:2px"></span><span style="font-weight:600">Roof Pixels (Building Mask)</span></div>
-      <div style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:14px;background:#333;display:inline-block;border-radius:2px"></span><span style="font-weight:600">Ground / Non-Roof</span></div>
-      <div style="display:flex;align-items:center;gap:5px"><span style="font-weight:500;color:#6b7a8d">Brightness = DSM elevation (higher = lighter)</span></div>
-    </div>
-
-    ${fluxData || fluxHeatmapUrl ? `
-    <!-- Solar Flux Section -->
-    <div style="font-size:12px;font-weight:800;color:#003366;text-transform:uppercase;letter-spacing:1px;border-bottom:2px solid #003366;padding-bottom:4px;margin-bottom:10px">Annual Solar Exposure</div>
-
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px">
-      <!-- Flux Heatmap -->
-      <div class="ic">
-        ${fluxHeatmapUrl ? `<img src="${fluxHeatmapUrl}" alt="Solar Flux Heatmap" style="width:100%;height:220px;object-fit:contain;background:#0a0a1a;display:block">` :
-          `<div style="height:220px;background:#0a0a1a;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:10px">Flux heatmap not available</div>`}
-        <div class="ic-label">Annual Flux Heatmap (kWh/m&sup2;/year)</div>
-      </div>
-
-      <!-- Flux Metrics -->
-      <div style="border:1px solid #d5dae3;border-radius:3px;padding:12px 16px;background:#f8f9fb">
-        <div style="font-size:10px;font-weight:800;color:#003366;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Solar Exposure Metrics</div>
-        ${fluxData ? `
-        <div class="kv"><span class="kv-l">Mean Annual Flux</span><span class="kv-r">${fluxData.mean_kwh_m2?.toFixed(0) || '—'} kWh/m&sup2;/yr</span></div>
-        <div class="kv"><span class="kv-l">Peak Annual Flux</span><span class="kv-r">${fluxData.max_kwh_m2?.toFixed(0) || '—'} kWh/m&sup2;/yr</span></div>
-        <div class="kv"><span class="kv-l">Minimum Flux</span><span class="kv-r">${fluxData.min_kwh_m2?.toFixed(0) || '—'} kWh/m&sup2;/yr</span></div>
-        <div class="kv"><span class="kv-l">Total Annual Energy</span><span class="kv-r" style="color:#003366;font-size:12px">${fluxData.total_annual_kwh?.toLocaleString() || '—'} kWh/yr</span></div>
-        <div style="border-top:1px solid #d5dae3;margin:6px 0"></div>
-        <div class="kv"><span class="kv-l">Peak Sun Hours/Day</span><span class="kv-r">${fluxData.peak_sun_hours_per_day?.toFixed(2) || '—'} hrs</span></div>
-        <div class="kv"><span class="kv-l">High-Sun Zones (&ge;1000)</span><span class="kv-r" style="color:#059669;font-weight:800">${fluxData.high_sun_pct?.toFixed(1) || '0'}%</span></div>
-        <div class="kv"><span class="kv-l">Shaded Zones (&lt;600)</span><span class="kv-r" style="color:#dc2626">${fluxData.shaded_pct?.toFixed(1) || '0'}%</span></div>
-        <div class="kv"><span class="kv-l">Flux Pixels Analyzed</span><span class="kv-r">${fluxData.valid_pixels?.toLocaleString() || '—'}</span></div>
-        ` : '<div style="color:#94a3b8;font-size:9px">Flux data not available for this location.</div>'}
-      </div>
-    </div>
-
-    <!-- Flux Legend -->
-    <div style="display:flex;gap:3px;align-items:center;font-size:8px;font-weight:600;padding:6px 12px;background:#f4f6f9;border:1px solid #d5dae3;border-radius:4px">
-      <span style="color:#6b7a8d">Low</span>
-      <span style="width:18px;height:10px;background:linear-gradient(90deg,#00b4ff,#00d68f,#ffe600,#ff0000);display:inline-block;border-radius:1px;margin:0 4px"></span>
-      <span style="color:#6b7a8d">High</span>
-      <span style="color:#6b7a8d;margin-left:8px">| Blue = low sun (&lt;600 kWh/m&sup2;) | Green = moderate | Yellow-Red = high sun (&ge;1000 kWh/m&sup2;)</span>
-    </div>
-    ` : `
-    <div style="padding:20px;text-align:center;background:#f8f9fb;border:1px solid #d5dae3;border-radius:5px;color:#6b7a8d;font-size:10px">
-      Annual solar flux data not available for this location.
-    </div>
-    `}
-
-    <!-- DSM Statistics -->
-    <div style="margin-top:12px;border:1px solid #d5dae3;border-radius:5px;padding:10px 16px;background:#fff">
-      <div style="font-size:9px;font-weight:800;color:#003366;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">DataLayers Processing Summary</div>
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;font-size:9px">
-        <div><span style="color:#6b7a8d">DSM Pixels:</span> <span style="font-weight:700">${report.metadata?.datalayers_analysis?.dsm_pixels?.toLocaleString() || '—'}</span></div>
-        <div><span style="color:#6b7a8d">Resolution:</span> <span style="font-weight:700">${report.metadata?.datalayers_analysis?.dsm_resolution_m?.toFixed(2) || '—'} m/px</span></div>
-        <div><span style="color:#6b7a8d">Imagery:</span> <span style="font-weight:700">${report.quality.imagery_quality || 'BASE'} (${report.quality.imagery_date || 'N/A'})</span></div>
-        <div><span style="color:#6b7a8d">Version:</span> <span style="font-weight:700">${report.report_version}</span></div>
-      </div>
-    </div>
-  </div>
-  ${ftr(4)}
-</div>
-
-<!-- ==================== PAGE 5: LENGTH DIAGRAM ==================== -->
+<!-- ==================== PAGE 4: LENGTH DIAGRAM ==================== -->
 <div class="page">
   ${hdr('LENGTH DIAGRAM', 'Segment Lengths &amp; Edge Types')}
   <div style="padding:14px 32px 50px">
@@ -2393,10 +2307,10 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
       </table>
     </div>
   </div>
-  ${ftr(5)}
+  ${ftr(4)}
 </div>
 
-<!-- ==================== PAGE 6: PITCH DIAGRAM ==================== -->
+<!-- ==================== PAGE 5: PITCH DIAGRAM ==================== -->
 <div class="page">
   ${hdr('PITCH DIAGRAM', 'Roof Pitch by Facet')}
   <div style="padding:14px 32px 50px">
@@ -2445,10 +2359,10 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
       </div>
     </div>
   </div>
-  ${ftr(6)}
+  ${ftr(5)}
 </div>
 
-<!-- ==================== PAGE 7: AREA DIAGRAM ==================== -->
+<!-- ==================== PAGE 6: AREA DIAGRAM ==================== -->
 <div class="page">
   ${hdr('AREA DIAGRAM', 'Facet Areas in Square Feet')}
   <div style="padding:14px 32px 50px">
@@ -2490,10 +2404,10 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
       </tbody>
     </table>
   </div>
-  ${ftr(7)}
+  ${ftr(6)}
 </div>
 
-<!-- ==================== PAGE 8: REPORT SUMMARY ==================== -->
+<!-- ==================== PAGE 7: REPORT SUMMARY ==================== -->
 <div class="page">
   ${hdr('REPORT SUMMARY', 'Areas per Pitch, Complexity &amp; Waste Calculation')}
   <div style="padding:14px 32px 50px">
@@ -2543,10 +2457,10 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
       </div>
     </div>
   </div>
-  ${ftr(8)}
+  ${ftr(7)}
 </div>
 
-<!-- ==================== PAGE 9: ALL STRUCTURES TOTALS & MATERIALS ==================== -->
+<!-- ==================== PAGE 8: ALL STRUCTURES TOTALS & MATERIALS ==================== -->
 <div class="page">
   ${hdr('ALL STRUCTURES TOTALS', 'Lengths, Areas, Pitches &amp; Material Order')}
   <div style="padding:14px 32px 50px">
@@ -2611,7 +2525,7 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
       </div>
     </div>
   </div>
-  ${ftr(9)}
+  ${ftr(8)}
 </div>
 
 <!-- ==================== LEGAL DISCLAIMER ==================== -->
