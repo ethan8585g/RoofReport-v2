@@ -268,16 +268,17 @@ crmRoutes.delete('/invoices/:id', async (c) => {
 })
 
 // ============================================================
-// CRM PROPOSALS
+// CRM PROPOSALS — with line items, tax, warranty, Gmail send
 // ============================================================
 
 function genProposalNum() { const d = new Date().toISOString().slice(0,10).replace(/-/g,''); return `PROP-${d}-${Math.floor(Math.random()*9999).toString().padStart(4,'0')}` }
 
+// LIST proposals
 crmRoutes.get('/proposals', async (c) => {
   const ownerId = await getOwnerId(c)
   if (!ownerId) return c.json({ error: 'Not authenticated' }, 401)
   const status = c.req.query('status') || ''
-  let q = `SELECT cp.*, cc.name as customer_name, COALESCE(cp.view_count, 0) as view_count FROM crm_proposals cp LEFT JOIN crm_customers cc ON cc.id = cp.crm_customer_id WHERE cp.owner_id = ?`
+  let q = `SELECT cp.*, cc.name as customer_name, cc.email as customer_email, COALESCE(cp.view_count, 0) as view_count FROM crm_proposals cp LEFT JOIN crm_customers cc ON cc.id = cp.crm_customer_id WHERE cp.owner_id = ?`
   const params: any[] = [ownerId]
   if (status === 'open') q += ` AND cp.status IN ('draft','sent','viewed')`
   else if (status === 'sold') q += ` AND cp.status = 'accepted'`
@@ -296,75 +297,141 @@ crmRoutes.get('/proposals', async (c) => {
   return c.json({ proposals: proposals.results, stats })
 })
 
+// GET single proposal with line items
+crmRoutes.get('/proposals/:id', async (c) => {
+  const ownerId = await getOwnerId(c)
+  if (!ownerId) return c.json({ error: 'Not authenticated' }, 401)
+  const id = c.req.param('id')
+  const proposal = await c.env.DB.prepare(`
+    SELECT cp.*, cc.name as customer_name, cc.email as customer_email, cc.phone as customer_phone,
+           cc.address as customer_address, cc.city as customer_city, cc.province as customer_province
+    FROM crm_proposals cp LEFT JOIN crm_customers cc ON cc.id = cp.crm_customer_id
+    WHERE cp.id = ? AND cp.owner_id = ?
+  `).bind(id, ownerId).first<any>()
+  if (!proposal) return c.json({ error: 'Proposal not found' }, 404)
+  const items = await c.env.DB.prepare('SELECT * FROM crm_proposal_items WHERE proposal_id = ? ORDER BY sort_order').bind(id).all()
+  return c.json({ proposal, items: items.results })
+})
+
+// CREATE proposal with line items
 crmRoutes.post('/proposals', async (c) => {
   const ownerId = await getOwnerId(c)
   if (!ownerId) return c.json({ error: 'Not authenticated' }, 401)
-  const body = await c.req.json()
-  if (!body.crm_customer_id || !body.title) return c.json({ error: 'Customer and title required' }, 400)
-  const total = (body.labor_cost || 0) + (body.material_cost || 0) + (body.other_cost || 0)
-  const propNum = genProposalNum()
+  try {
+    const body = await c.req.json()
+    if (!body.crm_customer_id || !body.title) return c.json({ error: 'Customer and title required' }, 400)
 
-  const result = await c.env.DB.prepare(`
-    INSERT INTO crm_proposals (owner_id, crm_customer_id, proposal_number, title, property_address, scope_of_work, materials_detail, labor_cost, material_cost, other_cost, total_amount, valid_until, notes, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')
-  `).bind(ownerId, body.crm_customer_id, propNum, body.title, body.property_address || null, body.scope_of_work || null, body.materials_detail || null, body.labor_cost || 0, body.material_cost || 0, body.other_cost || 0, total, body.valid_until || null, body.notes || null).run()
-  return c.json({ success: true, id: result.meta.last_row_id, proposal_number: propNum })
+    const taxRate = body.tax_rate ?? 5.0
+    let subtotal = 0
+
+    // If line items provided, calculate from them
+    if (body.items && body.items.length > 0) {
+      for (const it of body.items) subtotal += (it.quantity || 1) * (it.unit_price || 0)
+    } else {
+      // Legacy: simple labor/material/other
+      subtotal = (body.labor_cost || 0) + (body.material_cost || 0) + (body.other_cost || 0)
+    }
+    const taxAmount = Math.round(subtotal * (taxRate / 100) * 100) / 100
+    const total = Math.round((subtotal + taxAmount) * 100) / 100
+    const propNum = genProposalNum()
+
+    const result = await c.env.DB.prepare(`
+      INSERT INTO crm_proposals (owner_id, crm_customer_id, proposal_number, title, property_address, scope_of_work,
+        materials_detail, labor_cost, material_cost, other_cost, subtotal, tax_rate, tax_amount, total_amount,
+        valid_until, notes, warranty_terms, payment_terms, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')
+    `).bind(ownerId, body.crm_customer_id, propNum, body.title, body.property_address || null,
+      body.scope_of_work || null, body.materials_detail || null,
+      body.labor_cost || 0, body.material_cost || 0, body.other_cost || 0,
+      subtotal, taxRate, taxAmount, total,
+      body.valid_until || null, body.notes || null,
+      body.warranty_terms || null, body.payment_terms || null).run()
+
+    const proposalId = result.meta.last_row_id
+    if (!proposalId) return c.json({ error: 'Failed to create proposal' }, 500)
+
+    // Insert line items
+    if (body.items && body.items.length > 0) {
+      for (let i = 0; i < body.items.length; i++) {
+        const it = body.items[i]
+        const amt = Math.round((it.quantity || 1) * (it.unit_price || 0) * 100) / 100
+        await c.env.DB.prepare(
+          'INSERT INTO crm_proposal_items (proposal_id, description, quantity, unit, unit_price, amount, sort_order) VALUES (?,?,?,?,?,?,?)'
+        ).bind(proposalId, it.description || '', it.quantity || 1, it.unit || 'ea', it.unit_price || 0, amt, i).run()
+      }
+    }
+    return c.json({ success: true, id: proposalId, proposal_number: propNum })
+  } catch (err: any) {
+    console.error('[CRM] Proposal create failed:', err.message)
+    return c.json({ error: 'Failed to save proposal: ' + err.message }, 500)
+  }
 })
 
+// UPDATE proposal with line items
 crmRoutes.put('/proposals/:id', async (c) => {
   const ownerId = await getOwnerId(c)
   if (!ownerId) return c.json({ error: 'Not authenticated' }, 401)
-  const body = await c.req.json()
-  const id = c.req.param('id')
+  try {
+    const body = await c.req.json()
+    const id = c.req.param('id')
 
-  if (body.status && Object.keys(body).length <= 2) {
-    await c.env.DB.prepare("UPDATE crm_proposals SET status = ?, updated_at = datetime('now') WHERE id = ? AND owner_id = ?").bind(body.status, id, ownerId).run()
+    // Quick status-only update
+    if (body.status && Object.keys(body).length <= 2) {
+      await c.env.DB.prepare("UPDATE crm_proposals SET status = ?, updated_at = datetime('now') WHERE id = ? AND owner_id = ?").bind(body.status, id, ownerId).run()
+      return c.json({ success: true })
+    }
+
+    const taxRate = body.tax_rate ?? 5.0
+    let subtotal = 0
+    if (body.items && body.items.length > 0) {
+      for (const it of body.items) subtotal += (it.quantity || 1) * (it.unit_price || 0)
+    } else {
+      subtotal = (body.labor_cost || 0) + (body.material_cost || 0) + (body.other_cost || 0)
+    }
+    const taxAmount = Math.round(subtotal * (taxRate / 100) * 100) / 100
+    const total = Math.round((subtotal + taxAmount) * 100) / 100
+
+    await c.env.DB.prepare(`
+      UPDATE crm_proposals SET crm_customer_id=?, title=?, property_address=?, scope_of_work=?, materials_detail=?,
+        labor_cost=?, material_cost=?, other_cost=?, subtotal=?, tax_rate=?, tax_amount=?, total_amount=?,
+        valid_until=?, notes=?, warranty_terms=?, payment_terms=?, status=?, updated_at=datetime('now')
+      WHERE id=? AND owner_id=?
+    `).bind(body.crm_customer_id, body.title, body.property_address || null, body.scope_of_work || null,
+      body.materials_detail || null, body.labor_cost || 0, body.material_cost || 0, body.other_cost || 0,
+      subtotal, taxRate, taxAmount, total, body.valid_until || null, body.notes || null,
+      body.warranty_terms || null, body.payment_terms || null,
+      body.status || 'draft', id, ownerId).run()
+
+    // Replace line items
+    if (body.items) {
+      await c.env.DB.prepare('DELETE FROM crm_proposal_items WHERE proposal_id = ?').bind(id).run()
+      for (let i = 0; i < body.items.length; i++) {
+        const it = body.items[i]
+        const amt = Math.round((it.quantity || 1) * (it.unit_price || 0) * 100) / 100
+        await c.env.DB.prepare(
+          'INSERT INTO crm_proposal_items (proposal_id, description, quantity, unit, unit_price, amount, sort_order) VALUES (?,?,?,?,?,?,?)'
+        ).bind(id, it.description || '', it.quantity || 1, it.unit || 'ea', it.unit_price || 0, amt, i).run()
+      }
+    }
     return c.json({ success: true })
+  } catch (err: any) {
+    console.error('[CRM] Proposal update failed:', err.message)
+    return c.json({ error: 'Failed to update proposal: ' + err.message }, 500)
   }
-
-  const total = (body.labor_cost || 0) + (body.material_cost || 0) + (body.other_cost || 0)
-  await c.env.DB.prepare(`
-    UPDATE crm_proposals SET crm_customer_id=?, title=?, property_address=?, scope_of_work=?, materials_detail=?, labor_cost=?, material_cost=?, other_cost=?, total_amount=?, valid_until=?, notes=?, status=?, updated_at=datetime('now')
-    WHERE id=? AND owner_id=?
-  `).bind(body.crm_customer_id, body.title, body.property_address || null, body.scope_of_work || null, body.materials_detail || null, body.labor_cost || 0, body.material_cost || 0, body.other_cost || 0, total, body.valid_until || null, body.notes || null, body.status || 'draft', id, ownerId).run()
-  return c.json({ success: true })
 })
 
+// DELETE proposal + its items
 crmRoutes.delete('/proposals/:id', async (c) => {
   const ownerId = await getOwnerId(c)
   if (!ownerId) return c.json({ error: 'Not authenticated' }, 401)
-  await c.env.DB.prepare('DELETE FROM crm_proposals WHERE id = ? AND owner_id = ?').bind(c.req.param('id'), ownerId).run()
+  const id = c.req.param('id')
+  await c.env.DB.prepare('DELETE FROM crm_proposal_items WHERE proposal_id = ?').bind(id).run()
+  await c.env.DB.prepare('DELETE FROM proposal_view_log WHERE proposal_id = ?').bind(id).run()
+  await c.env.DB.prepare('DELETE FROM crm_proposals WHERE id = ? AND owner_id = ?').bind(id, ownerId).run()
   return c.json({ success: true })
 })
 
-// Send proposal — generates share_token, marks as sent, returns trackable link
-crmRoutes.post('/proposals/:id/send', async (c) => {
-  const ownerId = await getOwnerId(c)
-  if (!ownerId) return c.json({ error: 'Not authenticated' }, 401)
-  const id = c.req.param('id')
-
-  const proposal = await c.env.DB.prepare('SELECT * FROM crm_proposals WHERE id = ? AND owner_id = ?').bind(id, ownerId).first<any>()
-  if (!proposal) return c.json({ error: 'Proposal not found' }, 404)
-
-  // Generate a unique share token if not already created
-  let shareToken = proposal.share_token
-  if (!shareToken) {
-    shareToken = crypto.randomUUID().replace(/-/g, '').substring(0, 16)
-  }
-
-  await c.env.DB.prepare(`
-    UPDATE crm_proposals SET status = 'sent', share_token = ?, sent_at = datetime('now'), view_count = COALESCE(view_count, 0), updated_at = datetime('now')
-    WHERE id = ? AND owner_id = ?
-  `).bind(shareToken, id, ownerId).run()
-
-  // Build the public link
-  const baseUrl = new URL(c.req.url).origin
-  const publicLink = `${baseUrl}/proposal/view/${shareToken}`
-
-  return c.json({ success: true, share_token: shareToken, public_link: publicLink })
-})
-
-// Get proposal view stats
+// Get proposal view stats + detailed log
 crmRoutes.get('/proposals/:id/views', async (c) => {
   const ownerId = await getOwnerId(c)
   if (!ownerId) return c.json({ error: 'Not authenticated' }, 401)
@@ -375,11 +442,18 @@ crmRoutes.get('/proposals/:id/views', async (c) => {
   ).bind(id, ownerId).first<any>()
   if (!proposal) return c.json({ error: 'Proposal not found' }, 404)
 
+  // Get detailed view log
+  const viewLog = await c.env.DB.prepare(`
+    SELECT viewed_at, ip_address, user_agent, referrer FROM proposal_view_log
+    WHERE proposal_id = ? ORDER BY viewed_at DESC LIMIT 50
+  `).bind(id).all()
+
   return c.json({
     view_count: proposal.view_count || 0,
     last_viewed_at: proposal.last_viewed_at,
     sent_at: proposal.sent_at,
-    share_token: proposal.share_token
+    share_token: proposal.share_token,
+    view_log: viewLog.results
   })
 })
 
@@ -536,6 +610,385 @@ crmRoutes.delete('/jobs/:id', async (c) => {
   await c.env.DB.prepare('DELETE FROM crm_job_checklist WHERE job_id = ?').bind(id).run()
   await c.env.DB.prepare('DELETE FROM crm_jobs WHERE id = ? AND owner_id = ?').bind(id, ownerId).run()
   return c.json({ success: true })
+})
+
+// ============================================================
+// GMAIL OAUTH — Per-customer Gmail connection for sending proposals
+// ============================================================
+
+// Check Gmail connection status
+crmRoutes.get('/gmail/status', async (c) => {
+  const ownerId = await getOwnerId(c)
+  if (!ownerId) return c.json({ error: 'Not authenticated' }, 401)
+
+  const customer = await c.env.DB.prepare(
+    'SELECT gmail_connected_email, gmail_connected_at FROM customers WHERE id = ?'
+  ).bind(ownerId).first<any>()
+
+  return c.json({
+    connected: !!customer?.gmail_connected_email,
+    email: customer?.gmail_connected_email || null,
+    connected_at: customer?.gmail_connected_at || null
+  })
+})
+
+// Start Gmail OAuth flow
+crmRoutes.get('/gmail/connect', async (c) => {
+  const ownerId = await getOwnerId(c)
+  if (!ownerId) return c.json({ error: 'Not authenticated' }, 401)
+
+  const clientId = (c.env as any).GMAIL_CLIENT_ID
+  if (!clientId) {
+    return c.json({ error: 'Gmail integration is not configured. Contact support.' }, 400)
+  }
+
+  const url = new URL(c.req.url)
+  const redirectUri = `${url.protocol}//${url.host}/api/crm/gmail/callback`
+
+  const state = `${ownerId}:${crypto.randomUUID().replace(/-/g, '').substring(0, 16)}`
+  
+  // Store state in a temp session
+  try {
+    await c.env.DB.prepare(
+      "INSERT OR REPLACE INTO settings (master_company_id, setting_key, setting_value) VALUES (?, ?, ?)"
+    ).bind(ownerId, 'gmail_oauth_state', state).run()
+  } catch(e) {
+    // If settings table doesn't have this key, create it
+    await c.env.DB.prepare(`
+      CREATE TABLE IF NOT EXISTS customer_gmail_state (id INTEGER PRIMARY KEY, customer_id INTEGER, state TEXT, created_at TEXT DEFAULT (datetime('now')))
+    `).run().catch(() => {})
+  }
+
+  const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth')
+  authUrl.searchParams.set('client_id', clientId)
+  authUrl.searchParams.set('redirect_uri', redirectUri)
+  authUrl.searchParams.set('response_type', 'code')
+  authUrl.searchParams.set('scope', 'https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/userinfo.email')
+  authUrl.searchParams.set('access_type', 'offline')
+  authUrl.searchParams.set('prompt', 'consent')
+  authUrl.searchParams.set('state', state)
+
+  return c.json({ auth_url: authUrl.toString() })
+})
+
+// Gmail OAuth callback (browser redirect)
+crmRoutes.get('/gmail/callback', async (c) => {
+  const code = c.req.query('code')
+  const error = c.req.query('error')
+  const state = c.req.query('state') || ''
+
+  if (error || !code) {
+    return c.html(`<!DOCTYPE html><html><head><title>Gmail Connection</title><script src="https://cdn.tailwindcss.com"></script></head>
+<body class="bg-gray-50 min-h-screen flex items-center justify-center"><div class="bg-white rounded-2xl shadow-xl p-8 max-w-md text-center">
+<div class="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4"><i class="fas fa-times text-red-500 text-2xl"></i></div>
+<h2 class="text-xl font-bold text-gray-800 mb-2">Connection Failed</h2>
+<p class="text-gray-600 mb-4">${error || 'No authorization code received'}</p>
+<button onclick="window.close()" class="bg-sky-600 text-white px-6 py-2 rounded-lg font-semibold">Close Window</button>
+</div></body></html>`)
+  }
+
+  const customerId = parseInt(state.split(':')[0])
+  if (!customerId) {
+    return c.html(`<!DOCTYPE html><html><head><title>Gmail Connection</title></head><body><p>Invalid state. Please try again.</p></body></html>`)
+  }
+
+  const clientId = (c.env as any).GMAIL_CLIENT_ID
+  const clientSecret = (c.env as any).GMAIL_CLIENT_SECRET
+
+  const url = new URL(c.req.url)
+  const redirectUri = `${url.protocol}//${url.host}/api/crm/gmail/callback`
+
+  // Exchange code for tokens
+  const tokenResp = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'authorization_code',
+      code: code,
+      client_id: clientId,
+      client_secret: clientSecret,
+      redirect_uri: redirectUri
+    }).toString()
+  })
+
+  const tokenData: any = await tokenResp.json()
+  if (!tokenResp.ok || !tokenData.refresh_token) {
+    return c.html(`<!DOCTYPE html><html><head><title>Gmail Connection</title><script src="https://cdn.tailwindcss.com"></script></head>
+<body class="bg-gray-50 min-h-screen flex items-center justify-center"><div class="bg-white rounded-2xl shadow-xl p-8 max-w-md text-center">
+<div class="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4"><i class="fas fa-exclamation-triangle text-red-500 text-2xl"></i></div>
+<h2 class="text-xl font-bold text-gray-800 mb-2">Token Exchange Failed</h2>
+<p class="text-gray-600 mb-4">${tokenData.error_description || 'Could not obtain refresh token'}</p>
+<button onclick="window.close()" class="bg-sky-600 text-white px-6 py-2 rounded-lg font-semibold">Close</button>
+</div></body></html>`)
+  }
+
+  // Get user email
+  let gmailEmail = ''
+  try {
+    const profileResp = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', {
+      headers: { 'Authorization': `Bearer ${tokenData.access_token}` }
+    })
+    const profile: any = await profileResp.json()
+    gmailEmail = profile.emailAddress || ''
+  } catch(e) {}
+
+  // Store tokens on the customer record
+  await c.env.DB.prepare(`
+    UPDATE customers SET gmail_refresh_token = ?, gmail_connected_email = ?, gmail_connected_at = datetime('now') WHERE id = ?
+  `).bind(tokenData.refresh_token, gmailEmail, customerId).run()
+
+  return c.html(`<!DOCTYPE html>
+<html><head><title>Gmail Connected</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-50 min-h-screen flex items-center justify-center">
+<div class="bg-white rounded-2xl shadow-xl p-8 max-w-md text-center">
+  <div class="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+    <i class="fas fa-check text-green-600 text-2xl"></i>
+  </div>
+  <h2 class="text-xl font-bold text-gray-800 mb-2">Gmail Connected!</h2>
+  <p class="text-gray-600 mb-1">Successfully connected:</p>
+  <p class="text-sky-600 font-semibold mb-4">${gmailEmail}</p>
+  <p class="text-sm text-gray-500 mb-6">You can now send proposals directly from your Gmail. This window will close automatically.</p>
+  <button onclick="window.close()" class="bg-sky-600 text-white px-6 py-2 rounded-lg font-semibold hover:bg-sky-700">Close Window</button>
+</div>
+<script>
+  // Notify parent window
+  if (window.opener) {
+    window.opener.postMessage({ type: 'gmail_connected', email: '${gmailEmail}' }, '*');
+    setTimeout(function() { window.close(); }, 3000);
+  }
+</script>
+</body></html>`)
+})
+
+// Disconnect Gmail
+crmRoutes.post('/gmail/disconnect', async (c) => {
+  const ownerId = await getOwnerId(c)
+  if (!ownerId) return c.json({ error: 'Not authenticated' }, 401)
+
+  await c.env.DB.prepare(
+    "UPDATE customers SET gmail_refresh_token = NULL, gmail_connected_email = NULL, gmail_connected_at = NULL WHERE id = ?"
+  ).bind(ownerId).run()
+
+  return c.json({ success: true })
+})
+
+// ============================================================
+// ENHANCED PROPOSAL SEND — Email via customer's connected Gmail
+// ============================================================
+crmRoutes.post('/proposals/:id/send', async (c) => {
+  const ownerId = await getOwnerId(c)
+  if (!ownerId) return c.json({ error: 'Not authenticated' }, 401)
+  const id = c.req.param('id')
+
+  const proposal = await c.env.DB.prepare(`
+    SELECT cp.*, cc.name as customer_name, cc.email as customer_email, cc.phone as customer_phone,
+           cc.address as customer_address, cc.city as customer_city, cc.province as customer_province
+    FROM crm_proposals cp LEFT JOIN crm_customers cc ON cc.id = cp.crm_customer_id
+    WHERE cp.id = ? AND cp.owner_id = ?
+  `).bind(id, ownerId).first<any>()
+  if (!proposal) return c.json({ error: 'Proposal not found' }, 404)
+
+  // Get line items for the email
+  const itemsResult = await c.env.DB.prepare(
+    'SELECT * FROM crm_proposal_items WHERE proposal_id = ? ORDER BY sort_order'
+  ).bind(id).all()
+  const lineItems = itemsResult.results || []
+
+  // Generate share token if needed
+  let shareToken = proposal.share_token
+  if (!shareToken) {
+    shareToken = crypto.randomUUID().replace(/-/g, '').substring(0, 16)
+  }
+
+  await c.env.DB.prepare(`
+    UPDATE crm_proposals SET status = 'sent', share_token = ?, sent_at = datetime('now'), view_count = COALESCE(view_count, 0), updated_at = datetime('now')
+    WHERE id = ? AND owner_id = ?
+  `).bind(shareToken, id, ownerId).run()
+
+  const baseUrl = new URL(c.req.url).origin
+  const publicLink = `${baseUrl}/proposal/view/${shareToken}`
+
+  // Try sending via customer's connected Gmail
+  let emailSent = false
+  let emailError = ''
+  const customer = await c.env.DB.prepare(
+    'SELECT gmail_refresh_token, gmail_connected_email, name, email, phone, brand_business_name, brand_logo_url, brand_primary_color FROM customers WHERE id = ?'
+  ).bind(ownerId).first<any>()
+
+  if (customer?.gmail_refresh_token && proposal.customer_email) {
+    const clientId = (c.env as any).GMAIL_CLIENT_ID
+    const clientSecret = (c.env as any).GMAIL_CLIENT_SECRET
+
+    if (clientId && clientSecret) {
+      try {
+        // Refresh access token
+        const tokenResp = await fetch('https://oauth2.googleapis.com/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            grant_type: 'refresh_token',
+            refresh_token: customer.gmail_refresh_token,
+            client_id: clientId,
+            client_secret: clientSecret
+          }).toString()
+        })
+        const tokenData: any = await tokenResp.json()
+
+        if (tokenData.access_token) {
+          const businessName = customer.brand_business_name || customer.name || 'Your Roofer'
+          const fromEmail = customer.gmail_connected_email || customer.email
+          const primaryColor = customer.brand_primary_color || '#0369a1'
+          const fullAddress = [proposal.property_address, proposal.customer_city, proposal.customer_province].filter(Boolean).join(', ')
+
+          // Build line items HTML for email
+          let itemsHtml = ''
+          if (lineItems.length > 0) {
+            itemsHtml = '<table style="width:100%;border-collapse:collapse;margin:0 0 12px;">'
+            itemsHtml += '<tr style="background:#f1f5f9;"><td style="color:#475569;font-size:11px;font-weight:600;padding:6px 8px;text-align:left;">Item</td><td style="color:#475569;font-size:11px;font-weight:600;padding:6px 8px;text-align:center;">Qty</td><td style="color:#475569;font-size:11px;font-weight:600;padding:6px 8px;text-align:right;">Price</td><td style="color:#475569;font-size:11px;font-weight:600;padding:6px 8px;text-align:right;">Amount</td></tr>'
+            for (const item of lineItems) {
+              itemsHtml += `<tr><td style="color:#374151;font-size:12px;padding:6px 8px;border-bottom:1px solid #f1f5f9;">${(item as any).description}</td><td style="color:#374151;font-size:12px;padding:6px 8px;text-align:center;border-bottom:1px solid #f1f5f9;">${(item as any).quantity} ${(item as any).unit || ''}</td><td style="color:#374151;font-size:12px;padding:6px 8px;text-align:right;border-bottom:1px solid #f1f5f9;">$${parseFloat((item as any).unit_price).toFixed(2)}</td><td style="color:#374151;font-size:12px;padding:6px 8px;text-align:right;border-bottom:1px solid #f1f5f9;">$${parseFloat((item as any).amount).toFixed(2)}</td></tr>`
+            }
+            itemsHtml += '</table>'
+          }
+
+          const emailHtml = `
+<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#ffffff;">
+  <div style="background:${primaryColor};padding:32px;border-radius:12px 12px 0 0;">
+    ${customer.brand_logo_url ? `<img src="${customer.brand_logo_url}" alt="${businessName}" style="max-height:48px;margin-bottom:8px;">` : ''}
+    <h1 style="color:#ffffff;margin:0;font-size:22px;">${businessName}</h1>
+    <p style="color:rgba(255,255,255,0.7);margin:8px 0 0;font-size:14px;">Roofing Proposal &middot; ${proposal.proposal_number}</p>
+  </div>
+  <div style="padding:32px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px;">
+    <p style="color:#374151;font-size:16px;margin:0 0 8px;">Hi ${proposal.customer_name || 'there'},</p>
+    <p style="color:#6b7280;font-size:14px;line-height:1.6;margin:0 0 24px;">
+      Thank you for the opportunity to provide you with a roofing estimate. Please review your personalized proposal below.
+    </p>
+    
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:20px;margin:0 0 24px;">
+      <table style="width:100%;border-collapse:collapse;margin:0 0 8px;">
+        <tr><td style="color:#6b7280;font-size:13px;padding:4px 0;">Project</td><td style="color:#1e293b;font-size:13px;font-weight:600;text-align:right;">${proposal.title}</td></tr>
+        ${fullAddress ? `<tr><td style="color:#6b7280;font-size:13px;padding:4px 0;">Property</td><td style="color:#1e293b;font-size:13px;text-align:right;">${fullAddress}</td></tr>` : ''}
+      </table>
+      ${itemsHtml}
+      <table style="width:100%;border-collapse:collapse;">
+        ${proposal.subtotal ? `<tr><td style="color:#6b7280;font-size:13px;padding:4px 0;">Subtotal</td><td style="color:#1e293b;font-size:13px;text-align:right;">$${parseFloat(proposal.subtotal).toFixed(2)}</td></tr>` : ''}
+        ${proposal.tax_amount ? `<tr><td style="color:#6b7280;font-size:13px;padding:4px 0;">Tax (${proposal.tax_rate || 5}%)</td><td style="color:#1e293b;font-size:13px;text-align:right;">$${parseFloat(proposal.tax_amount).toFixed(2)}</td></tr>` : ''}
+        <tr><td colspan="2" style="border-top:1px solid #e2e8f0;padding-top:8px;"></td></tr>
+        <tr><td style="color:${primaryColor};font-size:18px;font-weight:700;padding:4px 0;">Total</td><td style="color:${primaryColor};font-size:18px;font-weight:700;text-align:right;">$${parseFloat(proposal.total_amount).toFixed(2)} CAD</td></tr>
+      </table>
+    </div>
+
+    <div style="text-align:center;margin:0 0 24px;">
+      <a href="${publicLink}" style="display:inline-block;background:${primaryColor};color:#ffffff;text-decoration:none;padding:14px 40px;border-radius:8px;font-weight:600;font-size:15px;">
+        View Full Proposal
+      </a>
+    </div>
+
+    <p style="color:#9ca3af;font-size:12px;text-align:center;margin:0;">
+      ${proposal.valid_until ? 'This proposal is valid until ' + new Date(proposal.valid_until).toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' }) + '.' : ''}
+    </p>
+  </div>
+  <p style="color:#9ca3af;font-size:11px;text-align:center;margin:16px 0 0;padding:0;">
+    Sent via RoofReporterAI &middot; ${fromEmail}
+  </p>
+</div>`
+
+          // Build RFC 2822 MIME message
+          const subject = `Roofing Proposal: ${proposal.title} — ${proposal.proposal_number}`
+          const boundary = 'boundary_' + crypto.randomUUID().replace(/-/g, '').substring(0, 16)
+          const rawMessage = [
+            `From: ${businessName} <${fromEmail}>`,
+            `To: ${proposal.customer_email}`,
+            `Subject: ${subject}`,
+            'MIME-Version: 1.0',
+            `Content-Type: multipart/alternative; boundary="${boundary}"`,
+            '',
+            `--${boundary}`,
+            'Content-Type: text/plain; charset=UTF-8',
+            '',
+            `Hi ${proposal.customer_name || 'there'},\n\nPlease find your roofing proposal:\n\nProject: ${proposal.title}\nTotal: $${parseFloat(proposal.total_amount).toFixed(2)} CAD\n\nView your proposal: ${publicLink}\n\nBest regards,\n${businessName}`,
+            '',
+            `--${boundary}`,
+            'Content-Type: text/html; charset=UTF-8',
+            '',
+            emailHtml,
+            '',
+            `--${boundary}--`
+          ].join('\r\n')
+
+          // Base64url encode
+          const encoded = btoa(unescape(encodeURIComponent(rawMessage)))
+            .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+
+          const sendResp = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${tokenData.access_token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ raw: encoded })
+          })
+
+          if (sendResp.ok) {
+            emailSent = true
+          } else {
+            const errData: any = await sendResp.json().catch(() => ({}))
+            emailError = errData?.error?.message || `Gmail API error (${sendResp.status})`
+          }
+        } else {
+          emailError = 'Could not refresh Gmail token. Please reconnect Gmail.'
+        }
+      } catch(e: any) {
+        emailError = e.message || 'Gmail send failed'
+      }
+    }
+  } else if (!customer?.gmail_refresh_token) {
+    emailError = 'Gmail not connected. Connect Gmail in settings to send proposals by email.'
+  } else if (!proposal.customer_email) {
+    emailError = 'Customer has no email address on file.'
+  }
+
+  return c.json({
+    success: true,
+    share_token: shareToken,
+    public_link: publicLink,
+    email_sent: emailSent,
+    email_error: emailError || null,
+    sent_to: emailSent ? proposal.customer_email : null
+  })
+})
+
+// ============================================================
+// PROPOSAL ACCEPT/DECLINE — Public endpoint (no auth, uses share_token)
+// ============================================================
+crmRoutes.post('/proposals/respond/:token', async (c) => {
+  const token = c.req.param('token')
+  const { action, signature } = await c.req.json()
+
+  if (!['accept', 'decline'].includes(action)) {
+    return c.json({ error: 'Invalid action' }, 400)
+  }
+
+  const proposal = await c.env.DB.prepare(
+    'SELECT id, status FROM crm_proposals WHERE share_token = ?'
+  ).bind(token).first<any>()
+
+  if (!proposal) return c.json({ error: 'Proposal not found' }, 404)
+  if (proposal.status === 'accepted' || proposal.status === 'declined') {
+    return c.json({ error: 'This proposal has already been ' + proposal.status }, 400)
+  }
+
+  const newStatus = action === 'accept' ? 'accepted' : 'declined'
+  const dateCol = action === 'accept' ? 'accepted_at' : 'declined_at'
+
+  await c.env.DB.prepare(`
+    UPDATE crm_proposals SET status = ?, ${dateCol} = datetime('now'), customer_signature = ?, updated_at = datetime('now') WHERE id = ?
+  `).bind(newStatus, signature || null, proposal.id).run()
+
+  return c.json({ success: true, status: newStatus })
 })
 
 // ============================================================

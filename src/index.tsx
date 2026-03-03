@@ -368,105 +368,356 @@ app.get('/proposal/view/:token', async (c) => {
     const token = c.req.param('token')
     const proposal = await c.env.DB.prepare(`
       SELECT cp.*, cc.name as customer_name, cc.email as customer_email, cc.phone as customer_phone,
-             cc.address as customer_address, cc.city as customer_city, cc.province as customer_province
+             cc.address as customer_address, cc.city as customer_city, cc.province as customer_province, cc.postal_code as customer_postal
       FROM crm_proposals cp
       LEFT JOIN crm_customers cc ON cc.id = cp.crm_customer_id
       WHERE cp.share_token = ?
     `).bind(token).first<any>()
 
     if (!proposal) {
-      return c.html(`<!DOCTYPE html><html><head><title>Proposal Not Found</title></head><body style="font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f3f4f6"><div style="text-align:center"><h1 style="color:#dc2626">Proposal Not Found</h1><p style="color:#6b7280">This proposal link is invalid or has expired.</p></div></body></html>`)
+      return c.html(`<!DOCTYPE html><html><head><title>Proposal Not Found</title><script src="https://cdn.tailwindcss.com"></script></head><body class="bg-gray-50 min-h-screen flex items-center justify-center"><div class="text-center"><div class="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4"><svg class="w-10 h-10 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg></div><h1 class="text-2xl font-bold text-gray-800 mb-2">Proposal Not Found</h1><p class="text-gray-500">This proposal link is invalid or has expired.</p></div></body></html>`)
     }
 
-    // Increment view count
+    // Increment view count & log the view
     await c.env.DB.prepare(`
-      UPDATE crm_proposals SET view_count = COALESCE(view_count, 0) + 1, last_viewed_at = datetime('now') WHERE id = ?
+      UPDATE crm_proposals SET view_count = COALESCE(view_count, 0) + 1, last_viewed_at = datetime('now'), status = CASE WHEN status = 'sent' THEN 'viewed' ELSE status END WHERE id = ?
     `).bind(proposal.id).run()
 
-    // Get owner (business) info for branding
-    const owner = await c.env.DB.prepare('SELECT name, email, phone FROM customers WHERE id = ?').bind(proposal.owner_id).first<any>()
+    // Log view details
+    const ip = c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || 'unknown'
+    const ua = c.req.header('user-agent') || ''
+    const ref = c.req.header('referer') || ''
+    await c.env.DB.prepare(
+      'INSERT INTO proposal_view_log (proposal_id, ip_address, user_agent, referrer) VALUES (?, ?, ?, ?)'
+    ).bind(proposal.id, ip, ua.substring(0, 500), ref.substring(0, 500)).run()
 
-    // Render the proposal
-    const fullAddress = [proposal.property_address, proposal.customer_city, proposal.customer_province].filter(Boolean).join(', ')
+    // Get owner (business) info for branding
+    const owner = await c.env.DB.prepare(
+      'SELECT name, email, phone, brand_business_name, brand_logo_url, brand_primary_color, brand_secondary_color, brand_tagline, brand_phone, brand_email, brand_website, brand_address, brand_license_number, brand_insurance_info FROM customers WHERE id = ?'
+    ).bind(proposal.owner_id).first<any>()
+
+    // Get line items
+    const itemsResult = await c.env.DB.prepare('SELECT * FROM crm_proposal_items WHERE proposal_id = ? ORDER BY sort_order').bind(proposal.id).all()
+    const lineItems = itemsResult.results || []
+
+    const businessName = owner?.brand_business_name || owner?.name || 'RoofReporterAI'
+    const primaryColor = owner?.brand_primary_color || '#0369a1'
+    const secondaryColor = owner?.brand_secondary_color || '#0ea5e9'
+    const brandPhone = owner?.brand_phone || owner?.phone || ''
+    const brandEmail = owner?.brand_email || owner?.email || ''
+    const brandWebsite = owner?.brand_website || ''
+    const brandAddress = owner?.brand_address || ''
+    const brandLicense = owner?.brand_license_number || ''
+    const brandInsurance = owner?.brand_insurance_info || ''
+    const brandTagline = owner?.brand_tagline || ''
+    const logoUrl = owner?.brand_logo_url || ''
+    const fullAddress = [proposal.property_address, proposal.customer_city, proposal.customer_province, proposal.customer_postal].filter(Boolean).join(', ')
+
+    const isAccepted = proposal.status === 'accepted'
+    const isDeclined = proposal.status === 'declined'
+    const isResponded = isAccepted || isDeclined
+    const proposalDate = proposal.created_at ? new Date(proposal.created_at).toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' }) : ''
+    const validUntil = proposal.valid_until ? new Date(proposal.valid_until).toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' }) : ''
+
+    // Build line items HTML
+    let itemsHtml = ''
+    if (lineItems.length > 0) {
+      itemsHtml = `<div class="overflow-x-auto"><table class="w-full text-sm">
+        <thead><tr class="border-b-2 border-gray-200">
+          <th class="text-left py-3 px-2 font-semibold text-gray-600">Description</th>
+          <th class="text-center py-3 px-2 font-semibold text-gray-600">Qty</th>
+          <th class="text-center py-3 px-2 font-semibold text-gray-600">Unit</th>
+          <th class="text-right py-3 px-2 font-semibold text-gray-600">Unit Price</th>
+          <th class="text-right py-3 px-2 font-semibold text-gray-600">Amount</th>
+        </tr></thead><tbody>`
+      for (const item of lineItems) {
+        const it = item as any
+        itemsHtml += `<tr class="border-b border-gray-100">
+          <td class="py-3 px-2 text-gray-800">${it.description}</td>
+          <td class="py-3 px-2 text-center text-gray-600">${it.quantity}</td>
+          <td class="py-3 px-2 text-center text-gray-500">${it.unit || 'ea'}</td>
+          <td class="py-3 px-2 text-right text-gray-700">$${parseFloat(it.unit_price).toFixed(2)}</td>
+          <td class="py-3 px-2 text-right font-medium text-gray-800">$${parseFloat(it.amount).toFixed(2)}</td>
+        </tr>`
+      }
+      itemsHtml += '</tbody></table></div>'
+    } else {
+      // Legacy: show labor/material/other
+      itemsHtml = '<div class="space-y-2">'
+      if (proposal.labor_cost > 0) itemsHtml += `<div class="flex justify-between text-sm"><span class="text-gray-600">Labor</span><span class="font-semibold text-gray-800">$${parseFloat(proposal.labor_cost).toFixed(2)}</span></div>`
+      if (proposal.material_cost > 0) itemsHtml += `<div class="flex justify-between text-sm"><span class="text-gray-600">Materials</span><span class="font-semibold text-gray-800">$${parseFloat(proposal.material_cost).toFixed(2)}</span></div>`
+      if (proposal.other_cost > 0) itemsHtml += `<div class="flex justify-between text-sm"><span class="text-gray-600">Other</span><span class="font-semibold text-gray-800">$${parseFloat(proposal.other_cost).toFixed(2)}</span></div>`
+      itemsHtml += '</div>'
+    }
+
     return c.html(`<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Proposal - ${proposal.title}</title>
+  <title>${proposal.title} — ${businessName}</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
+  <style>
+    @media print { .no-print { display: none !important; } body { background: white; } }
+    .brand-gradient { background: linear-gradient(135deg, ${primaryColor}, ${secondaryColor}); }
+    .brand-text { color: ${primaryColor}; }
+    .brand-bg { background-color: ${primaryColor}; }
+    .brand-bg-hover:hover { background-color: ${secondaryColor}; }
+    .signature-pad { border: 2px dashed #d1d5db; border-radius: 12px; height: 100px; cursor: crosshair; touch-action: none; }
+    .signature-pad.active { border-color: ${primaryColor}; }
+  </style>
 </head>
-<body class="bg-gray-50 min-h-screen">
-  <div class="max-w-3xl mx-auto px-4 py-8">
-    <!-- Header -->
-    <div class="bg-gradient-to-r from-sky-600 to-blue-700 rounded-t-2xl px-8 py-6 text-white">
-      <div class="flex items-center justify-between">
+<body class="bg-gray-100 min-h-screen">
+  <!-- Print / Download bar -->
+  <div class="no-print fixed top-0 left-0 right-0 z-50 bg-white/90 backdrop-blur-sm border-b border-gray-200">
+    <div class="max-w-4xl mx-auto px-4 py-2 flex items-center justify-between">
+      <span class="text-sm text-gray-500"><i class="fas fa-file-signature mr-1"></i>${proposal.proposal_number}</span>
+      <div class="flex gap-2">
+        <button onclick="window.print()" class="px-3 py-1.5 text-xs font-medium bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-700"><i class="fas fa-print mr-1"></i>Print</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="max-w-4xl mx-auto px-4 pt-16 pb-12">
+    <!-- Company Header -->
+    <div class="brand-gradient rounded-t-2xl px-8 py-8 text-white relative overflow-hidden">
+      <div class="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -translate-y-32 translate-x-32"></div>
+      <div class="absolute bottom-0 left-0 w-48 h-48 bg-white/5 rounded-full translate-y-24 -translate-x-24"></div>
+      <div class="relative z-10 flex items-start justify-between">
         <div>
-          <h1 class="text-2xl font-bold">${proposal.title}</h1>
-          <p class="text-sky-200 text-sm mt-1">${proposal.proposal_number}</p>
+          ${logoUrl ? `<img src="${logoUrl}" alt="${businessName}" class="h-14 mb-3 rounded-lg bg-white/20 p-1">` : ''}
+          <h1 class="text-2xl md:text-3xl font-bold tracking-tight">${businessName}</h1>
+          ${brandTagline ? `<p class="text-white/70 text-sm mt-1">${brandTagline}</p>` : ''}
         </div>
-        <div class="text-right text-sm">
-          <p class="font-semibold">${owner?.name || 'RoofReporterAI'}</p>
-          ${owner?.phone ? `<p class="text-sky-200">${owner.phone}</p>` : ''}
-          ${owner?.email ? `<p class="text-sky-200">${owner.email}</p>` : ''}
+        <div class="text-right text-sm space-y-0.5 text-white/80">
+          ${brandPhone ? `<p><i class="fas fa-phone mr-1.5"></i>${brandPhone}</p>` : ''}
+          ${brandEmail ? `<p><i class="fas fa-envelope mr-1.5"></i>${brandEmail}</p>` : ''}
+          ${brandWebsite ? `<p><i class="fas fa-globe mr-1.5"></i>${brandWebsite}</p>` : ''}
+          ${brandAddress ? `<p class="mt-2 text-white/60"><i class="fas fa-map-marker-alt mr-1.5"></i>${brandAddress}</p>` : ''}
         </div>
       </div>
     </div>
 
-    <!-- Proposal Body -->
-    <div class="bg-white rounded-b-2xl shadow-xl px-8 py-6 space-y-6">
-      <!-- Customer Info -->
-      <div class="border-b pb-4">
-        <h3 class="text-sm font-bold text-gray-500 uppercase mb-2">Prepared For</h3>
-        <p class="text-lg font-semibold text-gray-800">${proposal.customer_name || 'Customer'}</p>
-        ${fullAddress ? `<p class="text-gray-500 text-sm"><i class="fas fa-map-marker-alt mr-1 text-red-400"></i>${fullAddress}</p>` : ''}
-      </div>
-
-      <!-- Scope of Work -->
-      ${proposal.scope_of_work ? `
-      <div class="border-b pb-4">
-        <h3 class="text-sm font-bold text-gray-500 uppercase mb-2">Scope of Work</h3>
-        <p class="text-gray-700 whitespace-pre-line">${proposal.scope_of_work}</p>
-      </div>` : ''}
-
-      <!-- Pricing -->
-      <div class="border-b pb-4">
-        <h3 class="text-sm font-bold text-gray-500 uppercase mb-3">Pricing</h3>
-        <div class="space-y-2">
-          ${proposal.labor_cost > 0 ? `<div class="flex justify-between text-sm"><span class="text-gray-600">Labor</span><span class="font-semibold">$${parseFloat(proposal.labor_cost).toFixed(2)}</span></div>` : ''}
-          ${proposal.material_cost > 0 ? `<div class="flex justify-between text-sm"><span class="text-gray-600">Materials</span><span class="font-semibold">$${parseFloat(proposal.material_cost).toFixed(2)}</span></div>` : ''}
-          ${proposal.other_cost > 0 ? `<div class="flex justify-between text-sm"><span class="text-gray-600">Other</span><span class="font-semibold">$${parseFloat(proposal.other_cost).toFixed(2)}</span></div>` : ''}
-          <div class="flex justify-between text-lg pt-2 border-t font-bold text-sky-700">
-            <span>Total</span>
-            <span>$${parseFloat(proposal.total_amount).toFixed(2)} CAD</span>
+    <!-- Main Body -->
+    <div class="bg-white shadow-2xl rounded-b-2xl">
+      <!-- Proposal Meta -->
+      <div class="px-8 py-6 border-b border-gray-100 bg-gray-50/50">
+        <div class="flex flex-col md:flex-row justify-between gap-4">
+          <div>
+            <p class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-1">Proposal For</p>
+            <p class="text-xl font-bold text-gray-800">${proposal.customer_name || 'Customer'}</p>
+            ${fullAddress ? `<p class="text-sm text-gray-500 mt-1"><i class="fas fa-map-marker-alt mr-1 text-red-400"></i>${fullAddress}</p>` : ''}
+            ${proposal.customer_phone ? `<p class="text-sm text-gray-500"><i class="fas fa-phone mr-1 text-gray-400"></i>${proposal.customer_phone}</p>` : ''}
+            ${proposal.customer_email ? `<p class="text-sm text-gray-500"><i class="fas fa-envelope mr-1 text-gray-400"></i>${proposal.customer_email}</p>` : ''}
+          </div>
+          <div class="text-right space-y-1">
+            <div class="inline-block px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${isAccepted ? 'bg-green-100 text-green-700' : isDeclined ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}">${isAccepted ? 'Accepted' : isDeclined ? 'Declined' : proposal.status === 'viewed' ? 'Under Review' : 'Proposal'}</div>
+            <p class="text-sm text-gray-500"><span class="font-semibold text-gray-700">${proposal.proposal_number}</span></p>
+            ${proposalDate ? `<p class="text-xs text-gray-400">Issued: ${proposalDate}</p>` : ''}
+            ${validUntil ? `<p class="text-xs text-gray-400">Valid Until: ${validUntil}</p>` : ''}
           </div>
         </div>
       </div>
 
-      <!-- Notes -->
-      ${proposal.notes ? `
-      <div>
-        <h3 class="text-sm font-bold text-gray-500 uppercase mb-2">Notes</h3>
-        <p class="text-gray-600 text-sm whitespace-pre-line">${proposal.notes}</p>
+      <!-- Project Title -->
+      <div class="px-8 py-5 border-b border-gray-100">
+        <h2 class="text-xl font-bold text-gray-800"><i class="fas fa-hard-hat mr-2 brand-text"></i>${proposal.title}</h2>
+      </div>
+
+      <!-- Scope of Work -->
+      ${proposal.scope_of_work ? `
+      <div class="px-8 py-5 border-b border-gray-100">
+        <h3 class="text-sm font-bold uppercase tracking-widest text-gray-400 mb-3"><i class="fas fa-clipboard-list mr-1.5"></i>Scope of Work</h3>
+        <p class="text-gray-700 leading-relaxed whitespace-pre-line">${proposal.scope_of_work}</p>
       </div>` : ''}
 
-      <!-- Valid Until -->
-      ${proposal.valid_until ? `
-      <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-700">
-        <i class="fas fa-clock mr-1"></i>This proposal is valid until <strong>${new Date(proposal.valid_until).toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' })}</strong>
+      <!-- Materials Detail -->
+      ${proposal.materials_detail ? `
+      <div class="px-8 py-5 border-b border-gray-100">
+        <h3 class="text-sm font-bold uppercase tracking-widest text-gray-400 mb-3"><i class="fas fa-boxes-stacked mr-1.5"></i>Materials</h3>
+        <p class="text-gray-700 leading-relaxed whitespace-pre-line">${proposal.materials_detail}</p>
+      </div>` : ''}
+
+      <!-- Pricing / Line Items -->
+      <div class="px-8 py-6 border-b border-gray-100">
+        <h3 class="text-sm font-bold uppercase tracking-widest text-gray-400 mb-4"><i class="fas fa-dollar-sign mr-1.5"></i>Pricing</h3>
+        ${itemsHtml}
+        
+        <!-- Totals -->
+        <div class="mt-4 pt-4 border-t border-gray-200 flex justify-end">
+          <div class="w-full max-w-xs space-y-1.5">
+            ${proposal.subtotal ? `<div class="flex justify-between text-sm"><span class="text-gray-500">Subtotal</span><span class="text-gray-700 font-medium">$${parseFloat(proposal.subtotal).toFixed(2)}</span></div>` : ''}
+            ${proposal.tax_amount && proposal.tax_amount > 0 ? `<div class="flex justify-between text-sm"><span class="text-gray-500">Tax (${proposal.tax_rate || 5}% GST)</span><span class="text-gray-700 font-medium">$${parseFloat(proposal.tax_amount).toFixed(2)}</span></div>` : ''}
+            <div class="flex justify-between text-lg pt-2 border-t-2 border-gray-300">
+              <span class="font-bold brand-text">Total</span>
+              <span class="font-black brand-text">$${parseFloat(proposal.total_amount).toFixed(2)} CAD</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Warranty Terms -->
+      ${proposal.warranty_terms ? `
+      <div class="px-8 py-5 border-b border-gray-100">
+        <h3 class="text-sm font-bold uppercase tracking-widest text-gray-400 mb-3"><i class="fas fa-shield-halved mr-1.5"></i>Warranty</h3>
+        <p class="text-gray-700 leading-relaxed whitespace-pre-line">${proposal.warranty_terms}</p>
+      </div>` : ''}
+
+      <!-- Payment Terms -->
+      ${proposal.payment_terms ? `
+      <div class="px-8 py-5 border-b border-gray-100">
+        <h3 class="text-sm font-bold uppercase tracking-widest text-gray-400 mb-3"><i class="fas fa-credit-card mr-1.5"></i>Payment Terms</h3>
+        <p class="text-gray-700 leading-relaxed whitespace-pre-line">${proposal.payment_terms}</p>
+      </div>` : ''}
+
+      <!-- Notes -->
+      ${proposal.notes ? `
+      <div class="px-8 py-5 border-b border-gray-100">
+        <h3 class="text-sm font-bold uppercase tracking-widest text-gray-400 mb-3"><i class="fas fa-sticky-note mr-1.5"></i>Additional Notes</h3>
+        <p class="text-gray-600 text-sm leading-relaxed whitespace-pre-line">${proposal.notes}</p>
+      </div>` : ''}
+
+      <!-- Valid Until Banner -->
+      ${validUntil && !isResponded ? `
+      <div class="mx-8 my-5 bg-amber-50 border border-amber-200 rounded-xl px-5 py-3 text-sm text-amber-700 flex items-center">
+        <i class="fas fa-clock mr-2 text-amber-500"></i>
+        This proposal is valid until <strong class="ml-1">${validUntil}</strong>
+      </div>` : ''}
+
+      <!-- Accept / Decline Actions -->
+      ${!isResponded ? `
+      <div class="px-8 py-8 no-print" id="actionSection">
+        <div class="bg-gray-50 rounded-2xl p-6 border border-gray-200">
+          <h3 class="text-center text-lg font-bold text-gray-800 mb-2">Ready to proceed?</h3>
+          <p class="text-center text-sm text-gray-500 mb-6">Accept this proposal to get your roofing project started</p>
+          
+          <!-- Signature Pad -->
+          <div class="mb-5">
+            <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Your Signature (optional)</label>
+            <canvas id="signaturePad" class="signature-pad w-full bg-white" width="600" height="100"></canvas>
+            <div class="flex justify-end mt-1">
+              <button onclick="clearSignature()" class="text-xs text-gray-400 hover:text-gray-600"><i class="fas fa-eraser mr-1"></i>Clear</button>
+            </div>
+          </div>
+
+          <div class="flex gap-3">
+            <button onclick="respondProposal('accept')" class="flex-1 brand-bg brand-bg-hover text-white py-3.5 rounded-xl font-bold text-sm transition-all hover:shadow-lg">
+              <i class="fas fa-check-circle mr-2"></i>Accept Proposal
+            </button>
+            <button onclick="respondProposal('decline')" class="px-6 py-3.5 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-xl font-semibold text-sm transition-all">
+              Decline
+            </button>
+          </div>
+        </div>
+      </div>` : `
+      <div class="px-8 py-8">
+        <div class="rounded-2xl p-6 text-center ${isAccepted ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}">
+          <div class="w-16 h-16 mx-auto mb-3 rounded-full flex items-center justify-center ${isAccepted ? 'bg-green-100' : 'bg-red-100'}">
+            <i class="fas ${isAccepted ? 'fa-check-circle text-green-600' : 'fa-times-circle text-red-600'} text-2xl"></i>
+          </div>
+          <h3 class="text-lg font-bold ${isAccepted ? 'text-green-800' : 'text-red-800'}">Proposal ${isAccepted ? 'Accepted' : 'Declined'}</h3>
+          <p class="text-sm ${isAccepted ? 'text-green-600' : 'text-red-600'} mt-1">${isAccepted ? (proposal.accepted_at ? 'on ' + new Date(proposal.accepted_at).toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' }) : '') : (proposal.declined_at ? 'on ' + new Date(proposal.declined_at).toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' }) : '')}</p>
+          ${proposal.customer_signature ? `<div class="mt-4"><p class="text-xs text-gray-400 mb-1">Signature</p><img src="${proposal.customer_signature}" alt="Signature" class="max-h-16 mx-auto"></div>` : ''}
+        </div>
+      </div>`}
+
+      <!-- License & Insurance -->
+      ${brandLicense || brandInsurance ? `
+      <div class="px-8 py-4 bg-gray-50/50 text-xs text-gray-400 space-y-0.5">
+        ${brandLicense ? `<p><i class="fas fa-id-card mr-1"></i>License: ${brandLicense}</p>` : ''}
+        ${brandInsurance ? `<p><i class="fas fa-shield-alt mr-1"></i>${brandInsurance}</p>` : ''}
       </div>` : ''}
     </div>
 
     <!-- Footer -->
-    <div class="text-center mt-6 text-xs text-gray-400">
-      Powered by RoofReporterAI
+    <div class="text-center mt-6 text-xs text-gray-400 space-y-1">
+      <p>Powered by <span class="font-semibold">RoofReporterAI</span></p>
     </div>
   </div>
+
+  <script>
+    // Signature pad
+    var canvas = document.getElementById('signaturePad');
+    var ctx = canvas ? canvas.getContext('2d') : null;
+    var drawing = false;
+    var hasSignature = false;
+
+    if (canvas && ctx) {
+      canvas.width = canvas.offsetWidth * 2;
+      canvas.height = 200;
+      ctx.scale(2, 2);
+      ctx.strokeStyle = '#1e293b';
+      ctx.lineWidth = 2;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+
+      function getPos(e) {
+        var rect = canvas.getBoundingClientRect();
+        var x = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
+        var y = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top;
+        return { x: x, y: y };
+      }
+
+      canvas.addEventListener('mousedown', function(e) { drawing = true; ctx.beginPath(); var p = getPos(e); ctx.moveTo(p.x, p.y); canvas.classList.add('active'); });
+      canvas.addEventListener('mousemove', function(e) { if (!drawing) return; var p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); hasSignature = true; });
+      canvas.addEventListener('mouseup', function() { drawing = false; canvas.classList.remove('active'); });
+      canvas.addEventListener('mouseleave', function() { drawing = false; canvas.classList.remove('active'); });
+      canvas.addEventListener('touchstart', function(e) { e.preventDefault(); drawing = true; ctx.beginPath(); var p = getPos(e); ctx.moveTo(p.x, p.y); canvas.classList.add('active'); });
+      canvas.addEventListener('touchmove', function(e) { e.preventDefault(); if (!drawing) return; var p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); hasSignature = true; });
+      canvas.addEventListener('touchend', function() { drawing = false; canvas.classList.remove('active'); });
+    }
+
+    function clearSignature() {
+      if (ctx && canvas) { ctx.clearRect(0, 0, canvas.width, canvas.height); hasSignature = false; }
+    }
+
+    function respondProposal(action) {
+      var confirmMsg = action === 'accept'
+        ? 'Are you sure you want to accept this proposal?'
+        : 'Are you sure you want to decline this proposal?';
+      if (!confirm(confirmMsg)) return;
+
+      var signature = null;
+      if (hasSignature && canvas) {
+        try { signature = canvas.toDataURL('image/png'); } catch(e) {}
+      }
+
+      var btn = event.target;
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Processing...';
+
+      fetch('/api/crm/proposals/respond/${token}', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: action, signature: signature })
+      })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.success) {
+          location.reload();
+        } else {
+          alert(data.error || 'Something went wrong. Please try again.');
+          btn.disabled = false;
+          btn.innerHTML = action === 'accept'
+            ? '<i class="fas fa-check-circle mr-2"></i>Accept Proposal'
+            : 'Decline';
+        }
+      })
+      .catch(function() {
+        alert('Network error. Please check your connection and try again.');
+        btn.disabled = false;
+        btn.innerHTML = action === 'accept'
+          ? '<i class="fas fa-check-circle mr-2"></i>Accept Proposal'
+          : 'Decline';
+      });
+    }
+  </script>
 </body>
 </html>`)
   } catch (err: any) {
-    return c.html(`<html><body><p>Error loading proposal</p></body></html>`, 500)
+    console.error('[Proposal View] Error:', err.message)
+    return c.html(`<!DOCTYPE html><html><head><title>Error</title><script src="https://cdn.tailwindcss.com"></script></head><body class="bg-gray-50 min-h-screen flex items-center justify-center"><div class="text-center"><h1 class="text-xl font-bold text-red-600">Error Loading Proposal</h1><p class="text-gray-500 mt-2">Please try refreshing the page.</p></div></body></html>`, 500)
   }
 })
 app.get('/customer/d2d', (c) => {

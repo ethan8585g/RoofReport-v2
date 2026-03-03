@@ -418,10 +418,35 @@
   // ============================================================
   // MODULE: PROPOSALS
   // ============================================================
+  // MODULE: PROPOSALS — Enhanced with line items, Gmail, tracking
+  // ============================================================
   function initProposals() {
     root.innerHTML = '<div class="text-center py-8"><div class="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-brand-500 mx-auto mb-3"></div></div>';
+    checkGmailStatus();
     loadProposals();
   }
+
+  var _gmailConnected = false;
+  var _gmailEmail = '';
+
+  function checkGmailStatus() {
+    fetch('/api/crm/gmail/status', { headers: authHeadersOnly() })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        _gmailConnected = !!data.connected;
+        _gmailEmail = data.email || '';
+      }).catch(function() {});
+  }
+
+  // Listen for Gmail OAuth popup completion
+  window.addEventListener('message', function(e) {
+    if (e.data && e.data.type === 'gmail_connected') {
+      _gmailConnected = true;
+      _gmailEmail = e.data.email || '';
+      toast('Gmail connected: ' + _gmailEmail);
+      loadProposals(window._propFilter);
+    }
+  });
 
   function loadProposals(statusFilter) {
     var url = '/api/crm/proposals';
@@ -435,8 +460,20 @@
   function renderProposals(data) {
     var proposals = data.proposals || [];
     var stats = data.stats || {};
-    var html = '<div class="flex items-center justify-between mb-5 flex-wrap gap-3"><div><h2 class="text-lg font-bold text-gray-800"><i class="fas fa-file-signature text-amber-500 mr-2"></i>Proposals & Estimates</h2></div><button onclick="window._crmNewProposal()" class="bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-amber-700"><i class="fas fa-plus mr-1"></i>New Proposal</button></div>';
 
+    // Header with Gmail indicator
+    var html = '<div class="flex items-center justify-between mb-5 flex-wrap gap-3">';
+    html += '<div><h2 class="text-lg font-bold text-gray-800"><i class="fas fa-file-signature text-amber-500 mr-2"></i>Proposals & Estimates</h2></div>';
+    html += '<div class="flex items-center gap-2">';
+    // Gmail status indicator
+    html += '<button onclick="window._crmGmailSettings()" class="px-3 py-2 rounded-lg text-xs font-medium border transition-colors ' + (_gmailConnected ? 'bg-green-50 border-green-200 text-green-700 hover:bg-green-100' : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100') + '">';
+    html += '<i class="' + (_gmailConnected ? 'fas fa-check-circle text-green-500' : 'fab fa-google text-gray-400') + ' mr-1.5"></i>';
+    html += _gmailConnected ? 'Gmail Connected' : 'Connect Gmail';
+    html += '</button>';
+    html += '<button onclick="window._crmNewProposal()" class="bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-amber-700"><i class="fas fa-plus mr-1"></i>New Proposal</button>';
+    html += '</div></div>';
+
+    // Stats
     html += '<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">' +
       '<div class="bg-white rounded-xl border p-4 text-center"><p class="text-2xl font-black text-gray-800">' + (stats.total || 0) + '</p><p class="text-[10px] text-gray-500">Total</p></div>' +
       '<div class="bg-white rounded-xl border p-4 text-center"><p class="text-2xl font-black text-amber-600">' + (stats.open_count || 0) + '</p><p class="text-[10px] text-gray-500">Open</p></div>' +
@@ -457,9 +494,31 @@
       html += '<div class="space-y-3">';
       for (var i = 0; i < proposals.length; i++) {
         var p = proposals[i];
-        html += '<div class="bg-white rounded-xl border p-4 hover:shadow-md transition-shadow"><div class="flex items-start justify-between"><div class="min-w-0"><div class="flex items-center gap-2 mb-1"><span class="font-mono text-xs font-bold text-amber-600">' + p.proposal_number + '</span>' + badge(p.status) + (p.view_count > 0 ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-100 text-indigo-700"><i class="fas fa-eye mr-1"></i>' + p.view_count + ' view' + (p.view_count !== 1 ? 's' : '') + '</span>' : '') + '</div><p class="text-gray-800 font-medium text-sm">' + p.title + '</p><p class="text-xs text-gray-500 mt-1"><i class="fas fa-user mr-1"></i>' + (p.customer_name || 'N/A') + (p.property_address ? ' &middot; <i class="fas fa-map-marker-alt mr-1"></i>' + p.property_address : '') + '</p></div><div class="flex flex-col items-end gap-1 flex-shrink-0 ml-4"><span class="text-lg font-black text-gray-800">' + money(p.total_amount) + '</span><div class="flex items-center gap-1">';
-        if (p.status === 'draft') html += '<button onclick="window._crmSendProposal(' + p.id + ')" class="text-xs text-blue-600 hover:underline">Send</button>';
-        if (p.status === 'sent' || p.status === 'viewed') html += '<button onclick="window._crmCopyProposalLink(' + p.id + ')" class="text-xs text-blue-600 hover:underline"><i class="fas fa-link mr-0.5"></i>Link</button>';
+        html += '<div class="bg-white rounded-xl border p-4 hover:shadow-md transition-shadow">';
+        html += '<div class="flex items-start justify-between">';
+        html += '<div class="min-w-0">';
+        html += '<div class="flex items-center gap-2 mb-1 flex-wrap">';
+        html += '<span class="font-mono text-xs font-bold text-amber-600">' + p.proposal_number + '</span>';
+        html += badge(p.status);
+        if (p.view_count > 0) {
+          html += '<button onclick="window._crmViewTracking(' + p.id + ')" class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-100 text-indigo-700 hover:bg-indigo-200 cursor-pointer"><i class="fas fa-eye mr-1"></i>' + p.view_count + ' view' + (p.view_count !== 1 ? 's' : '') + '</button>';
+        }
+        if (p.customer_email) html += '<span class="text-[10px] text-gray-400"><i class="fas fa-envelope mr-0.5"></i>' + p.customer_email + '</span>';
+        html += '</div>';
+        html += '<p class="text-gray-800 font-medium text-sm">' + p.title + '</p>';
+        html += '<p class="text-xs text-gray-500 mt-1"><i class="fas fa-user mr-1"></i>' + (p.customer_name || 'N/A') + (p.property_address ? ' &middot; <i class="fas fa-map-marker-alt mr-1"></i>' + p.property_address : '') + '</p>';
+        html += '</div>';
+        html += '<div class="flex flex-col items-end gap-1 flex-shrink-0 ml-4">';
+        html += '<span class="text-lg font-black text-gray-800">' + money(p.total_amount) + '</span>';
+        html += '<div class="flex items-center gap-1.5 flex-wrap justify-end">';
+        if (p.status === 'draft') {
+          html += '<button onclick="window._crmEditProposal(' + p.id + ')" class="text-xs text-gray-500 hover:text-gray-700"><i class="fas fa-edit"></i></button>';
+          html += '<button onclick="window._crmSendProposal(' + p.id + ')" class="text-xs text-blue-600 hover:underline font-medium"><i class="fas fa-paper-plane mr-0.5"></i>Send</button>';
+        }
+        if (p.status === 'sent' || p.status === 'viewed') {
+          html += '<button onclick="window._crmCopyProposalLink(' + p.id + ')" class="text-xs text-blue-600 hover:underline"><i class="fas fa-link mr-0.5"></i>Link</button>';
+          html += '<button onclick="window._crmSendProposal(' + p.id + ')" class="text-xs text-blue-600 hover:underline"><i class="fas fa-redo mr-0.5"></i>Resend</button>';
+        }
         if (p.status !== 'accepted' && p.status !== 'declined') html += '<button onclick="window._crmMarkProposal(' + p.id + ',\'accepted\')" class="text-xs text-green-600 hover:underline">Won</button>';
         html += '<button onclick="window._crmDeleteProposal(' + p.id + ')" class="text-gray-400 hover:text-red-500"><i class="fas fa-trash text-xs"></i></button>';
         html += '</div></div></div></div>';
@@ -472,32 +531,120 @@
   window._propFilter = '';
   window._crmFilterProposals = function(s) { window._propFilter = s; loadProposals(s); };
 
+  // ---- Gmail Settings Modal ----
+  window._crmGmailSettings = function() {
+    var body = '<div class="space-y-4">';
+    if (_gmailConnected) {
+      body += '<div class="bg-green-50 border border-green-200 rounded-xl p-4 text-center">' +
+        '<div class="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-2"><i class="fas fa-check-circle text-green-600 text-xl"></i></div>' +
+        '<p class="font-semibold text-green-800">Gmail Connected</p>' +
+        '<p class="text-sm text-green-600">' + _gmailEmail + '</p></div>';
+      body += '<p class="text-sm text-gray-600">Proposals will be emailed from your connected Gmail account when you click "Send".</p>';
+      body += '<button onclick="window._crmDisconnectGmail()" class="w-full py-2 border border-red-200 text-red-600 rounded-lg text-sm hover:bg-red-50">Disconnect Gmail</button>';
+    } else {
+      body += '<div class="bg-gray-50 border border-gray-200 rounded-xl p-4 text-center">' +
+        '<div class="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-2"><i class="fab fa-google text-gray-400 text-xl"></i></div>' +
+        '<p class="font-semibold text-gray-700">Connect Your Gmail</p>' +
+        '<p class="text-sm text-gray-500 mt-1">Send proposals directly from your Gmail so customers receive them from your real email address.</p></div>';
+      body += '<button onclick="window._crmConnectGmail()" class="w-full py-3 bg-brand-600 text-white rounded-xl text-sm font-semibold hover:bg-brand-700"><i class="fab fa-google mr-2"></i>Connect Gmail Account</button>';
+      body += '<p class="text-xs text-gray-400 text-center">Without Gmail, proposals will only generate a shareable link.</p>';
+    }
+    body += '</div>';
+    showModal('Gmail Integration', body);
+  };
+
+  window._crmConnectGmail = function() {
+    closeModal();
+    fetch('/api/crm/gmail/connect', { headers: authHeadersOnly() })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.auth_url) {
+          window.open(data.auth_url, 'gmailOAuth', 'width=600,height=700');
+        } else {
+          toast(data.error || 'Gmail not configured', 'error');
+        }
+      }).catch(function(e) { toast('Failed to start Gmail connection: ' + (e.message || 'Network error'), 'error'); });
+  };
+
+  window._crmDisconnectGmail = function() {
+    if (!confirm('Disconnect Gmail? You won\'t be able to email proposals until you reconnect.')) return;
+    fetch('/api/crm/gmail/disconnect', { method: 'POST', headers: authHeaders() })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.success) { _gmailConnected = false; _gmailEmail = ''; closeModal(); toast('Gmail disconnected'); loadProposals(window._propFilter); }
+      }).catch(function(e) { toast('Failed: ' + (e.message || 'Network error'), 'error'); });
+  };
+
+  // ---- New Proposal with Line Items ----
+  var _propLineItems = [];
+
+  function propItemRowHTML(idx, item) {
+    item = item || { description: '', quantity: 1, unit: 'ea', unit_price: 0 };
+    return '<tr data-idx="' + idx + '">' +
+      '<td class="py-1 pr-1"><input type="text" class="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm prop-item-desc" value="' + (item.description || '') + '" placeholder="Description"></td>' +
+      '<td class="py-1 pr-1 w-16"><input type="number" class="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm text-center prop-item-qty" value="' + (item.quantity || 1) + '" min="0.01" step="0.01"></td>' +
+      '<td class="py-1 pr-1 w-16"><select class="w-full px-1 py-1.5 border border-gray-300 rounded-lg text-xs prop-item-unit">' +
+        '<option value="ea"' + (item.unit === 'ea' ? ' selected' : '') + '>ea</option>' +
+        '<option value="sq ft"' + (item.unit === 'sq ft' ? ' selected' : '') + '>sq ft</option>' +
+        '<option value="sq"' + (item.unit === 'sq' ? ' selected' : '') + '>sq</option>' +
+        '<option value="lin ft"' + (item.unit === 'lin ft' ? ' selected' : '') + '>lin ft</option>' +
+        '<option value="hr"' + (item.unit === 'hr' ? ' selected' : '') + '>hr</option>' +
+        '<option value="bundle"' + (item.unit === 'bundle' ? ' selected' : '') + '>bundle</option>' +
+        '<option value="lot"' + (item.unit === 'lot' ? ' selected' : '') + '>lot</option>' +
+      '</select></td>' +
+      '<td class="py-1 pr-1 w-24"><input type="number" class="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm text-right prop-item-price" value="' + (item.unit_price || 0) + '" min="0" step="0.01"></td>' +
+      '<td class="py-1 w-8 text-center"><button onclick="this.closest(\'tr\').remove();window._propRecalc()" class="text-gray-400 hover:text-red-500"><i class="fas fa-times"></i></button></td>' +
+      '</tr>';
+  }
+
   window._crmNewProposal = function() {
+    _propLineItems = [];
     fetch('/api/crm/customers', { headers: authHeadersOnly() })
       .then(function(r) { return r.json(); })
       .then(function(data) {
         var custs = data.customers || [];
         var body = '<div class="space-y-3">' +
           '<div><label class="block text-xs font-medium text-gray-600 mb-1">Customer *</label>' + customerSelectHTML(custs, '', 'propCustomer') + '</div>' +
-          '<div><label class="block text-xs font-medium text-gray-600 mb-1">Title *</label><input type="text" id="propTitle" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" placeholder="e.g. Full Roof Replacement"></div>' +
+          '<div><label class="block text-xs font-medium text-gray-600 mb-1">Title *</label><input type="text" id="propTitle" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" placeholder="e.g. Full Roof Replacement – 2,200 sq ft"></div>' +
           '<div><label class="block text-xs font-medium text-gray-600 mb-1">Property Address</label><input type="text" id="propAddress" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"></div>' +
-          '<div><label class="block text-xs font-medium text-gray-600 mb-1">Scope of Work</label><textarea id="propScope" rows="3" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" placeholder="Describe the work to be performed..."></textarea></div>' +
-          '<div class="grid grid-cols-3 gap-3"><div><label class="block text-xs font-medium text-gray-600 mb-1">Labor $</label><input type="number" id="propLabor" class="w-full px-2 py-2 border border-gray-300 rounded-lg text-sm" step="0.01" value="0"></div><div><label class="block text-xs font-medium text-gray-600 mb-1">Material $</label><input type="number" id="propMaterial" class="w-full px-2 py-2 border border-gray-300 rounded-lg text-sm" step="0.01" value="0"></div><div><label class="block text-xs font-medium text-gray-600 mb-1">Other $</label><input type="number" id="propOther" class="w-full px-2 py-2 border border-gray-300 rounded-lg text-sm" step="0.01" value="0"></div></div>' +
-          '<div><label class="block text-xs font-medium text-gray-600 mb-1">Valid Until</label><input type="date" id="propValid" class="w-full px-2 py-2 border border-gray-300 rounded-lg text-sm"></div>' +
+          '<div><label class="block text-xs font-medium text-gray-600 mb-1">Scope of Work</label><textarea id="propScope" rows="3" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" placeholder="Remove existing shingles, inspect decking, install new underlayment and architectural shingles..."></textarea></div>';
+
+        // Line items section
+        body += '<div class="border border-gray-200 rounded-xl p-3">' +
+          '<div class="flex items-center justify-between mb-2"><label class="text-xs font-semibold text-gray-700 uppercase tracking-wider"><i class="fas fa-list mr-1"></i>Line Items</label>' +
+          '<button onclick="window._propAddItem()" class="text-xs text-brand-600 hover:text-brand-700 font-medium"><i class="fas fa-plus mr-1"></i>Add Item</button></div>' +
+          '<table class="w-full" id="propItemsTable"><thead><tr class="text-[10px] text-gray-500 uppercase">' +
+          '<th class="text-left pb-1">Description</th><th class="text-center pb-1 w-16">Qty</th><th class="text-center pb-1 w-16">Unit</th><th class="text-right pb-1 w-24">Price</th><th class="w-8"></th>' +
+          '</tr></thead><tbody id="propItemsBody">';
+        // Start with one empty row
+        body += propItemRowHTML(0);
+        body += '</tbody></table></div>';
+
+        // Tax & totals
+        body += '<div class="grid grid-cols-2 gap-3">' +
+          '<div><label class="block text-xs font-medium text-gray-600 mb-1">Tax Rate (%)</label><input type="number" id="propTaxRate" class="w-full px-2 py-2 border border-gray-300 rounded-lg text-sm" value="5" min="0" step="0.5"></div>' +
+          '<div class="flex items-end"><div class="w-full bg-gray-50 rounded-lg border p-2 text-right"><p class="text-xs text-gray-500">Estimated Total</p><p class="text-lg font-black text-gray-800" id="propTotalDisplay">$0.00</p></div></div></div>';
+
+        body += '<div><label class="block text-xs font-medium text-gray-600 mb-1">Valid Until</label><input type="date" id="propValid" class="w-full px-2 py-2 border border-gray-300 rounded-lg text-sm"></div>' +
+          '<div><label class="block text-xs font-medium text-gray-600 mb-1">Warranty Terms</label><textarea id="propWarranty" rows="2" class="w-full px-2 py-2 border border-gray-300 rounded-lg text-sm" placeholder="e.g. 25-year manufacturer warranty, 5-year workmanship warranty"></textarea></div>' +
+          '<div><label class="block text-xs font-medium text-gray-600 mb-1">Payment Terms</label><textarea id="propPayment" rows="2" class="w-full px-2 py-2 border border-gray-300 rounded-lg text-sm" placeholder="e.g. 50% deposit upon acceptance, balance due upon completion"></textarea></div>' +
           '<div><label class="block text-xs font-medium text-gray-600 mb-1">Notes</label><textarea id="propNotes" rows="2" class="w-full px-2 py-2 border border-gray-300 rounded-lg text-sm"></textarea></div></div>';
 
         showModal('Create Proposal', body, function() {
           var custId = document.getElementById('propCustomer').value;
           var title = document.getElementById('propTitle').value.trim();
           if (!custId || !title) { toast('Customer and title required', 'error'); return; }
+
+          var items = getProposalItems();
           var payload = {
             crm_customer_id: parseInt(custId), title: title,
             property_address: document.getElementById('propAddress').value.trim(),
             scope_of_work: document.getElementById('propScope').value.trim(),
-            labor_cost: parseFloat(document.getElementById('propLabor').value) || 0,
-            material_cost: parseFloat(document.getElementById('propMaterial').value) || 0,
-            other_cost: parseFloat(document.getElementById('propOther').value) || 0,
+            items: items,
+            tax_rate: parseFloat(document.getElementById('propTaxRate').value) || 5,
             valid_until: document.getElementById('propValid').value || null,
+            warranty_terms: document.getElementById('propWarranty').value.trim() || null,
+            payment_terms: document.getElementById('propPayment').value.trim() || null,
             notes: document.getElementById('propNotes').value.trim()
           };
           fetch('/api/crm/proposals', { method: 'POST', headers: authHeaders(), body: JSON.stringify(payload) })
@@ -505,7 +652,123 @@
             .then(function(res) { if (res.success) { closeModal(); toast('Proposal created!'); loadProposals(); } else { toast(res.error || 'Failed', 'error'); } })
             .catch(function(e) { toast('Network error: ' + (e.message || 'Unknown'), 'error'); });
         }, 'Create Proposal');
+
+        // Auto-recalc on input
+        setTimeout(function() { window._propRecalc(); }, 100);
+      }).catch(function(e) { toast('Failed to load customers: ' + (e.message || 'Network error'), 'error'); });
+  };
+
+  function getProposalItems() {
+    var items = [];
+    var rows = document.querySelectorAll('#propItemsBody tr');
+    rows.forEach(function(row) {
+      var desc = row.querySelector('.prop-item-desc').value.trim();
+      if (!desc) return;
+      items.push({
+        description: desc,
+        quantity: parseFloat(row.querySelector('.prop-item-qty').value) || 1,
+        unit: row.querySelector('.prop-item-unit').value,
+        unit_price: parseFloat(row.querySelector('.prop-item-price').value) || 0
       });
+    });
+    return items;
+  }
+
+  window._propAddItem = function() {
+    var tbody = document.getElementById('propItemsBody');
+    if (!tbody) return;
+    var idx = tbody.querySelectorAll('tr').length;
+    var tr = document.createElement('tbody');
+    tr.innerHTML = propItemRowHTML(idx);
+    tbody.appendChild(tr.firstElementChild);
+  };
+
+  window._propRecalc = function() {
+    var items = getProposalItems();
+    var subtotal = 0;
+    items.forEach(function(it) { subtotal += (it.quantity || 1) * (it.unit_price || 0); });
+    var taxEl = document.getElementById('propTaxRate');
+    var tax = taxEl ? parseFloat(taxEl.value) || 0 : 5;
+    var taxAmt = subtotal * (tax / 100);
+    var total = subtotal + taxAmt;
+    var display = document.getElementById('propTotalDisplay');
+    if (display) display.textContent = '$' + total.toFixed(2);
+  };
+
+  // Recalculate on input changes
+  document.addEventListener('input', function(e) {
+    if (e.target.classList.contains('prop-item-qty') || e.target.classList.contains('prop-item-price') || e.target.id === 'propTaxRate') {
+      window._propRecalc();
+    }
+  });
+
+  // ---- Edit Proposal ----
+  window._crmEditProposal = function(id) {
+    Promise.all([
+      fetch('/api/crm/proposals/' + id, { headers: authHeadersOnly() }).then(function(r) { return r.json(); }),
+      fetch('/api/crm/customers', { headers: authHeadersOnly() }).then(function(r) { return r.json(); })
+    ]).then(function(results) {
+      var propData = results[0];
+      var custData = results[1];
+      var p = propData.proposal;
+      var items = propData.items || [];
+      var custs = custData.customers || [];
+
+      var body = '<div class="space-y-3">' +
+        '<div><label class="block text-xs font-medium text-gray-600 mb-1">Customer *</label>' + customerSelectHTML(custs, p.crm_customer_id, 'propCustomer') + '</div>' +
+        '<div><label class="block text-xs font-medium text-gray-600 mb-1">Title *</label><input type="text" id="propTitle" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" value="' + (p.title || '') + '"></div>' +
+        '<div><label class="block text-xs font-medium text-gray-600 mb-1">Property Address</label><input type="text" id="propAddress" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" value="' + (p.property_address || '') + '"></div>' +
+        '<div><label class="block text-xs font-medium text-gray-600 mb-1">Scope of Work</label><textarea id="propScope" rows="3" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">' + (p.scope_of_work || '') + '</textarea></div>';
+
+      // Line items
+      body += '<div class="border border-gray-200 rounded-xl p-3">' +
+        '<div class="flex items-center justify-between mb-2"><label class="text-xs font-semibold text-gray-700 uppercase tracking-wider"><i class="fas fa-list mr-1"></i>Line Items</label>' +
+        '<button onclick="window._propAddItem()" class="text-xs text-brand-600 hover:text-brand-700 font-medium"><i class="fas fa-plus mr-1"></i>Add Item</button></div>' +
+        '<table class="w-full" id="propItemsTable"><thead><tr class="text-[10px] text-gray-500 uppercase">' +
+        '<th class="text-left pb-1">Description</th><th class="text-center pb-1 w-16">Qty</th><th class="text-center pb-1 w-16">Unit</th><th class="text-right pb-1 w-24">Price</th><th class="w-8"></th>' +
+        '</tr></thead><tbody id="propItemsBody">';
+      if (items.length > 0) {
+        for (var i = 0; i < items.length; i++) body += propItemRowHTML(i, items[i]);
+      } else {
+        body += propItemRowHTML(0);
+      }
+      body += '</tbody></table></div>';
+
+      body += '<div class="grid grid-cols-2 gap-3">' +
+        '<div><label class="block text-xs font-medium text-gray-600 mb-1">Tax Rate (%)</label><input type="number" id="propTaxRate" class="w-full px-2 py-2 border border-gray-300 rounded-lg text-sm" value="' + (p.tax_rate || 5) + '" min="0" step="0.5"></div>' +
+        '<div class="flex items-end"><div class="w-full bg-gray-50 rounded-lg border p-2 text-right"><p class="text-xs text-gray-500">Estimated Total</p><p class="text-lg font-black text-gray-800" id="propTotalDisplay">$0.00</p></div></div></div>';
+
+      body += '<div><label class="block text-xs font-medium text-gray-600 mb-1">Valid Until</label><input type="date" id="propValid" class="w-full px-2 py-2 border border-gray-300 rounded-lg text-sm" value="' + (p.valid_until || '') + '"></div>' +
+        '<div><label class="block text-xs font-medium text-gray-600 mb-1">Warranty Terms</label><textarea id="propWarranty" rows="2" class="w-full px-2 py-2 border border-gray-300 rounded-lg text-sm">' + (p.warranty_terms || '') + '</textarea></div>' +
+        '<div><label class="block text-xs font-medium text-gray-600 mb-1">Payment Terms</label><textarea id="propPayment" rows="2" class="w-full px-2 py-2 border border-gray-300 rounded-lg text-sm">' + (p.payment_terms || '') + '</textarea></div>' +
+        '<div><label class="block text-xs font-medium text-gray-600 mb-1">Notes</label><textarea id="propNotes" rows="2" class="w-full px-2 py-2 border border-gray-300 rounded-lg text-sm">' + (p.notes || '') + '</textarea></div></div>';
+
+      showModal('Edit Proposal', body, function() {
+        var custId = document.getElementById('propCustomer').value;
+        var title = document.getElementById('propTitle').value.trim();
+        if (!custId || !title) { toast('Customer and title required', 'error'); return; }
+
+        var updItems = getProposalItems();
+        var payload = {
+          crm_customer_id: parseInt(custId), title: title,
+          property_address: document.getElementById('propAddress').value.trim(),
+          scope_of_work: document.getElementById('propScope').value.trim(),
+          items: updItems,
+          tax_rate: parseFloat(document.getElementById('propTaxRate').value) || 5,
+          valid_until: document.getElementById('propValid').value || null,
+          warranty_terms: document.getElementById('propWarranty').value.trim() || null,
+          payment_terms: document.getElementById('propPayment').value.trim() || null,
+          notes: document.getElementById('propNotes').value.trim(),
+          status: p.status
+        };
+        fetch('/api/crm/proposals/' + id, { method: 'PUT', headers: authHeaders(), body: JSON.stringify(payload) })
+          .then(function(r) { return r.json(); })
+          .then(function(res) { if (res.success) { closeModal(); toast('Proposal updated!'); loadProposals(window._propFilter); } else { toast(res.error || 'Failed', 'error'); } })
+          .catch(function(e) { toast('Network error: ' + (e.message || 'Unknown'), 'error'); });
+      }, 'Save Changes');
+
+      setTimeout(function() { window._propRecalc(); }, 100);
+    }).catch(function(e) { toast('Failed to load proposal: ' + (e.message || 'Network error'), 'error'); });
   };
 
   window._crmMarkProposal = function(id, status) {
@@ -515,27 +778,49 @@
       .catch(function(e) { toast('Network error: ' + (e.message || 'Unknown'), 'error'); });
   };
 
+  // ---- Send Proposal (via Gmail if connected) ----
   window._crmSendProposal = function(id) {
+    var sendBtn = event.target;
+    var origText = sendBtn.innerHTML;
+    sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    sendBtn.disabled = true;
+
     fetch('/api/crm/proposals/' + id + '/send', { method: 'POST', headers: authHeaders() })
       .then(function(r) { return r.json(); })
       .then(function(res) {
+        sendBtn.innerHTML = origText;
+        sendBtn.disabled = false;
+
         if (res.success) {
-          // Show the trackable link in a modal
-          var linkHtml = '<div class="space-y-4">' +
-            '<p class="text-sm text-gray-600">Your proposal has been marked as <strong>sent</strong>. Share this link with your customer — every time they open it, the view count will update automatically.</p>' +
+          var linkHtml = '<div class="space-y-4">';
+          
+          // Email status
+          if (res.email_sent) {
+            linkHtml += '<div class="bg-green-50 border border-green-200 rounded-xl p-4 text-center">' +
+              '<i class="fas fa-check-circle text-green-600 text-2xl mb-2"></i>' +
+              '<p class="font-semibold text-green-800">Proposal Emailed!</p>' +
+              '<p class="text-sm text-green-600">Sent to ' + res.sent_to + '</p></div>';
+          } else if (res.email_error) {
+            linkHtml += '<div class="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-700">' +
+              '<i class="fas fa-exclamation-triangle mr-1"></i>' + res.email_error + '</div>';
+          }
+
+          linkHtml += '<p class="text-sm text-gray-600">Share this trackable link — every time your customer opens it, the view count updates.</p>' +
             '<div class="bg-gray-50 border rounded-lg p-3 flex items-center gap-2">' +
               '<input type="text" id="proposalLink" value="' + res.public_link + '" class="flex-1 bg-transparent text-sm text-gray-800 font-mono border-0 outline-none" readonly>' +
-              '<button onclick="navigator.clipboard.writeText(document.getElementById(\'proposalLink\').value);this.innerHTML=\'<i class=\\\'fas fa-check\\\'></i>\';setTimeout(function(){},1500)" class="px-3 py-1.5 bg-brand-600 text-white rounded-lg text-xs font-semibold hover:bg-brand-700"><i class="fas fa-copy"></i></button>' +
-            '</div>' +
-            '<p class="text-xs text-gray-400"><i class="fas fa-info-circle mr-1"></i>You can copy this link anytime from the proposal list by clicking the "Link" button.</p>' +
-          '</div>';
-          showModal('Proposal Sent!', linkHtml);
+              '<button onclick="navigator.clipboard.writeText(document.getElementById(\'proposalLink\').value);toast(\'Link copied!\')" class="px-3 py-1.5 bg-brand-600 text-white rounded-lg text-xs font-semibold hover:bg-brand-700"><i class="fas fa-copy"></i></button>' +
+            '</div></div>';
+          showModal(res.email_sent ? 'Proposal Sent!' : 'Proposal Ready', linkHtml);
           loadProposals(window._propFilter);
         } else {
           toast(res.error || 'Failed to send proposal', 'error');
         }
       })
-      .catch(function() { toast('Network error', 'error'); });
+      .catch(function() {
+        sendBtn.innerHTML = origText;
+        sendBtn.disabled = false;
+        toast('Network error', 'error');
+      });
   };
 
   window._crmCopyProposalLink = function(id) {
@@ -552,7 +837,40 @@
         } else {
           toast('No shareable link — send the proposal first.', 'error');
         }
-      });
+      }).catch(function(e) { toast('Failed: ' + (e.message || 'Network error'), 'error'); });
+  };
+
+  // ---- View Tracking Analytics Modal ----
+  window._crmViewTracking = function(id) {
+    fetch('/api/crm/proposals/' + id + '/views', { headers: authHeadersOnly() })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        var body = '<div class="space-y-4">';
+        body += '<div class="grid grid-cols-3 gap-3">' +
+          '<div class="bg-indigo-50 rounded-xl p-3 text-center"><p class="text-2xl font-black text-indigo-700">' + (data.view_count || 0) + '</p><p class="text-[10px] text-indigo-500">Total Views</p></div>' +
+          '<div class="bg-blue-50 rounded-xl p-3 text-center"><p class="text-xs font-semibold text-blue-700">' + (data.sent_at ? fmtDate(data.sent_at) : 'Not sent') + '</p><p class="text-[10px] text-blue-500">Sent</p></div>' +
+          '<div class="bg-purple-50 rounded-xl p-3 text-center"><p class="text-xs font-semibold text-purple-700">' + (data.last_viewed_at ? fmtDate(data.last_viewed_at) : 'Never') + '</p><p class="text-[10px] text-purple-500">Last Viewed</p></div></div>';
+
+        if (data.view_log && data.view_log.length > 0) {
+          body += '<div><h4 class="text-xs font-semibold text-gray-500 uppercase mb-2">View History</h4>' +
+            '<div class="max-h-60 overflow-y-auto space-y-1.5">';
+          for (var i = 0; i < data.view_log.length; i++) {
+            var v = data.view_log[i];
+            var viewDate = v.viewed_at ? new Date(v.viewed_at).toLocaleString() : '';
+            var device = (v.user_agent || '').toLowerCase();
+            var icon = device.indexOf('mobile') > -1 || device.indexOf('iphone') > -1 || device.indexOf('android') > -1 ? 'fa-mobile-alt' : 'fa-desktop';
+            body += '<div class="flex items-center gap-3 bg-gray-50 rounded-lg p-2 text-xs">' +
+              '<i class="fas ' + icon + ' text-gray-400"></i>' +
+              '<div class="flex-1 min-w-0"><p class="text-gray-700 font-medium">' + viewDate + '</p>' +
+              '<p class="text-gray-400 truncate">' + (v.ip_address || '') + '</p></div></div>';
+          }
+          body += '</div></div>';
+        } else {
+          body += '<p class="text-sm text-gray-400 text-center py-4">No views recorded yet.</p>';
+        }
+        body += '</div>';
+        showModal('Proposal Views & Tracking', body);
+      }).catch(function(e) { toast('Failed to load tracking data: ' + (e.message || 'Network error'), 'error'); });
   };
 
   window._crmDeleteProposal = function(id) {
