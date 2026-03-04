@@ -328,6 +328,10 @@ export async function generateReportForOrder(
         }
         const aiGeometry = await analyzeRoofGeometry(overheadImageUrl, geminiEnv)
         if (aiGeometry && aiGeometry.facets && aiGeometry.facets.length > 0) {
+          // Check if geometry exhausted retries (lower confidence)
+          if ((aiGeometry as any)._retryExhausted) {
+            console.warn(`[GenerateDirect] ⚠ AI Geometry used fallback (best-effort after retry exhaustion, score ${(aiGeometry as any)._bestScore}) — measurements may be less accurate`)
+          }
           reportData.ai_geometry = aiGeometry
           console.log(`[GenerateDirect] AI Geometry: ${aiGeometry.facets.length} facets, ${aiGeometry.lines.length} lines`)
 
@@ -714,6 +718,10 @@ reportsRoutes.post('/:orderId/generate-enhanced', async (c) => {
         }
         const aiGeometry = await analyzeRoofGeometry(overheadImageUrl, geminiEnv)
         if (aiGeometry && aiGeometry.facets && aiGeometry.facets.length > 0) {
+          // Check if geometry exhausted retries (lower confidence)
+          if ((aiGeometry as any)._retryExhausted) {
+            console.warn(`[Generate DL] ⚠ AI Geometry used fallback (best-effort after retry exhaustion, score ${(aiGeometry as any)._bestScore}) — measurements may be less accurate`)
+          }
           reportData.ai_geometry = aiGeometry
           console.log(`[Generate DL] AI Geometry: ${aiGeometry.facets.length} facets, ${aiGeometry.lines.length} lines, ${aiGeometry.obstructions.length} obstructions`)
 

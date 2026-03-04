@@ -198,6 +198,7 @@ export async function analyzeRoofGeometry(
   //   4. Point-by-point tracing methodology (walk the edge, don't guess the shape)
   //   5. Facet-first approach: each sloped plane gets its own closed polygon
   //   6. Post-processing validation rejects outputs that look like bounding boxes
+  //   7. AUTO-RETRY: Validation failures trigger up to 3 retries with escalating prompts
   // =============================================================================
   const systemPrompt = `You are a PRECISION CAD MEASUREMENT TOOL designed for exact photogrammetry of residential roof structures from satellite imagery. You are NOT a conversational AI. You produce ONLY precise geometric measurements.
 
@@ -396,108 +397,233 @@ PRECISION REQUIREMENT: ±3 pixels. This data drives material cost calculations f
 
 Return ONLY the JSON object.`
 
-  const text = await callGemini({
-    apiKey: env.apiKey,
-    accessToken: env.accessToken,
-    project: env.project,
-    location: env.location,
-    model: 'gemini-2.5-flash',
-    contents: [{
-      parts: [
-        {
-          inlineData: {
-            mimeType: 'image/png',
-            data: base64Image
-          }
+  // =============================================================================
+  // AUTO-RETRY LOOP — Make validation checks "bite"
+  //
+  // Instead of just logging warnings for lazy geometry, we now:
+  // 1. Run the Gemini call + post-processing
+  // 2. Score the result with hard validation checks
+  // 3. If the result fails critical checks, throw and retry
+  // 4. Track the best attempt across retries (highest quality score)
+  // 5. After MAX_RETRIES exhausted, return best attempt or null for fallback
+  // =============================================================================
+  const MAX_RETRIES = 3
+  let bestAttempt: AIMeasurementAnalysis | null = null
+  let bestScore = -1
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      console.log(`[Gemini] ═══ Geometry attempt ${attempt}/${MAX_RETRIES} ═══`)
+
+      // Build retry-aware user prompt — after first failure, add explicit correction hints
+      let attemptUserPrompt = userPrompt
+      if (attempt === 2) {
+        attemptUserPrompt += `\n\nCRITICAL CORRECTION (attempt 2): Your previous output was REJECTED because it failed validation. Common failures:
+- Perimeter was a convex bounding box (no concave corners for L/T/U shapes)
+- Facets did not share edges with adjacent facets
+- Too few perimeter points for a complex roof
+LOOK MORE CAREFULLY at the roof shape. Trace EVERY corner. Do NOT simplify.`
+      } else if (attempt >= 3) {
+        attemptUserPrompt += `\n\nFINAL ATTEMPT — MAXIMUM PRECISION REQUIRED (attempt ${attempt}):
+Your previous outputs were BOTH rejected for geometric inaccuracy. This is your LAST chance.
+MANDATORY:
+1. Count the visible corners of the roof perimeter BEFORE tracing. Write down the count mentally.
+2. For EACH corner, note its approximate pixel (x,y) location.
+3. Verify that L-junctions, T-junctions, and garage steps create CONCAVE (inward) corners.
+4. Verify each facet polygon SHARES at least one edge with an adjacent facet.
+5. Verify your facet count matches the visible number of distinct slope planes.
+If the roof has wings or bumps, your perimeter MUST have concave vertices. A fully convex polygon = AUTOMATIC REJECTION.`
+      }
+
+      const text = await callGemini({
+        apiKey: env.apiKey,
+        accessToken: env.accessToken,
+        project: env.project,
+        location: env.location,
+        model: 'gemini-2.5-flash',
+        contents: [{
+          parts: [
+            {
+              inlineData: {
+                mimeType: 'image/png',
+                data: base64Image
+              }
+            },
+            { text: attemptUserPrompt }
+          ]
+        }],
+        systemInstruction: {
+          parts: [{ text: systemPrompt }]
         },
-        { text: userPrompt }
-      ]
-    }],
-    systemInstruction: {
-      parts: [{ text: systemPrompt }]
-    },
-    generationConfig: {
-      responseMimeType: 'application/json',
-      temperature: 0.05,
-      topP: 0.8
+        generationConfig: {
+          responseMimeType: 'application/json',
+          temperature: attempt === 1 ? 0.05 : (attempt === 2 ? 0.1 : 0.15), // Slightly raise temp on retries for diversity
+          topP: 0.8
+        }
+      })
+
+      console.log(`[Gemini] Raw response attempt ${attempt} (first 500 chars): ${text.substring(0, 500)}`)
+      const raw = JSON.parse(text) as any
+
+      // Normalize: Gemini may return coordinates in 0-1000 if it ignores our instruction.
+      const needsRescale = detectCoordScale(raw)
+      if (needsRescale) {
+        console.log('[Gemini] Detected 0-1000 coordinate scale — rescaling to 0-640')
+        rescaleAnalysis(raw, 640 / 1000)
+      }
+
+      const analysis = raw as AIMeasurementAnalysis
+
+      // Ensure arrays exist
+      if (!analysis.perimeter) analysis.perimeter = []
+      if (!analysis.facets) analysis.facets = []
+      if (!analysis.lines) analysis.lines = []
+      if (!analysis.obstructions) analysis.obstructions = []
+
+      // Derive perimeter from facets if missing
+      if (analysis.perimeter.length === 0 && analysis.facets.length > 0) {
+        analysis.perimeter = derivePerimeterFromFacets(analysis.facets)
+        console.log(`[Gemini] Derived perimeter (${analysis.perimeter.length} points) from ${analysis.facets.length} facets`)
+      }
+
+      // Clamp all coordinates to 0-640
+      clampCoordinates(analysis)
+
+      // ──────────────────────────────────────────────────────────────
+      // VALIDATION THAT BITES — Score the quality, reject if too low
+      // ──────────────────────────────────────────────────────────────
+      const failures: string[] = []
+      let qualityScore = 0
+
+      // Check 1: Perimeter centroid near center (320,320) — HARD FAIL if > 200px
+      if (analysis.perimeter && analysis.perimeter.length >= 3) {
+        const cx = analysis.perimeter.reduce((s, p) => s + p.x, 0) / analysis.perimeter.length
+        const cy = analysis.perimeter.reduce((s, p) => s + p.y, 0) / analysis.perimeter.length
+        const distFromCenter = Math.sqrt((cx - 320) ** 2 + (cy - 320) ** 2)
+        if (distFromCenter > 200) {
+          failures.push(`CENTROID_OFF: Perimeter centroid (${cx.toFixed(0)},${cy.toFixed(0)}) is ${distFromCenter.toFixed(0)}px from center — likely traced wrong building`)
+        } else {
+          qualityScore += 20  // centroid near center
+          if (distFromCenter < 80) qualityScore += 10  // bonus for very centered
+          console.log(`[Gemini] ✓ Centroid (${cx.toFixed(0)},${cy.toFixed(0)}), ${distFromCenter.toFixed(0)}px from center`)
+        }
+      } else {
+        failures.push(`NO_PERIMETER: Only ${analysis.perimeter?.length || 0} perimeter points — need at least 3`)
+      }
+
+      // Check 2: Convex polygon detection — HARD FAIL for complex roofs
+      // A polygon with 6+ points that is fully convex = lazy bounding box
+      const isConvex = analysis.perimeter.length >= 6 ? checkPolygonConvexity(analysis.perimeter) : false
+      if (isConvex && analysis.perimeter.length >= 6) {
+        failures.push(`CONVEX_BBOX: ${analysis.perimeter.length}-point perimeter is fully convex — looks like a bounding box, not a real roof trace`)
+        console.warn(`[Gemini] ✗ LAZY OUTPUT: ${analysis.perimeter.length}-point convex polygon detected`)
+      } else if (analysis.perimeter.length >= 6) {
+        qualityScore += 25  // concave perimeter = real tracing effort
+        console.log(`[Gemini] ✓ Perimeter has concave sections — real trace`)
+      } else if (analysis.perimeter.length >= 4) {
+        qualityScore += 15  // simple rectangle is OK for small houses
+      }
+
+      // Check 3: Facet count sanity
+      if (analysis.facets.length >= 4) {
+        qualityScore += 20
+        console.log(`[Gemini] ✓ ${analysis.facets.length} facets detected`)
+      } else if (analysis.facets.length >= 2) {
+        qualityScore += 10  // acceptable for simple gable
+        console.log(`[Gemini] ~ ${analysis.facets.length} facets (simple roof)`)
+      } else {
+        failures.push(`LOW_FACETS: Only ${analysis.facets.length} facet(s) — most roofs have at least 4`)
+      }
+
+      // Check 4: Shared facet edges — HARD FAIL if 0 shared edges with 4+ facets
+      let sharedEdgeCount = 0
+      if (analysis.facets.length >= 2) {
+        sharedEdgeCount = countSharedFacetEdges(analysis.facets)
+        console.log(`[Gemini] ${sharedEdgeCount} shared edges between facets`)
+        if (sharedEdgeCount === 0 && analysis.facets.length >= 4) {
+          failures.push(`NO_SHARED_EDGES: ${analysis.facets.length} facets but 0 shared edges — facets are disconnected (should share ridge/hip/valley lines)`)
+        } else if (sharedEdgeCount > 0) {
+          qualityScore += 15 + Math.min(sharedEdgeCount * 2, 10)  // up to 25 points
+        }
+      }
+
+      // Check 5: Pitch diversity — all identical pitches is suspicious
+      if (analysis.facets.length >= 3) {
+        const pitches = analysis.facets.map(f => f.pitch).filter(Boolean)
+        const uniquePitches = new Set(pitches)
+        if (uniquePitches.size === 1 && pitches.length >= 3) {
+          // Not a hard fail, but suspicious — deduct points
+          qualityScore -= 5
+          console.warn(`[Gemini] ~ All ${pitches.length} facets have identical pitch "${pitches[0]}" — suspicious`)
+        } else if (uniquePitches.size >= 2) {
+          qualityScore += 5
+          console.log(`[Gemini] ✓ ${uniquePitches.size} distinct pitch values`)
+        }
+      }
+
+      // Log quality assessment
+      console.log(`[Gemini] Attempt ${attempt} quality score: ${qualityScore}/100, failures: ${failures.length}`)
+      console.log(`[Gemini] Stats: ${analysis.perimeter.length} perim pts, ${analysis.facets.length} facets, ${analysis.lines.length} lines, ${sharedEdgeCount} shared edges`)
+
+      // Track best attempt
+      if (qualityScore > bestScore) {
+        bestScore = qualityScore
+        bestAttempt = analysis
+        console.log(`[Gemini] ★ New best attempt (score ${qualityScore})`)
+      }
+
+      // ──────────────────────────────────────────────────────────────
+      // DECISION: Accept or retry?
+      // ──────────────────────────────────────────────────────────────
+      if (failures.length === 0 && qualityScore >= 50) {
+        // ✅ PASSED — quality geometry, accept immediately
+        console.log(`[Gemini] ✅ Attempt ${attempt} PASSED all validation (score ${qualityScore}) — accepting`)
+        return analysis
+      }
+
+      if (failures.length > 0) {
+        // ❌ HARD FAILURES — must retry
+        const failMsg = failures.join('; ')
+        console.warn(`[Gemini] ✗ Attempt ${attempt} FAILED validation: ${failMsg}`)
+        if (attempt < MAX_RETRIES) {
+          console.log(`[Gemini] → Retrying (${MAX_RETRIES - attempt} attempts remaining)...`)
+          // Small delay before retry to avoid rate limiting
+          await new Promise(resolve => setTimeout(resolve, 500))
+          continue  // next iteration of retry loop
+        }
+      } else if (qualityScore < 50) {
+        // ⚠ LOW QUALITY — no hard failures but score too low, retry if possible
+        console.warn(`[Gemini] ⚠ Attempt ${attempt} low quality (score ${qualityScore} < 50)`)
+        if (attempt < MAX_RETRIES) {
+          console.log(`[Gemini] → Retrying for better quality...`)
+          await new Promise(resolve => setTimeout(resolve, 500))
+          continue
+        }
+      }
+
+    } catch (err: any) {
+      console.error(`[Gemini] ✗ Attempt ${attempt} error: ${err.message}`)
+      if (attempt < MAX_RETRIES) {
+        console.log(`[Gemini] → Retrying after error (${MAX_RETRIES - attempt} remaining)...`)
+        await new Promise(resolve => setTimeout(resolve, 1000))
+        continue
+      }
     }
-  })
-
-  console.log(`[Gemini] Raw response (first 800 chars): ${text.substring(0, 800)}`)
-  const raw = JSON.parse(text) as any
-
-  // Normalize: Gemini may return coordinates in 0-1000 if it ignores our instruction.
-  // Detect and rescale to 0-640 if needed.
-  const needsRescale = detectCoordScale(raw)
-  if (needsRescale) {
-    console.log('[Gemini] Detected 0-1000 coordinate scale — rescaling to 0-640')
-    rescaleAnalysis(raw, 640 / 1000)
   }
 
-  const analysis = raw as AIMeasurementAnalysis
-
-  // Validate and ensure perimeter exists
-  if (!analysis.perimeter) analysis.perimeter = []
-  if (!analysis.facets) analysis.facets = []
-  if (!analysis.lines) analysis.lines = []
-  if (!analysis.obstructions) analysis.obstructions = []
-
-  // If Gemini returned facets but no perimeter, derive perimeter from facet edges
-  if (analysis.perimeter.length === 0 && analysis.facets.length > 0) {
-    analysis.perimeter = derivePerimeterFromFacets(analysis.facets)
-    console.log(`[Gemini] Derived perimeter (${analysis.perimeter.length} points) from ${analysis.facets.length} facets`)
+  // ═══════════════════════════════════════════════════════════════════
+  // ALL RETRIES EXHAUSTED — Return best attempt or null
+  // ═══════════════════════════════════════════════════════════════════
+  if (bestAttempt) {
+    console.warn(`[Gemini] ⚠ All ${MAX_RETRIES} attempts used. Returning best attempt (score ${bestScore}). Pipeline should verify and may fall back to Solar API standard segments.`)
+    // Tag the result so the pipeline knows this was not a clean pass
+    ;(bestAttempt as any)._retryExhausted = true
+    ;(bestAttempt as any)._bestScore = bestScore
+    return bestAttempt
   }
 
-  // Clamp all coordinates to 0-640
-  clampCoordinates(analysis)
-
-  // ──────────────────────────────────────────────
-  // POST-PROCESSING VALIDATION: Reject lazy outputs
-  // ──────────────────────────────────────────────
-  
-  // Check 1: Perimeter centroid should be near center (320,320)
-  if (analysis.perimeter && analysis.perimeter.length >= 3) {
-    const cx = analysis.perimeter.reduce((s, p) => s + p.x, 0) / analysis.perimeter.length
-    const cy = analysis.perimeter.reduce((s, p) => s + p.y, 0) / analysis.perimeter.length
-    const distFromCenter = Math.sqrt((cx - 320) ** 2 + (cy - 320) ** 2)
-    if (distFromCenter > 200) {
-      console.warn(`[Gemini] ⚠ Perimeter centroid (${cx.toFixed(0)},${cy.toFixed(0)}) is ${distFromCenter.toFixed(0)}px from center — may have traced wrong building`)
-    } else {
-      console.log(`[Gemini] ✓ Perimeter centroid (${cx.toFixed(0)},${cy.toFixed(0)}), ${distFromCenter.toFixed(0)}px from center`)
-    }
-  }
-
-  // Check 2: Detect convex bounding box (lazy hexagon detection)
-  // A real roof with wings/bumps has CONCAVE sections (interior angles > 180°)
-  // If all interior angles are < 180°, the polygon is convex = likely a bounding box
-  if (analysis.perimeter && analysis.perimeter.length >= 6) {
-    const isConvex = checkPolygonConvexity(analysis.perimeter)
-    if (isConvex) {
-      console.warn(`[Gemini] ⚠ LAZY OUTPUT DETECTED: ${analysis.perimeter.length}-point perimeter is fully CONVEX (no concave corners). For complex roofs this likely means Gemini drew a bounding box instead of tracing the actual shape.`)
-    } else {
-      console.log(`[Gemini] ✓ Perimeter has concave sections — traces actual roof shape`)
-    }
-  }
-
-  // Check 3: Facet count sanity
-  if (analysis.facets.length < 2) {
-    console.warn(`[Gemini] ⚠ Only ${analysis.facets.length} facet(s) detected — most roofs have at least 4`)
-  } else if (analysis.facets.length >= 4) {
-    console.log(`[Gemini] ✓ ${analysis.facets.length} facets detected`)
-  }
-
-  // Check 4: Facets should share edges (adjacent facets have common vertices)
-  if (analysis.facets.length >= 2) {
-    const sharedEdgeCount = countSharedFacetEdges(analysis.facets)
-    console.log(`[Gemini] ✓ ${sharedEdgeCount} shared edges between adjacent facets`)
-    if (sharedEdgeCount === 0 && analysis.facets.length >= 4) {
-      console.warn(`[Gemini] ⚠ No shared edges between facets — facet polygons may be disconnected/overlapping incorrectly`)
-    }
-  }
-
-  console.log(`[Gemini] Final: ${analysis.perimeter.length} perimeter pts, ${analysis.facets.length} facets, ${analysis.lines.length} lines, ${analysis.obstructions.length} obstructions`)
-
-  return analysis
+  console.error(`[Gemini] ✗ All ${MAX_RETRIES} attempts failed with no usable geometry. Returning null — pipeline will fall back to Solar API / DataLayers segments.`)
+  return null
 }
 
 // ============================================================
