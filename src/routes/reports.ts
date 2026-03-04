@@ -330,6 +330,26 @@ export async function generateReportForOrder(
         if (aiGeometry && aiGeometry.facets && aiGeometry.facets.length > 0) {
           reportData.ai_geometry = aiGeometry
           console.log(`[GenerateDirect] AI Geometry: ${aiGeometry.facets.length} facets, ${aiGeometry.lines.length} lines`)
+
+          // ── RE-GENERATE SEGMENTS FROM REAL POLYGON GEOMETRY ──
+          // Now that we have AI facets, replace the hardcoded-percentage segments
+          // with polygon-area-derived segments for accurate per-facet measurements.
+          const aiSegments = generateSegmentsFromAIGeometry(
+            aiGeometry,
+            reportData.total_footprint_sqft,
+            reportData.roof_pitch_degrees
+          )
+          if (aiSegments.length >= 2) {
+            console.log(`[GenerateDirect] Replaced ${reportData.segments.length} template segments with ${aiSegments.length} polygon-measured segments`)
+            reportData.segments = aiSegments
+            // Re-derive edges and materials from the new geometry-based segments
+            const newEdges = generateEdgesFromSegments(aiSegments, reportData.total_footprint_sqft)
+            const newEdgeSummary = computeEdgeSummary(newEdges)
+            const newMaterials = computeMaterialEstimate(reportData.total_true_area_sqft, newEdges, aiSegments)
+            reportData.edges = newEdges
+            reportData.edge_summary = newEdgeSummary
+            reportData.materials = newMaterials
+          }
         }
       }
     } catch (geminiErr: any) {
@@ -696,6 +716,23 @@ reportsRoutes.post('/:orderId/generate-enhanced', async (c) => {
         if (aiGeometry && aiGeometry.facets && aiGeometry.facets.length > 0) {
           reportData.ai_geometry = aiGeometry
           console.log(`[Generate DL] AI Geometry: ${aiGeometry.facets.length} facets, ${aiGeometry.lines.length} lines, ${aiGeometry.obstructions.length} obstructions`)
+
+          // ── RE-GENERATE SEGMENTS FROM REAL POLYGON GEOMETRY ──
+          const aiSegments = generateSegmentsFromAIGeometry(
+            aiGeometry,
+            reportData.total_footprint_sqft,
+            reportData.roof_pitch_degrees
+          )
+          if (aiSegments.length >= 2) {
+            console.log(`[Generate DL] Replaced ${reportData.segments.length} template segments with ${aiSegments.length} polygon-measured segments`)
+            reportData.segments = aiSegments
+            const newEdges = generateEdgesFromSegments(aiSegments, reportData.total_footprint_sqft)
+            const newEdgeSummary = computeEdgeSummary(newEdges)
+            const newMaterials = computeMaterialEstimate(reportData.total_true_area_sqft, newEdges, aiSegments)
+            reportData.edges = newEdges
+            reportData.edge_summary = newEdgeSummary
+            reportData.materials = newMaterials
+          }
         }
       }
     } catch (geminiErr: any) {
@@ -866,9 +903,28 @@ reportsRoutes.post('/:orderId/generate-enhanced', async (c) => {
 // When we only have aggregate DSM data (no per-segment breakdown),
 // we estimate segments based on typical roof geometry patterns
 // ============================================================
-function generateSegmentsFromDLAnalysis(dl: DataLayersAnalysis): RoofSegment[] {
+function generateSegmentsFromDLAnalysis(dl: DataLayersAnalysis, aiGeometry?: AIMeasurementAnalysis | null): RoofSegment[] {
   const totalFootprintSqft = dl.area.flatAreaSqft
   const avgPitch = dl.area.avgPitchDeg
+
+  // ──────────────────────────────────────────────────────────
+  // PREFERRED PATH: Generate segments from actual AI geometry
+  // Each facet's area is computed from its real polygon shape,
+  // not hardcoded percentages.
+  // ──────────────────────────────────────────────────────────
+  if (aiGeometry?.facets && aiGeometry.facets.length >= 2) {
+    const aiSegments = generateSegmentsFromAIGeometry(aiGeometry, totalFootprintSqft, avgPitch)
+    if (aiSegments.length >= 2) {
+      console.log(`[Segments] Generated ${aiSegments.length} segments from AI geometry polygons (real measurement)`)
+      return aiSegments
+    }
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // FALLBACK: Hardcoded template percentages (last resort)
+  // Only used when AI geometry is unavailable or has < 2 facets
+  // ──────────────────────────────────────────────────────────
+  console.log(`[Segments] FALLBACK: Using hardcoded template percentages (no AI geometry available)`)
 
   // Determine approximate segment count from roof area
   // Larger roofs tend to have more segments
@@ -2000,7 +2056,7 @@ function generateProfessionalReportHTML(report: RoofReport): string {
   const facetColors = ['#4A90D9','#E8634A','#5CB85C','#F5A623','#9B59B6','#E84393','#2ECC71','#F39C12','#3498DB','#8E44AD','#E67E22','#27AE60']
 
   // Generate satellite overlay SVG from AI geometry
-  const overlaySVG = generateSatelliteOverlaySVG(report.ai_geometry, report.segments, report.edges, es, facetColors)
+  const overlaySVG = generateSatelliteOverlaySVG(report.ai_geometry, report.segments, report.edges, es, facetColors, report.total_footprint_sqft, report.roof_pitch_degrees)
   const hasOverlay = overlaySVG.length > 0
   const overlayLegend = hasOverlay ? generateOverlayLegend(es, !!(report.ai_geometry?.obstructions?.length)) : ''
 
@@ -2797,6 +2853,202 @@ function pixelDistance(x1: number, y1: number, x2: number, y2: number): number {
 }
 
 // ============================================================
+// POLYGON GEOMETRY UTILITIES — Real area from actual AI polygons
+// ============================================================
+
+/**
+ * Shoelace formula: compute the absolute area of a polygon from its vertices.
+ * Works for any simple (non-self-intersecting) polygon.
+ * Returns area in pixel² (on the 640×640 coordinate space).
+ */
+function polygonPixelArea(points: { x: number; y: number }[]): number {
+  if (!points || points.length < 3) return 0
+  let area = 0
+  const n = points.length
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n
+    area += points[i].x * points[j].y
+    area -= points[j].x * points[i].y
+  }
+  return Math.abs(area) / 2
+}
+
+/**
+ * Compute the scale factor: sqft per pixel² on the 640×640 satellite image.
+ *
+ * Strategy: We know the total roof footprint in sqft (from Google Solar API or DSM),
+ * and we know the total perimeter polygon pixel area (from AI geometry).
+ * The ratio gives us an exact conversion factor for that specific image.
+ *
+ * If AI geometry has facets, we sum all facet pixel areas (more precise than
+ * perimeter since facets may overlap slightly less).
+ * Falls back to perimeter polygon area, then to zoom-based estimate.
+ */
+function computePixelToSqftScale(
+  aiGeometry: AIMeasurementAnalysis | null | undefined,
+  totalFootprintSqft: number,
+  latitude?: number | null,
+  zoom?: number
+): number {
+  if (!totalFootprintSqft || totalFootprintSqft <= 0) return 0
+
+  // Method 1: Use sum of all facet polygon areas as the pixel reference
+  if (aiGeometry?.facets && aiGeometry.facets.length >= 2) {
+    const totalFacetPx = aiGeometry.facets.reduce((sum, f) => {
+      return sum + polygonPixelArea(f.points || [])
+    }, 0)
+    if (totalFacetPx > 100) { // sanity check: at least ~10x10 px
+      return totalFootprintSqft / totalFacetPx
+    }
+  }
+
+  // Method 2: Use perimeter polygon area
+  if (aiGeometry?.perimeter && aiGeometry.perimeter.length >= 3) {
+    const perimPx = polygonPixelArea(aiGeometry.perimeter)
+    if (perimPx > 100) {
+      return totalFootprintSqft / perimPx
+    }
+  }
+
+  // Method 3: Zoom-based estimate (last resort)
+  // At scale=2, the 640-px coordinate space covers 1280 actual pixels.
+  // metersPerPixel640 = (ground meters per actual pixel) × 2
+  // At zoom 20, lat 53°N: 1 px (in 640 space) ≈ 0.149 m
+  // At zoom 19, lat 53°N: 1 px (in 640 space) ≈ 0.298 m
+  if (latitude && zoom) {
+    const metersPerPx640 = (156543.03392 * Math.cos((latitude || 53) * Math.PI / 180)) / Math.pow(2, zoom) * 2
+    const sqftPerPx2 = (metersPerPx640 * metersPerPx640) * 10.7639
+    return sqftPerPx2
+  }
+
+  return 0
+}
+
+/**
+ * Parse pitch from AI facet's pitch string (e.g. "25 deg", "6/12", "22.5°")
+ * Returns degrees. Falls back to the given default if unparseable.
+ */
+function parseFacetPitch(pitchStr: string | undefined, defaultDeg: number): number {
+  if (!pitchStr) return defaultDeg
+  // Try "X/12" ratio format
+  const ratioMatch = pitchStr.match(/(\d+(?:\.\d+)?)\s*\/\s*12/)
+  if (ratioMatch) {
+    return Math.atan(parseFloat(ratioMatch[1]) / 12) * 180 / Math.PI
+  }
+  // Try "X deg" or "X°" format
+  const degMatch = pitchStr.match(/(\d+(?:\.\d+)?)\s*(?:deg|°)/)
+  if (degMatch) {
+    return parseFloat(degMatch[1])
+  }
+  // Try bare number
+  const num = parseFloat(pitchStr)
+  if (!isNaN(num) && num > 0 && num < 90) return num
+  return defaultDeg
+}
+
+/**
+ * Parse azimuth from AI facet's azimuth string (e.g. "180 deg", "South", "SW")
+ * Returns degrees. Falls back to 180 if unparseable.
+ */
+function parseFacetAzimuth(azStr: string | undefined): number {
+  if (!azStr) return 180
+  // Try numeric
+  const degMatch = azStr.match(/(\d+(?:\.\d+)?)\s*(?:deg|°)?/)
+  if (degMatch) return parseFloat(degMatch[1])
+  // Try cardinal direction
+  const cardinals: Record<string, number> = {
+    'N': 0, 'NNE': 22.5, 'NE': 45, 'ENE': 67.5, 'E': 90, 'ESE': 112.5,
+    'SE': 135, 'SSE': 157.5, 'S': 180, 'SSW': 202.5, 'SW': 225, 'WSW': 247.5,
+    'W': 270, 'WNW': 292.5, 'NW': 315, 'NNW': 337.5,
+    'NORTH': 0, 'SOUTH': 180, 'EAST': 90, 'WEST': 270
+  }
+  const upper = azStr.trim().toUpperCase()
+  if (cardinals[upper] !== undefined) return cardinals[upper]
+  return 180
+}
+
+/**
+ * Generate RoofSegment[] from actual AI geometry facet polygons.
+ * Each segment's area is computed from its polygon's pixel area × scale factor,
+ * then pitch-corrected to true area.
+ * This completely replaces the hardcoded percentage approach.
+ */
+function generateSegmentsFromAIGeometry(
+  aiGeometry: AIMeasurementAnalysis,
+  totalFootprintSqft: number,
+  avgPitchDeg: number
+): RoofSegment[] {
+  const facets = aiGeometry.facets
+  if (!facets || facets.length === 0) return []
+
+  const scaleFactor = computePixelToSqftScale(aiGeometry, totalFootprintSqft)
+  if (scaleFactor <= 0) return []
+
+  const segments: RoofSegment[] = facets.map((facet, i) => {
+    const pxArea = polygonPixelArea(facet.points || [])
+    const footprintSqft = pxArea * scaleFactor
+    const pitchDeg = parseFacetPitch(facet.pitch, avgPitchDeg)
+    const azimuthDeg = parseFacetAzimuth(facet.azimuth)
+    const trueAreaSqft = trueAreaFromFootprint(footprintSqft, pitchDeg)
+    const trueAreaSqm = trueAreaSqft * 0.0929
+
+    // Compute centroid for directional naming
+    const cx = (facet.points || []).reduce((s, p) => s + p.x, 0) / ((facet.points || []).length || 1)
+    const cy = (facet.points || []).reduce((s, p) => s + p.y, 0) / ((facet.points || []).length || 1)
+    const dirName = degreesToCardinal(azimuthDeg)
+    const facetLabel = facet.id || `Facet ${i + 1}`
+
+    return {
+      name: `${dirName} ${facetLabel}`,
+      footprint_area_sqft: Math.round(footprintSqft),
+      true_area_sqft: Math.round(trueAreaSqft),
+      true_area_sqm: Math.round(trueAreaSqm * 10) / 10,
+      pitch_degrees: Math.round(pitchDeg * 10) / 10,
+      pitch_ratio: pitchToRatio(pitchDeg),
+      azimuth_degrees: Math.round(azimuthDeg * 10) / 10,
+      azimuth_direction: dirName,
+      _pixel_area: Math.round(pxArea), // keep for debug/overlay
+    } as RoofSegment
+  })
+
+  return segments
+}
+
+/**
+ * For SVG overlay labels: compute per-facet display data directly from polygon geometry.
+ * Returns array aligned 1:1 with aiGeometry.facets, each with real sqft + pitch.
+ * This replaces the broken segments[i] || segments[0] fallback entirely.
+ */
+function computeFacetDisplayData(
+  aiGeometry: AIMeasurementAnalysis,
+  totalFootprintSqft: number,
+  avgPitchDeg: number
+): { footprint_sqft: number; true_area_sqft: number; pitch_deg: number; pitch_ratio: string }[] {
+  const facets = aiGeometry.facets
+  if (!facets || facets.length === 0) return []
+
+  const scaleFactor = computePixelToSqftScale(aiGeometry, totalFootprintSqft)
+  if (scaleFactor <= 0) {
+    // Can't compute — return empty (overlay will skip labels)
+    return []
+  }
+
+  return facets.map((facet) => {
+    const pxArea = polygonPixelArea(facet.points || [])
+    const footprintSqft = pxArea * scaleFactor
+    const pitchDeg = parseFacetPitch(facet.pitch, avgPitchDeg)
+    const trueAreaSqft = trueAreaFromFootprint(footprintSqft, pitchDeg)
+
+    return {
+      footprint_sqft: Math.round(footprintSqft),
+      true_area_sqft: Math.round(trueAreaSqft),
+      pitch_deg: Math.round(pitchDeg * 10) / 10,
+      pitch_ratio: pitchToRatio(pitchDeg)
+    }
+  })
+}
+
+// ============================================================
 // HELPER: Calculate the angle of rotation for a label along a line
 // Returns degrees for SVG transform rotate
 // ============================================================
@@ -2864,7 +3116,9 @@ function generateSatelliteOverlaySVG(
   segments: RoofSegment[],
   edges: EdgeMeasurement[],
   edgeSummary: { total_ridge_ft: number; total_hip_ft: number; total_valley_ft: number; total_eave_ft: number; total_rake_ft: number },
-  colors: string[]
+  colors: string[],
+  totalFootprintSqft: number = 0,
+  avgPitchDeg: number = 25
 ): string {
   if (!aiGeometry) return ''
   
@@ -3099,25 +3353,41 @@ function generateSatelliteOverlaySVG(
   })
 
   // ====================================================================
-  // 5. DRAW FACET AREA LABELS — centered on each roof section
+  // 5. DRAW FACET AREA LABELS — computed from actual polygon geometry
+  //    Uses Shoelace formula for pixel area → scale to sqft → pitch-correct
+  //    Completely bypasses the old segments[i] fallback that caused duplication
   // ====================================================================
   if (hasFacets) {
+    // Compute per-facet display data from real polygon geometry
+    const facetData = computeFacetDisplayData(aiGeometry!, totalFootprintSqft, avgPitchDeg)
+
     aiGeometry.facets.forEach((facet, i) => {
       if (!facet.points || facet.points.length < 3) return
-      const seg = segments[i] || segments[0]
-      if (!seg) return
 
       const color = colors[i % colors.length]
       const cx = facet.points.reduce((s, p) => s + p.x, 0) / facet.points.length
       const cy = facet.points.reduce((s, p) => s + p.y, 0) / facet.points.length
 
-      const areaText = `${seg.true_area_sqft.toLocaleString()} ft²`
+      // Use polygon-derived data if available, else fall back to legacy segment data
+      let areaText: string
+      let pitchText: string
+      if (facetData[i] && facetData[i].true_area_sqft > 0) {
+        areaText = `${facetData[i].true_area_sqft.toLocaleString()} ft²`
+        pitchText = facetData[i].pitch_ratio
+      } else {
+        // Last-resort fallback: use segment data (but this should rarely hit now)
+        const seg = segments[i] || segments[segments.length - 1] || segments[0]
+        if (!seg) return
+        areaText = `${seg.true_area_sqft.toLocaleString()} ft²`
+        pitchText = seg.pitch_ratio
+      }
+
       const pillW = Math.max(areaText.length * 7 + 14, 80)
       const pillH = 30
 
       svg += `<rect x="${(cx - pillW / 2).toFixed(1)}" y="${(cy - pillH / 2).toFixed(1)}" width="${pillW.toFixed(1)}" height="${pillH}" rx="5" fill="rgba(0,0,0,0.8)" stroke="${color}" stroke-width="1.2"/>`
-      svg += `<text x="${cx.toFixed(1)}" y="${(cy - 1).toFixed(1)}" text-anchor="middle" font-size="12" font-weight="900" fill="#fff" font-family="Inter,system-ui,sans-serif">${seg.true_area_sqft.toLocaleString()} ft²</text>`
-      svg += `<text x="${cx.toFixed(1)}" y="${(cy + 12).toFixed(1)}" text-anchor="middle" font-size="9" font-weight="600" fill="${color}" font-family="Inter,system-ui,sans-serif">${seg.pitch_ratio}</text>`
+      svg += `<text x="${cx.toFixed(1)}" y="${(cy - 1).toFixed(1)}" text-anchor="middle" font-size="12" font-weight="900" fill="#fff" font-family="Inter,system-ui,sans-serif">${areaText}</text>`
+      svg += `<text x="${cx.toFixed(1)}" y="${(cy + 12).toFixed(1)}" text-anchor="middle" font-size="9" font-weight="600" fill="${color}" font-family="Inter,system-ui,sans-serif">${pitchText}</text>`
     })
   }
 
