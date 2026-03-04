@@ -57,10 +57,12 @@ interface GeminiCallOptions {
   contents: any[]          // Gemini contents array
   systemInstruction?: any  // System instruction
   generationConfig?: any   // Generation config
+  timeoutMs?: number       // Per-call timeout in ms (default: 25000 for CF Workers safety)
 }
 
 async function callGemini(opts: GeminiCallOptions): Promise<any> {
   const model = opts.model || 'gemini-2.0-flash'
+  const timeoutMs = opts.timeoutMs || 25000  // 25s default — safe for CF Workers
   
   // Build request body
   const requestBody: any = {
@@ -83,7 +85,8 @@ async function callGemini(opts: GeminiCallOptions): Promise<any> {
         'Authorization': `Bearer ${opts.accessToken}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify(requestBody)
+      body: JSON.stringify(requestBody),
+      signal: AbortSignal.timeout(timeoutMs)
     })
 
     if (response.ok) {
@@ -109,7 +112,8 @@ async function callGemini(opts: GeminiCallOptions): Promise<any> {
             'Content-Type': 'application/json',
             'X-Goog-User-Project': opts.project
           },
-          body: JSON.stringify(requestBody)
+          body: JSON.stringify(requestBody),
+          signal: AbortSignal.timeout(timeoutMs)
         })
 
         if (vertexResponse.ok) {
@@ -132,7 +136,8 @@ async function callGemini(opts: GeminiCallOptions): Promise<any> {
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody)
+      body: JSON.stringify(requestBody),
+      signal: AbortSignal.timeout(timeoutMs)
     })
 
     if (!response.ok) {
@@ -407,7 +412,9 @@ Return ONLY the JSON object.`
   // 4. Track the best attempt across retries (highest quality score)
   // 5. After MAX_RETRIES exhausted, return best attempt or null for fallback
   // =============================================================================
-  const MAX_RETRIES = 3
+  // MAX_RETRIES=2: first good attempt + one correction retry
+  // Keeps total wall-clock under ~55s even worst-case (safe for CF Workers)
+  const MAX_RETRIES = 2
   let bestAttempt: AIMeasurementAnalysis | null = null
   let bestScore = -1
 
@@ -418,20 +425,14 @@ Return ONLY the JSON object.`
       // Build retry-aware user prompt — after first failure, add explicit correction hints
       let attemptUserPrompt = userPrompt
       if (attempt === 2) {
-        attemptUserPrompt += `\n\nCRITICAL CORRECTION (attempt 2): Your previous output was REJECTED because it failed validation. Common failures:
-- Perimeter was a convex bounding box (no concave corners for L/T/U shapes)
-- Facets did not share edges with adjacent facets
-- Too few perimeter points for a complex roof
-LOOK MORE CAREFULLY at the roof shape. Trace EVERY corner. Do NOT simplify.`
-      } else if (attempt >= 3) {
-        attemptUserPrompt += `\n\nFINAL ATTEMPT — MAXIMUM PRECISION REQUIRED (attempt ${attempt}):
-Your previous outputs were BOTH rejected for geometric inaccuracy. This is your LAST chance.
-MANDATORY:
-1. Count the visible corners of the roof perimeter BEFORE tracing. Write down the count mentally.
+        attemptUserPrompt += `\n\nCRITICAL CORRECTION — FINAL ATTEMPT:
+Your previous output was REJECTED because it failed validation. This is your LAST chance.
+Common failures: convex bounding box (no concave corners), disconnected facets (no shared edges), too few perimeter points.
+MANDATORY before responding:
+1. Count the visible corners of the roof perimeter BEFORE tracing. 
 2. For EACH corner, note its approximate pixel (x,y) location.
 3. Verify that L-junctions, T-junctions, and garage steps create CONCAVE (inward) corners.
 4. Verify each facet polygon SHARES at least one edge with an adjacent facet.
-5. Verify your facet count matches the visible number of distinct slope planes.
 If the roof has wings or bumps, your perimeter MUST have concave vertices. A fully convex polygon = AUTOMATIC REJECTION.`
       }
 
@@ -441,6 +442,7 @@ If the roof has wings or bumps, your perimeter MUST have concave vertices. A ful
         project: env.project,
         location: env.location,
         model: 'gemini-2.5-flash',
+        timeoutMs: 25000,  // 25s per attempt — keeps total under CF Workers wall-clock limit
         contents: [{
           parts: [
             {
@@ -457,7 +459,7 @@ If the roof has wings or bumps, your perimeter MUST have concave vertices. A ful
         },
         generationConfig: {
           responseMimeType: 'application/json',
-          temperature: attempt === 1 ? 0.05 : (attempt === 2 ? 0.1 : 0.15), // Slightly raise temp on retries for diversity
+          temperature: attempt === 1 ? 0.05 : 0.12,  // Slightly raise temp on retry for diversity
           topP: 0.8
         }
       })
@@ -575,9 +577,11 @@ If the roof has wings or bumps, your perimeter MUST have concave vertices. A ful
       // ──────────────────────────────────────────────────────────────
       // DECISION: Accept or retry?
       // ──────────────────────────────────────────────────────────────
-      if (failures.length === 0 && qualityScore >= 50) {
-        // ✅ PASSED — quality geometry, accept immediately
-        console.log(`[Gemini] ✅ Attempt ${attempt} PASSED all validation (score ${qualityScore}) — accepting`)
+      // Accept threshold: score >= 30 with no hard failures
+      // Lowered from 50 to avoid unnecessary retries on Cloudflare Workers (wall-clock budget)
+      if (failures.length === 0 && qualityScore >= 30) {
+        // ✅ PASSED — geometry is usable, accept immediately
+        console.log(`[Gemini] ✅ Attempt ${attempt} PASSED validation (score ${qualityScore}) — accepting`)
         return analysis
       }
 
@@ -587,16 +591,15 @@ If the roof has wings or bumps, your perimeter MUST have concave vertices. A ful
         console.warn(`[Gemini] ✗ Attempt ${attempt} FAILED validation: ${failMsg}`)
         if (attempt < MAX_RETRIES) {
           console.log(`[Gemini] → Retrying (${MAX_RETRIES - attempt} attempts remaining)...`)
-          // Small delay before retry to avoid rate limiting
-          await new Promise(resolve => setTimeout(resolve, 500))
+          await new Promise(resolve => setTimeout(resolve, 200))
           continue  // next iteration of retry loop
         }
-      } else if (qualityScore < 50) {
+      } else if (qualityScore < 30) {
         // ⚠ LOW QUALITY — no hard failures but score too low, retry if possible
-        console.warn(`[Gemini] ⚠ Attempt ${attempt} low quality (score ${qualityScore} < 50)`)
+        console.warn(`[Gemini] ⚠ Attempt ${attempt} low quality (score ${qualityScore} < 30)`)
         if (attempt < MAX_RETRIES) {
           console.log(`[Gemini] → Retrying for better quality...`)
-          await new Promise(resolve => setTimeout(resolve, 500))
+          await new Promise(resolve => setTimeout(resolve, 200))
           continue
         }
       }
@@ -605,7 +608,7 @@ If the roof has wings or bumps, your perimeter MUST have concave vertices. A ful
       console.error(`[Gemini] ✗ Attempt ${attempt} error: ${err.message}`)
       if (attempt < MAX_RETRIES) {
         console.log(`[Gemini] → Retrying after error (${MAX_RETRIES - attempt} remaining)...`)
-        await new Promise(resolve => setTimeout(resolve, 1000))
+        await new Promise(resolve => setTimeout(resolve, 200))
         continue
       }
     }
