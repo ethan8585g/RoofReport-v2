@@ -1109,13 +1109,13 @@ reportsRoutes.post('/:orderId/email', async (c) => {
 
     let gmailRefreshToken = (c.env as any).GMAIL_REFRESH_TOKEN || ''
     const gmailClientId = (c.env as any).GMAIL_CLIENT_ID || ''
-    const gmailClientSecret = (c.env as any).GMAIL_CLIENT_SECRET || ''
+    let gmailClientSecret = (c.env as any).GMAIL_CLIENT_SECRET || ''
     const resendApiKey = (c.env as any).RESEND_API_KEY
     const saKey = c.env.GCP_SERVICE_ACCOUNT_KEY
     const senderEmail = from_email || c.env.GMAIL_SENDER_EMAIL || null
 
-    // If no refresh token in env, check the DB (stored from /api/auth/gmail/callback)
-    if (!gmailRefreshToken && gmailClientId && gmailClientSecret) {
+    // Check DB for stored credentials (from Gmail OAuth setup)
+    if (!gmailRefreshToken) {
       try {
         const row = await c.env.DB.prepare(
           "SELECT setting_value FROM settings WHERE setting_key = 'gmail_refresh_token' AND master_company_id = 1"
@@ -1123,6 +1123,17 @@ reportsRoutes.post('/:orderId/email', async (c) => {
         if (row?.setting_value) {
           gmailRefreshToken = row.setting_value
           console.log('[Email] Using Gmail refresh token from database')
+        }
+      } catch (e) { /* settings table might not exist */ }
+    }
+    if (!gmailClientSecret) {
+      try {
+        const row = await c.env.DB.prepare(
+          "SELECT setting_value FROM settings WHERE setting_key = 'gmail_client_secret' AND master_company_id = 1"
+        ).first<any>()
+        if (row?.setting_value) {
+          gmailClientSecret = row.setting_value
+          console.log('[Email] Using Gmail client secret from database')
         }
       } catch (e) { /* settings table might not exist */ }
     }

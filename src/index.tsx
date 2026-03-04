@@ -910,6 +910,10 @@ function getSuperAdminDashboardHTML() {
           <i class="fas fa-envelope-open-text w-5 text-center"></i>
           <span class="label text-sm font-medium">Email Outreach</span>
         </div>
+        <div class="sa-nav-item rounded-xl px-4 py-3 flex items-center gap-3 text-gray-400" onclick="saSetView('email-setup')">
+          <i class="fas fa-cog w-5 text-center"></i>
+          <span class="label text-sm font-medium">Email Setup</span>
+        </div>
         <div class="border-t border-gray-800 my-3"></div>
         <a href="/admin" class="sa-nav-item rounded-xl px-4 py-3 flex items-center gap-3 text-gray-400 no-underline">
           <i class="fas fa-tachometer-alt w-5 text-center"></i>

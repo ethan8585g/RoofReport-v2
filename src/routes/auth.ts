@@ -556,9 +556,53 @@ authRoutes.get('/admin-stats', async (c) => {
 // Protected by admin session
 // ============================================================
 
-authRoutes.get('/gmail', async (c) => {
-  // Require admin session to access Gmail setup
+// Helper: get a setting value from the settings table
+async function getDbSetting(db: any, key: string): Promise<string | null> {
+  try {
+    const row = await db.prepare(
+      "SELECT setting_value FROM settings WHERE setting_key = ? AND master_company_id = 1"
+    ).bind(key).first<any>()
+    return row?.setting_value || null
+  } catch (e) { return null }
+}
+
+// Helper: save a setting value to the settings table
+async function setDbSetting(db: any, key: string, value: string, encrypted = false): Promise<void> {
+  const existing = await db.prepare(
+    "SELECT id FROM settings WHERE setting_key = ? AND master_company_id = 1"
+  ).bind(key).first<any>()
+  if (existing) {
+    await db.prepare(
+      "UPDATE settings SET setting_value = ?, is_encrypted = ?, updated_at = datetime('now') WHERE setting_key = ? AND master_company_id = 1"
+    ).bind(value, encrypted ? 1 : 0, key).run()
+  } else {
+    await db.prepare(
+      "INSERT INTO settings (master_company_id, setting_key, setting_value, is_encrypted) VALUES (1, ?, ?, ?)"
+    ).bind(key, value, encrypted ? 1 : 0).run()
+  }
+}
+
+// POST /api/auth/gmail/setup — Save Gmail OAuth client secret from GCP console
+authRoutes.post('/gmail/setup', async (c) => {
   const admin = await validateAdminSession(c.env.DB, c.req.header('Authorization'))
+  if (!admin) return c.json({ error: 'Admin authentication required' }, 401)
+
+  const { client_secret } = await c.req.json()
+  if (!client_secret || client_secret.length < 10) {
+    return c.json({ error: 'Valid Gmail OAuth client secret is required' }, 400)
+  }
+
+  // Store in DB
+  await setDbSetting(c.env.DB, 'gmail_client_secret', client_secret, true)
+
+  return c.json({
+    success: true,
+    message: 'Gmail client secret saved. Now visit /api/auth/gmail to complete authorization.',
+    next_step: '/api/auth/gmail'
+  })
+})
+
+authRoutes.get('/gmail', async (c) => {
   // Allow without auth for browser redirect flow (OAuth callback)
   
   const clientId = (c.env as any).GMAIL_CLIENT_ID
@@ -569,9 +613,23 @@ authRoutes.get('/gmail', async (c) => {
         step1: 'Go to https://console.cloud.google.com/apis/credentials',
         step2: 'Create OAuth 2.0 Client ID (Web application type)',
         step3: 'Add authorized redirect URI: {your_domain}/api/auth/gmail/callback',
-        step4: 'Set GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET in .dev.vars',
+        step4: 'Set GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET in .dev.vars or use /api/auth/gmail/setup',
         step5: 'Visit this endpoint again to start authorization'
       }
+    }, 400)
+  }
+
+  // Check if client secret is available (env or DB)
+  let clientSecret = (c.env as any).GMAIL_CLIENT_SECRET || ''
+  if (!clientSecret) {
+    clientSecret = await getDbSetting(c.env.DB, 'gmail_client_secret') || ''
+  }
+  if (!clientSecret) {
+    return c.json({
+      error: 'GMAIL_CLIENT_SECRET not configured',
+      fix: 'Go to Admin Dashboard → Settings → Email Setup, paste your OAuth client secret, then try again.',
+      setup_endpoint: 'POST /api/auth/gmail/setup with {"client_secret": "your-secret"}',
+      gcp_console: 'https://console.cloud.google.com/apis/credentials'
     }, 400)
   }
 
@@ -609,10 +667,14 @@ authRoutes.get('/gmail/callback', async (c) => {
   }
 
   const clientId = (c.env as any).GMAIL_CLIENT_ID
-  const clientSecret = (c.env as any).GMAIL_CLIENT_SECRET
+  // Read client secret from env or DB
+  let clientSecret = (c.env as any).GMAIL_CLIENT_SECRET || ''
+  if (!clientSecret) {
+    clientSecret = await getDbSetting(c.env.DB, 'gmail_client_secret') || ''
+  }
 
   if (!clientId || !clientSecret) {
-    return c.json({ error: 'GMAIL_CLIENT_ID or GMAIL_CLIENT_SECRET not configured' }, 400)
+    return c.json({ error: 'GMAIL_CLIENT_ID or GMAIL_CLIENT_SECRET not configured. Use /api/auth/gmail/setup first.' }, 400)
   }
 
   const url = new URL(c.req.url)
@@ -694,31 +756,44 @@ authRoutes.get('/gmail/callback', async (c) => {
 
 authRoutes.get('/gmail/status', async (c) => {
   const hasClientId = !!(c.env as any).GMAIL_CLIENT_ID
-  const hasClientSecret = !!(c.env as any).GMAIL_CLIENT_SECRET
-  const hasRefreshToken = !!(c.env as any).GMAIL_REFRESH_TOKEN
+  const hasClientSecretEnv = !!(c.env as any).GMAIL_CLIENT_SECRET
+  const hasRefreshTokenEnv = !!(c.env as any).GMAIL_REFRESH_TOKEN
 
   let dbRefreshToken = false
+  let dbClientSecret = false
   let dbSenderEmail = ''
   try {
-    const row = await c.env.DB.prepare(
+    const rtRow = await c.env.DB.prepare(
       "SELECT setting_value FROM settings WHERE setting_key = 'gmail_refresh_token' AND master_company_id = 1"
     ).first<any>()
-    if (row?.setting_value) dbRefreshToken = true
+    if (rtRow?.setting_value) dbRefreshToken = true
+
+    const csRow = await c.env.DB.prepare(
+      "SELECT setting_value FROM settings WHERE setting_key = 'gmail_client_secret' AND master_company_id = 1"
+    ).first<any>()
+    if (csRow?.setting_value) dbClientSecret = true
+
     const emailRow = await c.env.DB.prepare(
       "SELECT setting_value FROM settings WHERE setting_key = 'gmail_sender_email' AND master_company_id = 1"
     ).first<any>()
     dbSenderEmail = emailRow?.setting_value || ''
   } catch (e) {}
 
+  const hasClientSecret = hasClientSecretEnv || dbClientSecret
+  const hasRefreshToken = hasRefreshTokenEnv || dbRefreshToken
+
   return c.json({
     gmail_oauth2: {
       client_id_configured: hasClientId,
       client_secret_configured: hasClientSecret,
-      refresh_token_in_env: hasRefreshToken,
-      refresh_token_in_db: dbRefreshToken,
+      client_secret_source: hasClientSecretEnv ? 'env' : (dbClientSecret ? 'database' : 'missing'),
+      refresh_token_configured: hasRefreshToken,
+      refresh_token_source: hasRefreshTokenEnv ? 'env' : (dbRefreshToken ? 'database' : 'missing'),
       sender_email: dbSenderEmail || (c.env as any).GMAIL_SENDER_EMAIL || '',
-      ready: hasClientId && hasClientSecret && (hasRefreshToken || dbRefreshToken),
-      authorize_url: hasClientId ? '/api/auth/gmail' : null
+      ready: hasClientId && hasClientSecret && hasRefreshToken,
+      needs_setup: !hasClientSecret ? 'client_secret' : (!hasRefreshToken ? 'authorize' : null),
+      authorize_url: (hasClientId && hasClientSecret) ? '/api/auth/gmail' : null,
+      setup_url: '/api/auth/gmail/setup'
     }
   })
 })

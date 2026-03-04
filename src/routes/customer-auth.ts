@@ -83,39 +83,38 @@ async function sendVerificationEmail(env: any, toEmail: string, code: string, db
     }
   }
 
-  // ---- METHOD 2: Gmail OAuth2 (check env vars first, then DB for stored refresh token) ----
+  // ---- METHOD 2: Gmail OAuth2 (check env vars first, then DB for stored credentials) ----
   let gmailRefreshToken = (env as any).GMAIL_REFRESH_TOKEN || ''
   const gmailClientId = (env as any).GMAIL_CLIENT_ID || ''
-  const gmailClientSecret = (env as any).GMAIL_CLIENT_SECRET || ''
+  let gmailClientSecret = (env as any).GMAIL_CLIENT_SECRET || ''
 
-  // If no refresh token in env, check the DB (stored from /api/auth/gmail/callback)
-  if (!gmailRefreshToken && gmailClientId && db) {
-    try {
-      const row = await db.prepare(
-        "SELECT setting_value FROM settings WHERE setting_key = 'gmail_refresh_token' AND master_company_id = 1"
-      ).first()
-      if (row?.setting_value) {
-        gmailRefreshToken = row.setting_value
-        console.log('[Verification Email] Using Gmail refresh token from database')
-      }
-    } catch (e) { /* settings table might not exist yet */ }
+  // Check DB for stored credentials (from /api/auth/gmail/callback and /api/auth/gmail/setup)
+  if (db) {
+    if (!gmailRefreshToken) {
+      try {
+        const row = await db.prepare(
+          "SELECT setting_value FROM settings WHERE setting_key = 'gmail_refresh_token' AND master_company_id = 1"
+        ).first()
+        if (row?.setting_value) {
+          gmailRefreshToken = row.setting_value
+          console.log('[Verification Email] Using Gmail refresh token from database')
+        }
+      } catch (e) { /* settings table might not exist yet */ }
+    }
+    if (!gmailClientSecret) {
+      try {
+        const row = await db.prepare(
+          "SELECT setting_value FROM settings WHERE setting_key = 'gmail_client_secret' AND master_company_id = 1"
+        ).first()
+        if (row?.setting_value) {
+          gmailClientSecret = row.setting_value
+          console.log('[Verification Email] Using Gmail client secret from database')
+        }
+      } catch (e) { /* ignore */ }
+    }
   }
 
-  // Also try to get client_secret from DB if not in env
-  let effectiveClientSecret = gmailClientSecret
-  if (!effectiveClientSecret && gmailClientId && db) {
-    try {
-      const row = await db.prepare(
-        "SELECT setting_value FROM settings WHERE setting_key = 'gmail_client_secret' AND master_company_id = 1"
-      ).first()
-      if (row?.setting_value) {
-        effectiveClientSecret = row.setting_value
-        console.log('[Verification Email] Using Gmail client secret from database')
-      }
-    } catch (e) { /* ignore */ }
-  }
-
-  if (gmailRefreshToken && gmailClientId && effectiveClientSecret) {
+  if (gmailRefreshToken && gmailClientId && gmailClientSecret) {
     try {
       // Get fresh access token
       const tokenResp = await fetch('https://oauth2.googleapis.com/token', {
@@ -125,7 +124,7 @@ async function sendVerificationEmail(env: any, toEmail: string, code: string, db
           grant_type: 'refresh_token',
           refresh_token: gmailRefreshToken,
           client_id: gmailClientId,
-          client_secret: effectiveClientSecret
+          client_secret: gmailClientSecret
         }).toString()
       })
       const tokenData: any = await tokenResp.json()
