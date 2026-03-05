@@ -82,6 +82,12 @@ async function loadView(view) {
         const analyticsRes = await saFetch(`/api/analytics/dashboard?period=${SA.analyticsPeriod}`);
         if (analyticsRes) SA.data.analytics = await analyticsRes.json();
         break;
+      case 'pricing':
+        const pricingRes = await saFetch('/api/settings/pricing/config');
+        if (pricingRes) SA.data.pricing = await pricingRes.json();
+        const squareRes = await saFetch('/api/settings/square/status');
+        if (squareRes) SA.data.square = await squareRes.json();
+        break;
     }
   } catch (e) {
     console.error('Load error:', e);
@@ -172,6 +178,7 @@ function renderContent() {
     case 'email-outreach': break; // Handled by email-outreach.js
     case 'email-setup': root.innerHTML = renderEmailSetupView(); break;
     case 'analytics': root.innerHTML = renderAnalyticsView(); break;
+    case 'pricing': root.innerHTML = renderPricingView(); break;
     default: root.innerHTML = renderUsersView();
   }
 }
@@ -1092,3 +1099,453 @@ function renderAnalyticsView() {
 window.saRefreshAnalytics = function() {
   loadView('analytics');
 };
+
+// ============================================================
+// VIEW: PRICING & BILLING — Full control over all pricing
+// ============================================================
+
+function renderPricingView() {
+  const d = SA.data.pricing || {};
+  const p = d.pricing || {};
+  const packages = d.packages || [];
+  const sq = SA.data.square || {};
+
+  const activePackages = packages.filter(x => x.is_active);
+  const inactivePackages = packages.filter(x => !x.is_active);
+
+  return `
+    <div class="mb-6">
+      <h2 class="text-2xl font-black text-gray-900"><i class="fas fa-dollar-sign mr-2 text-red-500"></i>Pricing & Billing</h2>
+      <p class="text-sm text-gray-500 mt-1">Manage report pricing, credit packages, subscriptions, and Square payment terminal</p>
+    </div>
+
+    <!-- Square Status Banner -->
+    <div class="mb-6 rounded-2xl p-5 ${sq.connected ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class="w-12 h-12 rounded-xl flex items-center justify-center ${sq.connected ? 'bg-green-100' : 'bg-red-100'}">
+            <i class="fas ${sq.connected ? 'fa-check-circle text-green-600' : 'fa-exclamation-triangle text-red-600'} text-xl"></i>
+          </div>
+          <div>
+            <h3 class="font-bold ${sq.connected ? 'text-green-800' : 'text-red-800'}">${sq.connected ? 'Square Payment Terminal Connected' : 'Square Not Connected'}</h3>
+            <p class="text-sm ${sq.connected ? 'text-green-600' : 'text-red-600'}">
+              ${sq.connected
+                ? (sq.merchant?.business_name || 'Connected') + (sq.location?.name ? ' — Location: ' + sq.location.name : '') + (sq.location?.currency ? ' (' + sq.location.currency + ')' : '')
+                : (sq.error || 'Configure SQUARE_ACCESS_TOKEN and SQUARE_LOCATION_ID in Cloudflare Pages secrets')}
+            </p>
+          </div>
+        </div>
+        <div class="flex items-center gap-3">
+          ${sq.stats ? `
+            <div class="text-right">
+              <p class="text-xs text-gray-500">${sq.stats.total_payments || 0} payments</p>
+              <p class="text-xs text-gray-500">${sq.stats.total_webhooks || 0} webhooks</p>
+            </div>
+          ` : ''}
+          <button onclick="loadView('pricing')" class="px-3 py-2 bg-white border border-gray-200 rounded-xl text-xs font-medium hover:bg-gray-50 transition-colors">
+            <i class="fas fa-sync-alt mr-1"></i> Refresh
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Core Pricing Section -->
+    ${saSection('Core Pricing', 'fa-tag', `
+      <form id="pricingForm" onsubmit="savePricingSettings(event)">
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+
+          <!-- Price Per Report -->
+          <div class="space-y-2">
+            <label class="block text-sm font-semibold text-gray-700"><i class="fas fa-file-alt mr-1 text-blue-500"></i> Price Per Report (CAD)</label>
+            <div class="relative">
+              <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 font-bold">$</span>
+              <input type="number" step="0.01" min="0" id="pricePerReport"
+                value="${(p.price_per_report_cents / 100).toFixed(2)}"
+                class="w-full pl-8 pr-4 py-3 border border-gray-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-red-500 focus:border-red-500">
+            </div>
+            <p class="text-[10px] text-gray-400">Default charge for a single roof measurement report</p>
+          </div>
+
+          <!-- Free Trial Reports -->
+          <div class="space-y-2">
+            <label class="block text-sm font-semibold text-gray-700"><i class="fas fa-gift mr-1 text-purple-500"></i> Free Trial Reports</label>
+            <input type="number" min="0" max="50" id="freeTrialReports"
+              value="${p.free_trial_reports || 3}"
+              class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-red-500 focus:border-red-500">
+            <p class="text-[10px] text-gray-400">Number of free reports for new users</p>
+          </div>
+
+          <!-- Monthly Subscription -->
+          <div class="space-y-2">
+            <label class="block text-sm font-semibold text-gray-700"><i class="fas fa-calendar-alt mr-1 text-green-500"></i> Monthly Subscription (CAD)</label>
+            <div class="relative">
+              <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 font-bold">$</span>
+              <input type="number" step="0.01" min="0" id="subscriptionMonthly"
+                value="${(p.subscription_monthly_price_cents / 100).toFixed(2)}"
+                class="w-full pl-8 pr-4 py-3 border border-gray-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-red-500 focus:border-red-500">
+            </div>
+            <p class="text-[10px] text-gray-400">Monthly fee for full CRM + unlimited reports (after free trial)</p>
+          </div>
+
+          <!-- Annual Subscription -->
+          <div class="space-y-2">
+            <label class="block text-sm font-semibold text-gray-700"><i class="fas fa-calendar-check mr-1 text-indigo-500"></i> Annual Subscription (CAD)</label>
+            <div class="relative">
+              <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 font-bold">$</span>
+              <input type="number" step="0.01" min="0" id="subscriptionAnnual"
+                value="${(p.subscription_annual_price_cents / 100).toFixed(2)}"
+                class="w-full pl-8 pr-4 py-3 border border-gray-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-red-500 focus:border-red-500">
+            </div>
+            <p class="text-[10px] text-gray-400">Annual fee (discounted) for full CRM + unlimited reports</p>
+          </div>
+
+          <!-- Roofer Secretary Monthly -->
+          <div class="space-y-2">
+            <label class="block text-sm font-semibold text-gray-700"><i class="fas fa-headset mr-1 text-amber-500"></i> Roofer Secretary — Monthly (CAD)</label>
+            <div class="relative">
+              <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 font-bold">$</span>
+              <input type="number" step="0.01" min="0" id="secretaryMonthly"
+                value="${(p.secretary_monthly_price_cents / 100).toFixed(2)}"
+                class="w-full pl-8 pr-4 py-3 border border-gray-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-red-500 focus:border-red-500">
+            </div>
+            <p class="text-[10px] text-gray-400">Monthly subscription for AI receptionist / call answering</p>
+          </div>
+
+          <!-- Roofer Secretary Per-Call -->
+          <div class="space-y-2">
+            <label class="block text-sm font-semibold text-gray-700"><i class="fas fa-phone-alt mr-1 text-teal-500"></i> Roofer Secretary — Per Call (CAD)</label>
+            <div class="relative">
+              <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 font-bold">$</span>
+              <input type="number" step="0.01" min="0" id="secretaryPerCall"
+                value="${(p.secretary_per_call_price_cents / 100).toFixed(2)}"
+                class="w-full pl-8 pr-4 py-3 border border-gray-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-red-500 focus:border-red-500">
+            </div>
+            <p class="text-[10px] text-gray-400">Per-call fee if using pay-as-you-go model</p>
+          </div>
+        </div>
+
+        <!-- Subscription Features -->
+        <div class="mt-6 space-y-2">
+          <label class="block text-sm font-semibold text-gray-700"><i class="fas fa-list-check mr-1 text-sky-500"></i> Subscription Features (comma-separated)</label>
+          <textarea id="subscriptionFeatures" rows="3"
+            class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-red-500 focus:border-red-500"
+            placeholder="Unlimited reports, Full CRM access, AI Secretary, Custom branding, Priority support">${p.subscription_features || ''}</textarea>
+          <p class="text-[10px] text-gray-400">Features shown on public pricing page for the subscription plan</p>
+        </div>
+
+        <div class="mt-6 flex items-center justify-between">
+          <p class="text-xs text-gray-400"><i class="fas fa-info-circle mr-1"></i> Changes take effect immediately for new transactions</p>
+          <button type="submit" id="savePricingBtn" class="px-6 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl font-semibold text-sm transition-colors">
+            <i class="fas fa-save mr-1"></i> Save Pricing
+          </button>
+        </div>
+      </form>
+    `)}
+
+    <!-- Credit Packages Section -->
+    ${saSection('Credit Report Packages', 'fa-box-open', `
+      <p class="text-sm text-gray-500 mb-4">Bulk credit packs customers purchase through Square checkout. Each credit = 1 roof report.</p>
+
+      <!-- Active Packages -->
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6" id="packageGrid">
+        ${activePackages.map(pkg => renderPackageCard(pkg, true)).join('')}
+
+        <!-- Add New Package Card -->
+        <div onclick="showAddPackageModal()" class="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center cursor-pointer hover:border-red-400 hover:bg-red-50/30 transition-all group">
+          <div class="w-12 h-12 bg-gray-100 group-hover:bg-red-100 rounded-xl flex items-center justify-center mx-auto mb-3 transition-colors">
+            <i class="fas fa-plus text-gray-400 group-hover:text-red-500 text-lg transition-colors"></i>
+          </div>
+          <p class="text-sm font-semibold text-gray-500 group-hover:text-red-600 transition-colors">Add Package</p>
+          <p class="text-[10px] text-gray-400">Create a new credit pack</p>
+        </div>
+      </div>
+
+      ${inactivePackages.length > 0 ? `
+        <div class="border-t border-gray-100 pt-4">
+          <p class="text-xs text-gray-400 mb-3"><i class="fas fa-eye-slash mr-1"></i> Inactive Packages (hidden from customers)</p>
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+            ${inactivePackages.map(pkg => renderPackageCard(pkg, false)).join('')}
+          </div>
+        </div>
+      ` : ''}
+    `)}
+
+    <!-- Package Edit Modal (hidden) -->
+    <div id="pkgModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/50 backdrop-blur-sm" style="display:none">
+      <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6">
+        <div class="flex items-center justify-between mb-5">
+          <h3 class="text-lg font-bold text-gray-800" id="pkgModalTitle">Edit Package</h3>
+          <button onclick="closePkgModal()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-lg"></i></button>
+        </div>
+        <form onsubmit="savePackage(event)">
+          <input type="hidden" id="pkgId" value="">
+          <div class="space-y-4">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Package Name</label>
+              <input type="text" id="pkgName" placeholder="e.g. 10 Pack" required
+                class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-red-500 focus:border-red-500">
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Description</label>
+              <input type="text" id="pkgDesc" placeholder="e.g. 10 reports, $9 each"
+                class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-red-500 focus:border-red-500">
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Credits (Reports)</label>
+                <input type="number" id="pkgCredits" min="1" required
+                  class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-red-500 focus:border-red-500">
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Total Price (CAD)</label>
+                <div class="relative">
+                  <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 font-bold">$</span>
+                  <input type="number" step="0.01" min="0.01" id="pkgPrice" required
+                    class="w-full pl-8 pr-4 py-2.5 border border-gray-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-red-500 focus:border-red-500">
+                </div>
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Sort Order</label>
+                <input type="number" id="pkgSort" min="0" value="0"
+                  class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-red-500 focus:border-red-500">
+              </div>
+              <div class="flex items-end">
+                <label class="flex items-center gap-2 cursor-pointer py-2.5">
+                  <input type="checkbox" id="pkgActive" checked class="w-4 h-4 text-red-600 rounded focus:ring-red-500">
+                  <span class="text-sm font-medium text-gray-700">Active (visible)</span>
+                </label>
+              </div>
+            </div>
+            <div id="pkgPricePreview" class="text-center py-3 bg-gray-50 rounded-xl">
+              <p class="text-xs text-gray-500">Price per report will show here</p>
+            </div>
+          </div>
+          <div class="flex gap-3 mt-6">
+            <button type="button" onclick="closePkgModal()" class="flex-1 px-4 py-2.5 bg-gray-100 hover:bg-gray-200 rounded-xl text-sm font-medium transition-colors">Cancel</button>
+            <button type="submit" id="pkgSaveBtn" class="flex-1 px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold transition-colors">
+              <i class="fas fa-save mr-1"></i> Save
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+}
+
+function renderPackageCard(pkg, isActive) {
+  const pricePerReport = pkg.credits > 0 ? (pkg.price_cents / 100 / pkg.credits).toFixed(2) : '0.00';
+  return `
+    <div class="border ${isActive ? 'border-gray-200' : 'border-gray-100 opacity-60'} rounded-xl p-5 relative hover:shadow-md transition-all ${isActive ? 'bg-white' : 'bg-gray-50'}">
+      ${!isActive ? '<span class="absolute top-2 right-2 text-[9px] bg-gray-200 text-gray-500 px-1.5 py-0.5 rounded-full font-medium">INACTIVE</span>' : ''}
+      <div class="text-center mb-3">
+        <p class="text-3xl font-black text-gray-900">${pkg.credits}</p>
+        <p class="text-xs font-semibold text-gray-500 uppercase">${pkg.name}</p>
+      </div>
+      <div class="text-center mb-3">
+        <p class="text-xl font-bold text-red-600">$${(pkg.price_cents / 100).toFixed(2)}</p>
+        <p class="text-[10px] text-gray-400">$${pricePerReport} / report</p>
+      </div>
+      <p class="text-[10px] text-gray-400 text-center mb-4 min-h-[16px]">${pkg.description || ''}</p>
+      <div class="flex gap-2">
+        <button onclick="editPackage(${pkg.id}, '${(pkg.name || '').replace(/'/g, "\\'")}', '${(pkg.description || '').replace(/'/g, "\\'")}', ${pkg.credits}, ${pkg.price_cents}, ${pkg.sort_order || 0}, ${pkg.is_active})"
+          class="flex-1 px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-xs font-medium text-gray-700 transition-colors">
+          <i class="fas fa-edit mr-1"></i> Edit
+        </button>
+        ${isActive
+          ? `<button onclick="deactivatePackage(${pkg.id})" class="px-3 py-2 bg-red-50 hover:bg-red-100 rounded-lg text-xs font-medium text-red-600 transition-colors" title="Deactivate"><i class="fas fa-eye-slash"></i></button>`
+          : `<button onclick="activatePackage(${pkg.id})" class="px-3 py-2 bg-green-50 hover:bg-green-100 rounded-lg text-xs font-medium text-green-600 transition-colors" title="Reactivate"><i class="fas fa-eye"></i></button>`
+        }
+      </div>
+    </div>`;
+}
+
+// ============================================================
+// PRICING ACTIONS
+// ============================================================
+
+// Save core pricing settings
+async function savePricingSettings(e) {
+  e.preventDefault();
+  const btn = document.getElementById('savePricingBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Saving...';
+
+  try {
+    const body = {
+      price_per_report_cents: Math.round(parseFloat(document.getElementById('pricePerReport').value) * 100),
+      free_trial_reports: parseInt(document.getElementById('freeTrialReports').value) || 3,
+      subscription_monthly_price_cents: Math.round(parseFloat(document.getElementById('subscriptionMonthly').value) * 100),
+      subscription_annual_price_cents: Math.round(parseFloat(document.getElementById('subscriptionAnnual').value) * 100),
+      secretary_monthly_price_cents: Math.round(parseFloat(document.getElementById('secretaryMonthly').value) * 100),
+      secretary_per_call_price_cents: Math.round(parseFloat(document.getElementById('secretaryPerCall').value) * 100),
+      subscription_features: document.getElementById('subscriptionFeatures').value.trim(),
+    };
+
+    const res = await fetch('/api/settings/pricing/config', {
+      method: 'PUT',
+      headers: { ...saHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'Failed to save');
+    }
+
+    btn.innerHTML = '<i class="fas fa-check mr-1"></i> Saved!';
+    btn.classList.replace('bg-red-600', 'bg-green-600');
+    setTimeout(() => {
+      btn.innerHTML = '<i class="fas fa-save mr-1"></i> Save Pricing';
+      btn.classList.replace('bg-green-600', 'bg-red-600');
+      btn.disabled = false;
+    }, 2000);
+  } catch (err) {
+    alert('Error saving pricing: ' + err.message);
+    btn.innerHTML = '<i class="fas fa-save mr-1"></i> Save Pricing';
+    btn.disabled = false;
+  }
+}
+window.savePricingSettings = savePricingSettings;
+
+// Show add-package modal
+function showAddPackageModal() {
+  document.getElementById('pkgModalTitle').textContent = 'Add New Package';
+  document.getElementById('pkgId').value = '';
+  document.getElementById('pkgName').value = '';
+  document.getElementById('pkgDesc').value = '';
+  document.getElementById('pkgCredits').value = '';
+  document.getElementById('pkgPrice').value = '';
+  document.getElementById('pkgSort').value = '0';
+  document.getElementById('pkgActive').checked = true;
+  document.getElementById('pkgPricePreview').innerHTML = '<p class="text-xs text-gray-500">Enter credits and price to see per-report cost</p>';
+  const modal = document.getElementById('pkgModal');
+  modal.style.display = 'flex';
+  modal.classList.remove('hidden');
+}
+window.showAddPackageModal = showAddPackageModal;
+
+// Edit existing package
+function editPackage(id, name, desc, credits, priceCents, sortOrder, isActive) {
+  document.getElementById('pkgModalTitle').textContent = 'Edit Package';
+  document.getElementById('pkgId').value = id;
+  document.getElementById('pkgName').value = name;
+  document.getElementById('pkgDesc').value = desc;
+  document.getElementById('pkgCredits').value = credits;
+  document.getElementById('pkgPrice').value = (priceCents / 100).toFixed(2);
+  document.getElementById('pkgSort').value = sortOrder;
+  document.getElementById('pkgActive').checked = !!isActive;
+  updatePkgPreview();
+  const modal = document.getElementById('pkgModal');
+  modal.style.display = 'flex';
+  modal.classList.remove('hidden');
+}
+window.editPackage = editPackage;
+
+function closePkgModal() {
+  const modal = document.getElementById('pkgModal');
+  modal.style.display = 'none';
+  modal.classList.add('hidden');
+}
+window.closePkgModal = closePkgModal;
+
+// Update price preview in modal
+function updatePkgPreview() {
+  const credits = parseInt(document.getElementById('pkgCredits')?.value) || 0;
+  const price = parseFloat(document.getElementById('pkgPrice')?.value) || 0;
+  const preview = document.getElementById('pkgPricePreview');
+  if (!preview) return;
+  if (credits > 0 && price > 0) {
+    const perReport = (price / credits).toFixed(2);
+    preview.innerHTML = `<p class="text-sm font-bold text-green-700">$${perReport} per report</p><p class="text-[10px] text-gray-400">${credits} credits for $${price.toFixed(2)} CAD</p>`;
+  } else {
+    preview.innerHTML = '<p class="text-xs text-gray-500">Enter credits and price to see per-report cost</p>';
+  }
+}
+
+// Attach preview updaters after render
+document.addEventListener('input', function(e) {
+  if (e.target && (e.target.id === 'pkgCredits' || e.target.id === 'pkgPrice')) {
+    updatePkgPreview();
+  }
+});
+
+// Save (create or update) a package
+async function savePackage(e) {
+  e.preventDefault();
+  const btn = document.getElementById('pkgSaveBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Saving...';
+
+  const id = document.getElementById('pkgId').value;
+  const body = {
+    name: document.getElementById('pkgName').value.trim(),
+    description: document.getElementById('pkgDesc').value.trim(),
+    credits: parseInt(document.getElementById('pkgCredits').value),
+    price_cents: Math.round(parseFloat(document.getElementById('pkgPrice').value) * 100),
+    sort_order: parseInt(document.getElementById('pkgSort').value) || 0,
+    is_active: document.getElementById('pkgActive').checked,
+  };
+
+  if (!body.name || !body.credits || !body.price_cents) {
+    alert('Name, credits, and price are required.');
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-save mr-1"></i> Save';
+    return;
+  }
+
+  try {
+    const url = id ? `/api/settings/packages/${id}` : '/api/settings/packages';
+    const method = id ? 'PUT' : 'POST';
+    const res = await fetch(url, {
+      method,
+      headers: { ...saHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'Failed to save package');
+    }
+
+    closePkgModal();
+    loadView('pricing');
+  } catch (err) {
+    alert('Error: ' + err.message);
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-save mr-1"></i> Save';
+  }
+}
+window.savePackage = savePackage;
+
+// Deactivate a package
+async function deactivatePackage(id) {
+  if (!confirm('Deactivate this package? It will be hidden from customers but not deleted.')) return;
+  try {
+    const res = await fetch(`/api/settings/packages/${id}`, {
+      method: 'DELETE',
+      headers: saHeaders()
+    });
+    if (!res.ok) throw new Error('Failed');
+    loadView('pricing');
+  } catch (err) {
+    alert('Error deactivating package: ' + err.message);
+  }
+}
+window.deactivatePackage = deactivatePackage;
+
+// Reactivate a package
+async function activatePackage(id) {
+  try {
+    const res = await fetch(`/api/settings/packages/${id}/activate`, {
+      method: 'PUT',
+      headers: saHeaders()
+    });
+    if (!res.ok) throw new Error('Failed');
+    loadView('pricing');
+  } catch (err) {
+    alert('Error activating package: ' + err.message);
+  }
+}
+window.activatePackage = activatePackage;
