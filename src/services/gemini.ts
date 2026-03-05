@@ -62,8 +62,8 @@ interface GeminiCallOptions {
 
 async function callGemini(opts: GeminiCallOptions): Promise<any> {
   const model = opts.model || 'gemini-2.0-flash'
-  const timeoutMs = opts.timeoutMs || 25000  // 25s default — safe for CF Workers
-  
+  const timeoutMs = opts.timeoutMs || 55000  // 55s default — Pro model needs more time
+
   // Build request body
   const requestBody: any = {
     contents: opts.contents,
@@ -73,8 +73,42 @@ async function callGemini(opts: GeminiCallOptions): Promise<any> {
     requestBody.systemInstruction = opts.systemInstruction
   }
 
-  // Priority 1: Bearer token auth (from service account or static token)
-  // Uses Generative Language API which works better with service accounts
+  // Priority 1: Bearer token auth via Vertex AI Platform (fastest for Pro models)
+  // The Vertex AI regional endpoint routes to the nearest cluster for lower latency.
+  if (opts.accessToken && opts.project && opts.location) {
+    try {
+      const vertexUrl = getVertexAIUrl(opts.project, opts.location, model, 'generateContent')
+      console.log(`[Gemini] Calling Vertex AI Platform: ${model} via ${opts.location}`)
+      
+      const vertexResponse = await fetch(vertexUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${opts.accessToken}`,
+          'Content-Type': 'application/json',
+          'X-Goog-User-Project': opts.project
+        },
+        body: JSON.stringify(requestBody),
+        signal: AbortSignal.timeout(timeoutMs)
+      })
+
+      if (vertexResponse.ok) {
+        const data: any = await vertexResponse.json()
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text
+        if (text) return text
+        throw new Error('Empty response from Vertex AI')
+      }
+      const errText = await vertexResponse.text()
+      console.warn(`[Gemini] Vertex AI failed (${vertexResponse.status}): ${errText.substring(0, 200)}`)
+    } catch (e: any) {
+      // Re-throw timeouts — they count against our budget
+      if (e.name === 'AbortError' || e.name === 'TimeoutError' || e.message?.includes('abort') || e.message?.includes('timeout')) {
+        throw e
+      }
+      console.warn(`[Gemini] Vertex AI error: ${e.message}`)
+    }
+  }
+
+  // Priority 2: Bearer token auth via Generative Language API (fallback)
   if (opts.accessToken) {
     const url = `${GEMINI_REST_BASE}/${model}:generateContent`
     console.log(`[Gemini] Calling Generative Language API with Bearer token: ${model}`)
@@ -98,40 +132,12 @@ async function callGemini(opts: GeminiCallOptions): Promise<any> {
 
     const errText = await response.text()
     console.warn(`[Gemini] Bearer auth failed (${response.status}): ${errText.substring(0, 200)}`)
-    
-    // If Bearer fails, try Vertex AI Platform endpoint as fallback
-    if (opts.project && opts.location) {
-      try {
-        const vertexUrl = getVertexAIUrl(opts.project, opts.location, model, 'generateContent')
-        console.log(`[Gemini] Trying Vertex AI Platform fallback: ${model} via ${opts.location}`)
-        
-        const vertexResponse = await fetch(vertexUrl, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${opts.accessToken}`,
-            'Content-Type': 'application/json',
-            'X-Goog-User-Project': opts.project
-          },
-          body: JSON.stringify(requestBody),
-          signal: AbortSignal.timeout(timeoutMs)
-        })
-
-        if (vertexResponse.ok) {
-          const data: any = await vertexResponse.json()
-          const text = data.candidates?.[0]?.content?.parts?.[0]?.text
-          if (text) return text
-        }
-        console.warn(`[Gemini] Vertex AI Platform also failed (${vertexResponse.status})`)
-      } catch (e: any) {
-        console.warn(`[Gemini] Vertex AI Platform error: ${e.message}`)
-      }
-    }
   }
 
-  // Priority 2: API key auth
+  // Priority 2: API key auth (fallback — may not work for all models)
   if (opts.apiKey) {
     const url = `${GEMINI_REST_BASE}/${model}:generateContent?key=${opts.apiKey}`
-    console.log(`[Gemini] Calling REST API with API key: ${model}`)
+    console.log(`[Gemini] Calling REST API with API key (fallback): ${model}`)
     
     const response = await fetch(url, {
       method: 'POST',
@@ -142,12 +148,12 @@ async function callGemini(opts: GeminiCallOptions): Promise<any> {
 
     if (!response.ok) {
       const errText = await response.text()
-      throw new Error(`Gemini API error ${response.status}: ${errText}`)
+      throw new Error(`Gemini API error ${response.status}: ${errText.substring(0, 200)}`)
     }
 
     const data: any = await response.json()
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text
-    if (!text) throw new Error('Empty response from Gemini')
+    if (!text) throw new Error('Empty response from Gemini (API key auth)')
     return text
   }
 
@@ -170,15 +176,24 @@ export async function analyzeRoofGeometry(
     project?: string
     location?: string
     serviceAccountKey?: string
+  },
+  options?: {
+    maxRetries?: number    // Override MAX_RETRIES (default 2)
+    timeoutMs?: number     // Override per-call timeout (default 25000)
+    acceptScore?: number   // Override acceptance threshold (default 30)
+    model?: string         // Override model (default: gemini-2.5-flash)
   }
 ): Promise<AIMeasurementAnalysis | null> {
-  // Auto-generate access token from service account key if available
+  // Auto-generate access token from service account key if available.
+  // Service account Bearer token is REQUIRED for Gemini calls — the GOOGLE_VERTEX_API_KEY
+  // is actually a Google Maps API key and is blocked on generativelanguage.googleapis.com.
   if (!env.accessToken && env.serviceAccountKey) {
     try {
+      const tokenStartMs = Date.now()
       env.accessToken = await getAccessToken(env.serviceAccountKey)
       if (!env.project) env.project = getProjectId(env.serviceAccountKey) || undefined
       if (!env.location) env.location = 'us-central1'
-      console.log('[Gemini] Auto-generated access token from service account key')
+      console.log(`[Gemini] Auto-generated access token in ${Date.now() - tokenStartMs}ms (project: ${env.project})`)
     } catch (e: any) {
       console.warn('[Gemini] Service account token generation failed:', e.message)
     }
@@ -189,7 +204,9 @@ export async function analyzeRoofGeometry(
     return null
   }
 
+  const imageStartMs = Date.now()
   const base64Image = await fetchImageAsBase64(satelliteImageUrl)
+  console.log(`[Gemini] Image fetched in ${Date.now() - imageStartMs}ms (${Math.round(base64Image.length / 1024)}KB base64)`)
 
   // =============================================================================
   // GEMINI PROMPT v4 — Precision CAD Photogrammetry Mode
@@ -412,11 +429,18 @@ Return ONLY the JSON object.`
   // 4. Track the best attempt across retries (highest quality score)
   // 5. After MAX_RETRIES exhausted, return best attempt or null for fallback
   // =============================================================================
-  // MAX_RETRIES=2: first good attempt + one correction retry
-  // Keeps total wall-clock under ~55s even worst-case (safe for CF Workers)
-  const MAX_RETRIES = 2
+  // MAX_RETRIES: configurable per caller.
+  // /enhance endpoint passes maxRetries=1 to stay within 30s waitUntil budget.
+  // /generate-enhanced passes maxRetries=2 when it has time budget.
+  // Default: 2 (first attempt + one correction retry)
+  const MAX_RETRIES = options?.maxRetries ?? 2
+  const CALL_TIMEOUT = options?.timeoutMs ?? 55000  // 55s default — Pro model needs more time, CF Workers wall time is unlimited
+  const ACCEPT_SCORE = options?.acceptScore ?? 20    // Minimum score to accept without retry (lowered for Pro model which is more accurate)
+  const GEMINI_MODEL = options?.model ?? 'gemini-2.5-pro'
   let bestAttempt: AIMeasurementAnalysis | null = null
   let bestScore = -1
+  
+  console.log(`[Gemini] Config: model=${GEMINI_MODEL}, maxRetries=${MAX_RETRIES}, timeout=${CALL_TIMEOUT}ms, acceptScore=${ACCEPT_SCORE}`)
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
@@ -436,13 +460,14 @@ MANDATORY before responding:
 If the roof has wings or bumps, your perimeter MUST have concave vertices. A fully convex polygon = AUTOMATIC REJECTION.`
       }
 
+      const geminiCallStartMs = Date.now()
       const text = await callGemini({
         apiKey: env.apiKey,
         accessToken: env.accessToken,
         project: env.project,
         location: env.location,
-        model: 'gemini-2.5-flash',
-        timeoutMs: 25000,  // 25s per attempt — keeps total under CF Workers wall-clock limit
+        model: GEMINI_MODEL,
+        timeoutMs: CALL_TIMEOUT,
         contents: [{
           parts: [
             {
@@ -464,6 +489,7 @@ If the roof has wings or bumps, your perimeter MUST have concave vertices. A ful
         }
       })
 
+      console.log(`[Gemini] Gemini API responded in ${Date.now() - geminiCallStartMs}ms`)
       console.log(`[Gemini] Raw response attempt ${attempt} (first 500 chars): ${text.substring(0, 500)}`)
       const raw = JSON.parse(text) as any
 
@@ -577,16 +603,24 @@ If the roof has wings or bumps, your perimeter MUST have concave vertices. A ful
       // ──────────────────────────────────────────────────────────────
       // DECISION: Accept or retry?
       // ──────────────────────────────────────────────────────────────
-      // Accept threshold: score >= 30 with no hard failures
-      // Lowered from 50 to avoid unnecessary retries on Cloudflare Workers (wall-clock budget)
-      if (failures.length === 0 && qualityScore >= 30) {
+      // Accept if score meets threshold with no hard failures
+      // OR if we have usable geometry (facets >= 2) and this is the last attempt
+      if (failures.length === 0 && qualityScore >= ACCEPT_SCORE) {
         // ✅ PASSED — geometry is usable, accept immediately
         console.log(`[Gemini] ✅ Attempt ${attempt} PASSED validation (score ${qualityScore}) — accepting`)
         return analysis
       }
+      
+      // EARLY ACCEPT: If we have decent geometry and only soft failures, accept on last attempt
+      // This prevents complex roofs from always falling back to generic SVG
+      if (attempt >= MAX_RETRIES && qualityScore >= 15 && analysis.facets.length >= 2) {
+        console.log(`[Gemini] ✅ Attempt ${attempt} SOFT ACCEPT (score ${qualityScore}, ${analysis.facets.length} facets) — usable geometry on final attempt`)
+        ;(analysis as any)._softAccepted = true
+        return analysis
+      }
 
       if (failures.length > 0) {
-        // ❌ HARD FAILURES — must retry
+        // ❌ HARD FAILURES — retry if attempts remain
         const failMsg = failures.join('; ')
         console.warn(`[Gemini] ✗ Attempt ${attempt} FAILED validation: ${failMsg}`)
         if (attempt < MAX_RETRIES) {
@@ -594,9 +628,9 @@ If the roof has wings or bumps, your perimeter MUST have concave vertices. A ful
           await new Promise(resolve => setTimeout(resolve, 200))
           continue  // next iteration of retry loop
         }
-      } else if (qualityScore < 30) {
+      } else if (qualityScore < ACCEPT_SCORE) {
         // ⚠ LOW QUALITY — no hard failures but score too low, retry if possible
-        console.warn(`[Gemini] ⚠ Attempt ${attempt} low quality (score ${qualityScore} < 30)`)
+        console.warn(`[Gemini] ⚠ Attempt ${attempt} low quality (score ${qualityScore} < ${ACCEPT_SCORE})`)
         if (attempt < MAX_RETRIES) {
           console.log(`[Gemini] → Retrying for better quality...`)
           await new Promise(resolve => setTimeout(resolve, 200))
@@ -605,7 +639,10 @@ If the roof has wings or bumps, your perimeter MUST have concave vertices. A ful
       }
 
     } catch (err: any) {
-      console.error(`[Gemini] ✗ Attempt ${attempt} error: ${err.message}`)
+      const isTimeout = err.message?.includes('abort') || err.message?.includes('timeout') || err.name === 'AbortError' || err.name === 'TimeoutError'
+      console.error(`[Gemini] ✗ Attempt ${attempt} ${isTimeout ? 'TIMEOUT' : 'ERROR'}: ${err.message}`)
+      // Store the error for diagnostic reporting
+      ;(bestAttempt as any)?._lastError || ((bestAttempt || {} as any)._lastError = err.message)
       if (attempt < MAX_RETRIES) {
         console.log(`[Gemini] → Retrying after error (${MAX_RETRIES - attempt} remaining)...`)
         await new Promise(resolve => setTimeout(resolve, 200))
@@ -626,6 +663,7 @@ If the roof has wings or bumps, your perimeter MUST have concave vertices. A ful
   }
 
   console.error(`[Gemini] ✗ All ${MAX_RETRIES} attempts failed with no usable geometry. Returning null — pipeline will fall back to Solar API / DataLayers segments.`)
+  // Return null — the enhance endpoint will record the error
   return null
 }
 

@@ -40,7 +40,7 @@ function generateEnhancedImagery(lat: number, lng: number, apiKey: string, footp
   const roofZoom = footprintM2 > 2000 ? 19 : footprintM2 > 800 ? 20 : 20
   const mediumZoom = roofZoom - 1     // Bridge: property + neighbors
   const contextZoom = roofZoom - 3    // Wide neighborhood context
-  const closeupZoom = Math.min(roofZoom + 1, 21)  // Detail: shingle-level view
+  const closeupZoom = roofZoom  // Same zoom as overhead — we're just panning to corners, not zooming further
   
   // Geo-math for offsets
   // At lat ~53° N (Edmonton): 1° lat ≈ 111.3 km, 1° lng ≈ 67 km
@@ -53,8 +53,20 @@ function generateEnhancedImagery(lat: number, lng: number, apiKey: string, footp
   const offsetLat = dirOffsetMeters * latDegPerMeter
   const offsetLng = dirOffsetMeters * lngDegPerMeter
   
-  // Quadrant close-up offset (~10m from center for corner detail)
-  const quadOffsetMeters = 10
+  // Quadrant close-up offset — proportional to roof size, TIGHTLY anchored to corners
+  // At zoom 21, the visible area is only ~15m across (640px, scale=2).
+  // Even 5m offset pushes the center 1/3 of the frame away from the roof.
+  // Goal: show each CORNER of the roof, not the driveway or yard.
+  //
+  // Strategy: offset = 25% of estimated half-side-length, clamped tightly.
+  // For a ~15m × 12m house (~1600 sqft, ~150m²):
+  //   roofSide ≈ 12m, halfSide ≈ 6m, offset = 6 * 0.25 = 1.5m → clamped to 2m
+  // For a large ~25m × 20m house (~5000 sqft, ~465m²):
+  //   roofSide ≈ 21m, halfSide ≈ 10.5m, offset = 10.5 * 0.25 = 2.6m → 2.6m
+  // This keeps the camera ON the roof corner, not beyond it.
+  const roofSideMeters = Math.sqrt(footprintM2)  // approximate side length of square equiv.
+  const halfSide = roofSideMeters / 2
+  const quadOffsetMeters = Math.max(2, Math.min(halfSide * 0.25, 6))  // 2m min, 6m max
   const quadLat = quadOffsetMeters * latDegPerMeter
   const quadLng = quadOffsetMeters * lngDegPerMeter
   
@@ -322,12 +334,11 @@ export async function generateReportForOrder(
       reportData = generateMockRoofReport(order, mapsApiKey)
     }
 
-    // Gemini Vision AI overlay — DISABLED for initial generation
-    // CF Workers/Pages has a strict 30s wall-clock limit.
-    // buildingInsights (~3s) + Gemini (~15-25s) = too close to limit, causing timeouts.
-    // Gemini Vision can be added later via /generate-enhanced or /ai-enhance endpoint.
-    // Reports 26-31 worked (11-16s), Report 32 was 22s (barely), Reports 33-35 timed out.
-    console.log(`[GenerateDirect] Skipping Gemini Vision (CF Workers timeout safety) — Solar API segments used. Use /generate-enhanced to add AI geometry later.`)
+    // Gemini Vision AI overlay — runs as SEPARATE request via /api/reports/:id/enhance
+    // CF Workers has a hard 30s limit on waitUntil(). buildingInsights (~3s) is safe,
+    // but Gemini Pro (~15-30s) pushes total past 30s. The report completes first with
+    // Solar API data, then the client auto-triggers /enhance for AI geometry overlay.
+    console.log(`[GenerateDirect] Report will complete with Solar API data. Gemini Pro overlay available via /enhance endpoint.`)
 
     const professionalHtml = generateProfessionalReportHTML(reportData)
     const edgeSummary = reportData.edge_summary
@@ -592,6 +603,189 @@ reportsRoutes.post('/:orderId/retry', async (c) => {
 })
 
 // ============================================================
+// ENHANCE — Run Gemini Vision Pro on a completed report
+// Adds AI geometry overlay (facet polygons, ridges, hips, valleys)
+// This is a SEPARATE request from report generation because
+// Gemini Pro takes ~15-30s which exceeds CF Workers 30s limit
+// when combined with buildingInsights API calls.
+// ============================================================
+reportsRoutes.post('/:orderId/enhance', async (c) => {
+  try {
+    const orderId = c.req.param('orderId')
+    
+    // Get the existing report + order data
+    const report = await c.env.DB.prepare(
+      'SELECT id, status, api_response_raw, roof_footprint_sqft, roof_pitch_degrees FROM reports WHERE order_id = ?'
+    ).bind(orderId).first<any>()
+    
+    if (!report) return c.json({ error: 'Report not found' }, 404)
+    
+    const order = await c.env.DB.prepare(
+      'SELECT * FROM orders WHERE id = ?'
+    ).bind(orderId).first<any>()
+    
+    if (!order) return c.json({ error: 'Order not found' }, 404)
+    
+    // Get satellite image URL from the stored report data
+    let reportData: any = null
+    try {
+      reportData = report.api_response_raw ? JSON.parse(report.api_response_raw) : null
+    } catch(e) {}
+    
+    const overheadImageUrl = reportData?.imagery?.satellite_overhead_url || reportData?.imagery?.satellite_url
+    if (!overheadImageUrl) {
+      return c.json({ error: 'No satellite image URL found in report. Generate report first.' }, 400)
+    }
+    
+    if (!c.env.GOOGLE_VERTEX_API_KEY && !c.env.GCP_SERVICE_ACCOUNT_KEY) {
+      return c.json({ error: 'Gemini API credentials not configured' }, 400)
+    }
+    
+    console.log(`[Enhance] Starting Gemini 2.5 Pro analysis for order ${orderId}`)
+    console.log(`[Enhance] Overhead URL: ${overheadImageUrl?.substring(0, 100)}...`)
+    console.log(`[Enhance] Credentials: apiKey=${!!c.env.GOOGLE_VERTEX_API_KEY}, svcAcct=${!!c.env.GCP_SERVICE_ACCOUNT_KEY}, project=${c.env.GOOGLE_CLOUD_PROJECT}`)
+    
+    // Mark as processing immediately
+    await c.env.DB.prepare(`
+      UPDATE reports SET ai_status = 'processing', updated_at = datetime('now') WHERE order_id = ?
+    `).bind(orderId).run()
+    
+    // Run Gemini Pro SYNCHRONOUSLY — CF Workers has UNLIMITED wall time for HTTP requests
+    // (as long as the client stays connected). Wall time != CPU time.
+    // fetch() calls to Gemini API don't count as CPU time.
+    // The client (browser/curl) will wait 30-60s for the response.
+    try {
+      const geminiEnv = {
+        apiKey: c.env.GOOGLE_VERTEX_API_KEY,
+        accessToken: undefined as string | undefined,
+        project: c.env.GOOGLE_CLOUD_PROJECT,
+        location: c.env.GOOGLE_CLOUD_LOCATION || 'us-central1',
+        serviceAccountKey: c.env.GCP_SERVICE_ACCOUNT_KEY,
+      }
+      
+      // Use gemini-2.5-pro for superior spatial reasoning on complex roofs.
+      // Pro model passes strict concave/convex validation that Flash cannot.
+      // API key path is preferred (faster than service account Bearer token, saves 1-2s).
+      // CF Workers wall time is UNLIMITED for HTTP — only CPU time matters (10ms free / 5min paid).
+      console.log(`[Enhance] Calling analyzeRoofGeometry with model=gemini-2.5-pro, timeout=55000ms, maxRetries=2`)
+      const enhanceStartMs = Date.now()
+      const aiGeometry = await analyzeRoofGeometry(overheadImageUrl, geminiEnv, {
+        maxRetries: 1,     // Single attempt — Pro model is slow but accurate
+        timeoutMs: 90000,  // 90s timeout — Pro model needs 30-60s for complex image analysis
+        acceptScore: 15,   // Lower threshold — accept any usable geometry on complex roofs
+        model: 'gemini-2.5-pro',  // Pro model — strong spatial reasoning, passes strict validation
+      })
+        
+        if (aiGeometry && aiGeometry.facets && aiGeometry.facets.length > 0) {
+          const retryExhausted = (aiGeometry as any)._retryExhausted
+          const softAccepted = (aiGeometry as any)._softAccepted
+          const bestScore = (aiGeometry as any)._bestScore
+          
+          console.log(`[Enhance] Order ${orderId}: ${aiGeometry.facets.length} facets, ${aiGeometry.lines.length} lines${retryExhausted ? ` (best-effort, score ${bestScore})` : ''}${softAccepted ? ' (soft-accepted)' : ''} — gemini-2.5-pro`)
+          
+          // Re-generate segments from AI geometry
+          const footprintSqft = report.roof_footprint_sqft || reportData?.total_footprint_sqft || 1500
+          const pitchDeg = report.roof_pitch_degrees || reportData?.roof_pitch_degrees || 20
+          
+          const aiSegments = generateSegmentsFromAIGeometry(aiGeometry, footprintSqft, pitchDeg)
+          let newEdges: any = null
+          let newEdgeSummary: any = null
+          let newMaterials: any = null
+          
+          if (aiSegments.length >= 2 && reportData) {
+            newEdges = generateEdgesFromSegments(aiSegments, footprintSqft)
+            newEdgeSummary = computeEdgeSummary(newEdges)
+            const trueArea = reportData.total_true_area_sqft || footprintSqft * 1.1
+            newMaterials = computeMaterialEstimate(trueArea, newEdges, aiSegments)
+            
+            // Update the stored report data with AI geometry
+            reportData.ai_geometry = aiGeometry
+            reportData.segments = aiSegments
+            reportData.edges = newEdges
+            reportData.edge_summary = newEdgeSummary
+            reportData.materials = newMaterials
+          } else if (reportData) {
+            reportData.ai_geometry = aiGeometry
+          }
+          
+          // Regenerate HTML with AI geometry overlay
+          const professionalHtml = reportData ? generateProfessionalReportHTML(reportData) : null
+          
+          // Update DB with AI geometry + regenerated HTML + updated segments/edges/materials
+          const updateFields: string[] = ['ai_measurement_json = ?', 'ai_status = \'completed\'', 'ai_analyzed_at = datetime(\'now\')', 'api_response_raw = ?']
+          const updateValues: any[] = [JSON.stringify(aiGeometry)]
+          
+          if (newEdges && aiSegments.length >= 2) {
+            updateFields.push('roof_segments = ?', 'edge_measurements = ?')
+            updateValues.push(JSON.stringify(aiSegments), JSON.stringify(newEdges))
+          }
+          if (newEdgeSummary) {
+            updateFields.push('total_ridge_ft = ?', 'total_hip_ft = ?', 'total_valley_ft = ?', 'total_eave_ft = ?', 'total_rake_ft = ?')
+            updateValues.push(newEdgeSummary.total_ridge_ft, newEdgeSummary.total_hip_ft, newEdgeSummary.total_valley_ft, newEdgeSummary.total_eave_ft, newEdgeSummary.total_rake_ft)
+          }
+          if (newMaterials) {
+            updateFields.push('material_estimate = ?', 'gross_squares = ?', 'bundle_count = ?', 'total_material_cost_cad = ?', 'complexity_class = ?')
+            updateValues.push(JSON.stringify(newMaterials), newMaterials.gross_squares, newMaterials.bundle_count, newMaterials.total_material_cost_cad, newMaterials.complexity_class)
+          }
+          if (professionalHtml) {
+            updateFields.push('professional_report_html = ?')
+            updateValues.push(professionalHtml)
+          }
+          updateFields.push("updated_at = datetime('now')")
+          updateValues.push(JSON.stringify(reportData))  // api_response_raw
+          updateValues.push(orderId)  // WHERE clause
+          
+          const sql = `UPDATE reports SET ${updateFields.join(', ')} WHERE order_id = ?`
+          
+          // Fix: api_response_raw binding — we pushed it to updateFields first but value last
+          // Reorder: put api_response_raw value after ai_measurement_json value
+          const orderedValues = [updateValues[0]]  // ai_measurement_json
+          orderedValues.push(...updateValues.slice(1, -2))  // middle values
+          orderedValues.push(updateValues[updateValues.length - 2])  // api_response_raw (JSON reportData)
+          orderedValues.push(updateValues[updateValues.length - 1])  // orderId
+          
+          await c.env.DB.prepare(sql).bind(...orderedValues).run()
+          
+          console.log(`[Enhance] ✅ Order ${orderId}: DB updated with AI geometry (${aiGeometry.facets.length} facets, gemini-2.5-pro)`)
+          
+          return c.json({ 
+            success: true, 
+            message: `AI enhancement completed (gemini-2.5-pro) — ${aiGeometry.facets.length} facets detected`,
+            orderId,
+            facets: aiGeometry.facets.length,
+            lines: aiGeometry.lines.length,
+            obstructions: aiGeometry.obstructions.length,
+            softAccepted: !!(aiGeometry as any)._softAccepted,
+            retryExhausted: !!(aiGeometry as any)._retryExhausted,
+          })
+        } else {
+          const diagInfo = aiGeometry 
+            ? `Got geometry but 0 facets (perimeter: ${aiGeometry.perimeter?.length || 0} pts, lines: ${aiGeometry.lines?.length || 0})` 
+            : `analyzeRoofGeometry returned null after ${Date.now() - enhanceStartMs}ms (likely auth error or model not available via API key)`
+          console.warn(`[Enhance] Order ${orderId}: ${diagInfo}`)
+          await c.env.DB.prepare(`
+            UPDATE reports SET ai_status = 'failed', ai_error = ?, ai_analyzed_at = datetime('now'), updated_at = datetime('now')
+            WHERE order_id = ?
+          `).bind(diagInfo.substring(0, 500), orderId).run()
+          
+          return c.json({ success: false, error: diagInfo, orderId }, 400)
+        }
+    } catch (err: any) {
+      console.error(`[Enhance] Order ${orderId} failed:`, err.message)
+      try {
+        await c.env.DB.prepare(`
+          UPDATE reports SET ai_status = 'failed', ai_error = ?, ai_analyzed_at = datetime('now'), updated_at = datetime('now')
+          WHERE order_id = ?
+        `).bind(err.message.substring(0, 500), orderId).run()
+      } catch(dbErr) {}
+      return c.json({ error: 'Enhancement failed', details: err.message }, 500)
+    }
+  } catch (err: any) {
+    return c.json({ error: 'Enhancement failed', details: err.message }, 500)
+  }
+})
+
+// ============================================================
 // ENHANCED GENERATE — Solar DataLayers + GeoTIFF processing
 // Full execute_roof_order() pipeline:
 //   1. Geocode address → lat/lng
@@ -768,7 +962,12 @@ reportsRoutes.post('/:orderId/generate-enhanced', async (c) => {
           location: c.env.GOOGLE_CLOUD_LOCATION || 'us-central1',
           serviceAccountKey: c.env.GCP_SERVICE_ACCOUNT_KEY,
         }
-        const aiGeometry = await analyzeRoofGeometry(overheadImageUrl, geminiEnv)
+        const aiGeometry = await analyzeRoofGeometry(overheadImageUrl, geminiEnv, {
+          maxRetries: 1,     // Single attempt — time-budgeted
+          timeoutMs: Math.min(Math.floor(enhancedRemainingMs * 0.85), 90000),  // 85% of remaining budget, max 90s
+          acceptScore: 15,   // Relaxed threshold — accept any usable geometry
+          model: 'gemini-2.5-pro',  // Pro — superior spatial reasoning for complex roofs
+        })
         if (aiGeometry && aiGeometry.facets && aiGeometry.facets.length > 0) {
           // Check if geometry exhausted retries (lower confidence)
           if ((aiGeometry as any)._retryExhausted) {
