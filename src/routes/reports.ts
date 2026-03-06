@@ -218,11 +218,11 @@ reportsRoutes.get('/:orderId/html', async (c) => {
       const html = tryRegenerate(stored)
       if (html) {
         console.log(`[Report HTML] Regenerated HTML from JSON stored in professional_report_html for order ${orderId}`)
-        // Update DB with the real HTML so future requests are fast
+        // Update DB: save real HTML + move the full RoofReport JSON to api_response_raw
         try {
           await c.env.DB.prepare(
-            `UPDATE reports SET professional_report_html = ? WHERE order_id = ?`
-          ).bind(html, parseInt(orderId)).run()
+            `UPDATE reports SET professional_report_html = ?, api_response_raw = ? WHERE order_id = ?`
+          ).bind(html, stored, parseInt(orderId)).run()
         } catch (_) { /* non-critical */ }
         return c.html(html)
       }
@@ -646,7 +646,7 @@ reportsRoutes.post('/:orderId/enhance', async (c) => {
     
     // Get the existing report + order data
     const report = await c.env.DB.prepare(
-      'SELECT id, status, api_response_raw, roof_footprint_sqft, roof_pitch_degrees FROM reports WHERE order_id = ?'
+      'SELECT id, status, api_response_raw, professional_report_html, roof_footprint_sqft, roof_pitch_degrees FROM reports WHERE order_id = ?'
     ).bind(orderId).first<any>()
     
     if (!report) return c.json({ error: 'Report not found' }, 404)
@@ -658,12 +658,53 @@ reportsRoutes.post('/:orderId/enhance', async (c) => {
     if (!order) return c.json({ error: 'Order not found' }, 404)
     
     // Get satellite image URL from the stored report data
+    // Try api_response_raw first, then professional_report_html (may contain full RoofReport JSON)
     let reportData: any = null
     try {
       reportData = report.api_response_raw ? JSON.parse(report.api_response_raw) : null
     } catch(e) {}
+    // If api_response_raw doesn't have imagery, try professional_report_html as JSON
+    if (!reportData?.imagery?.satellite_url && report.professional_report_html) {
+      try {
+        const parsed = JSON.parse(report.professional_report_html)
+        if (parsed?.property?.address && parsed?.imagery) {
+          reportData = parsed
+        }
+      } catch(e) { /* professional_report_html is real HTML, not JSON */ }
+    }
     
-    const overheadImageUrl = reportData?.imagery?.satellite_overhead_url || reportData?.imagery?.satellite_url
+    let overheadImageUrl = reportData?.imagery?.satellite_overhead_url || reportData?.imagery?.satellite_url
+    
+    // Fallback: construct satellite URL from lat/lng if available
+    if (!overheadImageUrl && order.latitude && order.longitude && c.env.GOOGLE_MAPS_API_KEY) {
+      overheadImageUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${order.latitude},${order.longitude}&zoom=20&size=640x640&scale=2&maptype=satellite&key=${c.env.GOOGLE_MAPS_API_KEY}`
+      console.log(`[Enhance] Constructed satellite URL from lat/lng: ${order.latitude},${order.longitude}`)
+      // Build minimal reportData if we don't have one
+      if (!reportData || !reportData.property) {
+        reportData = {
+          order_id: parseInt(orderId),
+          property: {
+            address: order.property_address || 'Unknown',
+            city: order.property_city,
+            province: order.property_province,
+            postal_code: order.property_postal_code,
+            homeowner_name: order.homeowner_name,
+            requester_name: order.requester_name,
+            latitude: order.latitude,
+            longitude: order.longitude,
+          },
+          total_footprint_sqft: report.roof_footprint_sqft || 0,
+          total_true_area_sqft: 0,
+          segments: [],
+          edges: [],
+          edge_summary: { total_ridge_ft: 0, total_hip_ft: 0, total_valley_ft: 0, total_eave_ft: 0, total_rake_ft: 0, total_linear_ft: 0 },
+          materials: { net_area_sqft: 0, gross_squares: 0, bundle_count: 0, line_items: [], waste_table: [] },
+          imagery: { satellite_url: overheadImageUrl, satellite_overhead_url: overheadImageUrl },
+          metadata: { provider: 'reconstructed' },
+          quality: { imagery_quality: 'BASE', confidence_score: 50 },
+        }
+      }
+    }
     if (!overheadImageUrl) {
       return c.json({ error: 'No satellite image URL found in report. Generate report first.' }, 400)
     }
@@ -2421,10 +2462,15 @@ function computeEdgeSummary(edges: EdgeMeasurement[]) {
 // High-DPI ready, PDF-convertible, email-embeddable
 // ============================================================
 function generateProfessionalReportHTML(report: RoofReport): string {
-  const prop = report.property
-  const mat = report.materials
-  const es = report.edge_summary
-  const quality = report.quality
+  const prop = report.property || { address: 'Unknown' } as any
+  const mat = report.materials || { net_area_sqft: 0, gross_squares: 0, bundle_count: 0, line_items: [], waste_table: [], waste_pct: 15, gross_area_sqft: 0, total_material_cost_cad: 0, complexity_class: 'simple', complexity_factor: 1, shingle_type: 'architectural' } as any
+  const es = report.edge_summary || { total_ridge_ft: 0, total_hip_ft: 0, total_valley_ft: 0, total_eave_ft: 0, total_rake_ft: 0, total_linear_ft: 0, total_step_flashing_ft: 0, total_wall_flashing_ft: 0, total_transition_ft: 0, total_parapet_ft: 0 } as any
+  const quality = report.quality || { imagery_quality: 'BASE', confidence_score: 50 } as any
+  // Ensure critical numeric fields have safe defaults
+  if (!report.total_true_area_sqft) report.total_true_area_sqft = report.total_footprint_sqft || 1
+  if (!report.total_footprint_sqft) report.total_footprint_sqft = report.total_true_area_sqft || 1
+  if (!report.area_multiplier) report.area_multiplier = report.total_true_area_sqft / (report.total_footprint_sqft || 1)
+  if (!report.generated_at) report.generated_at = new Date().toISOString() as any
   const reportNum = `${String(report.order_id).padStart(8,'0')}`
   const reportDate = new Date(report.generated_at).toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' })
   const reportDateShort = new Date(report.generated_at).toLocaleDateString('en-CA', { year: 'numeric', month: 'numeric', day: 'numeric' })
@@ -2475,8 +2521,8 @@ function generateProfessionalReportHTML(report: RoofReport): string {
   // Computed values
   const totalLinearFt = es.total_ridge_ft + es.total_hip_ft + es.total_valley_ft + es.total_eave_ft + es.total_rake_ft
   const bundleCount3Tab = Math.ceil(grossSquares * 3)
-  const providerLabel = report.metadata.provider === 'mock' ? 'Simulated'
-    : report.metadata.provider === 'google_solar_datalayers' ? 'Google Solar DataLayers'
+  const providerLabel = report.metadata?.provider === 'mock' ? 'Simulated'
+    : report.metadata?.provider === 'google_solar_datalayers' ? 'Google Solar DataLayers'
     : 'Google Solar API'
 
   // Predominant pitch from the largest segment
