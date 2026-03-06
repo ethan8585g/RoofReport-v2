@@ -385,9 +385,14 @@ export async function generateReportForOrder(
     // This produces perimeter polygon, facets, ridge/hip/valley lines from the image.
     // The architectural diagram SVG is then rendered from these real coordinates —
     // NOT from an LLM making up shapes from text measurements.
+    //
+    // CRITICAL: On Cloudflare Workers, waitUntil() has a ~30s hard limit.
+    // We use gemini-2.0-flash (10-15s) with a 20s timeout so the entire
+    // generation completes within the 30s window. If Gemini fails or times out,
+    // the fallback diagram is used and /enhance can be called separately later.
     const satImageUrl = reportData.imagery?.satellite_overhead_url || reportData.imagery?.satellite_url
     if (satImageUrl && (env.GCP_SERVICE_ACCOUNT_KEY || env.GOOGLE_VERTEX_API_KEY)) {
-      console.log(`[GenerateDirect] Calling Gemini to analyze satellite image for real roof geometry...`)
+      console.log(`[GenerateDirect] Calling Gemini (flash) to analyze satellite image for roof geometry...`)
       try {
         const geminiEnv = {
           apiKey: env.GOOGLE_VERTEX_API_KEY,
@@ -396,11 +401,13 @@ export async function generateReportForOrder(
           serviceAccountKey: env.GCP_SERVICE_ACCOUNT_KEY,
         }
         const startGemini = Date.now()
+        // Use gemini-2.0-flash for speed (10-15s vs 45-110s for 2.5-pro)
+        // Single attempt, 20s timeout — must fit in CF Workers 30s window
         const aiGeometry = await analyzeRoofGeometry(satImageUrl, geminiEnv, {
-          maxRetries: 2,
-          timeoutMs: 180000,
-          acceptScore: 15,
-          model: 'gemini-2.5-pro',
+          maxRetries: 1,
+          timeoutMs: 20000,
+          acceptScore: 10,
+          model: 'gemini-2.0-flash',
         })
         const geminiDuration = Date.now() - startGemini
         if (aiGeometry && aiGeometry.facets && aiGeometry.facets.length > 0) {
@@ -416,9 +423,8 @@ export async function generateReportForOrder(
       console.log(`[GenerateDirect] Skipping Gemini geometry: ${!satImageUrl ? 'no satellite image' : 'no GCP credentials'}`)
     }
 
-    // generateProfessionalReportHTML uses reportData.ai_geometry to render the diagram.
-    // If Gemini succeeded, the architectural diagram will be drawn from REAL roof coordinates.
-    // If not, it falls back to a generic shape from segment data.
+    // ── SAVE REPORT ──
+    // Generate the report HTML (with Gemini geometry if available, fallback otherwise).
     const professionalHtml = generateProfessionalReportHTML(reportData)
     const edgeSummary = reportData.edge_summary
     const materials = reportData.materials
@@ -444,6 +450,7 @@ export async function generateReportForOrder(
         professional_report_html = ?,
         report_version = ?,
         api_response_raw = ?,
+        satellite_image_url = ?,
         status = 'completed', generation_completed_at = datetime('now'), updated_at = datetime('now')
       WHERE order_id = ?
     `).bind(
@@ -465,6 +472,7 @@ export async function generateReportForOrder(
       professionalHtml,
       usedDataLayers ? '3.0' : '2.0',
       JSON.stringify(reportData),
+      satImageUrl || null,
       orderId
     ).run()
 
@@ -472,6 +480,8 @@ export async function generateReportForOrder(
       UPDATE orders SET status = 'completed', delivered_at = datetime('now'), updated_at = datetime('now')
       WHERE id = ?
     `).bind(orderId).run()
+
+    console.log(`[GenerateDirect] ✅ Report saved for order ${orderId} (Gemini geometry: ${reportData.ai_geometry ? 'YES' : 'fallback'})`)
 
     const version = usedDataLayers ? '3.0' : '2.0'
     return {
