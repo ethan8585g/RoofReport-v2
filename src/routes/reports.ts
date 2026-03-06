@@ -205,27 +205,17 @@ reportsRoutes.get('/:orderId/html', async (c) => {
       return null
     }
 
-    // Priority 1: Try api_response_raw (full RoofReport)
-    if (report.api_response_raw) {
-      const html = tryRegenerate(report.api_response_raw)
-      if (html && (html.startsWith('<!DOCTYPE') || html.startsWith('<html'))) {
-        return c.html(html)
-      }
-    }
-
-    // Priority 2: professional_report_html may contain a full RoofReport JSON 
-    // (enhance endpoint sometimes overwrites it with JSON instead of HTML)
+    // Priority 1: Use stored professional_report_html if it looks like valid HTML
+    // This preserves GPT-generated diagrams and other dynamic content that can't be regenerated from raw data alone
     if (report.professional_report_html) {
       const stored = report.professional_report_html as string
-      // If it looks like HTML, return it directly
       if (stored.trimStart().startsWith('<!DOCTYPE') || stored.trimStart().startsWith('<html')) {
         return c.html(stored)
       }
-      // Otherwise try to parse as RoofReport JSON and regenerate
+      // If it's JSON instead of HTML, try to regenerate
       const html = tryRegenerate(stored)
       if (html) {
         console.log(`[Report HTML] Regenerated HTML from JSON stored in professional_report_html for order ${orderId}`)
-        // Update DB: save real HTML + move the full RoofReport JSON to api_response_raw
         try {
           await c.env.DB.prepare(
             `UPDATE reports SET professional_report_html = ?, api_response_raw = ? WHERE order_id = ?`
@@ -235,6 +225,14 @@ reportsRoutes.get('/:orderId/html', async (c) => {
       }
       // Last resort: return whatever is stored
       return c.html(stored)
+    }
+
+    // Priority 2: Fallback — try to regenerate from api_response_raw if no stored HTML
+    if (report.api_response_raw) {
+      const html = tryRegenerate(report.api_response_raw)
+      if (html && (html.startsWith('<!DOCTYPE') || html.startsWith('<html'))) {
+        return c.html(html)
+      }
     }
 
     return c.json({ error: 'Report data not available' }, 404)
@@ -2688,7 +2686,7 @@ Respond with ONLY valid JSON:
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
       body: JSON.stringify({
-        model: 'gpt-5-mini',
+        model: 'claude-haiku-4-5',
         messages: [{ role: 'user', content: prompt }],
         max_tokens: 4000,
         temperature: 0.2,
@@ -2764,7 +2762,7 @@ async function generateGPTRoofDiagram(
   const baseUrl = env.OPENAI_BASE_URL || 'https://www.genspark.ai/api/llm_proxy/v1'
 
   if (!apiKey) {
-    console.log('[GPT Diagram] No OPENAI_API_KEY configured — skipping GPT diagram generation')
+    console.log('[GPT Diagram] No OPENAI_API_KEY — skipping')
     return null
   }
 
@@ -2776,46 +2774,37 @@ async function generateGPTRoofDiagram(
   const footprint = Math.round(report.total_footprint_sqft)
   const trueArea = Math.round(report.total_true_area_sqft)
 
-  // Build the segment detail string
   const segDetail = report.segments.map((s, i) =>
-    `Facet ${i + 1}: ${s.footprint_area_sqft} sqft, pitch ${s.pitch_ratio} (${s.pitch_degrees}°), faces ${s.azimuth_direction}`
-  ).join('\n')
+    `Facet ${i + 1}: ${s.footprint_area_sqft}sqft ${s.pitch_ratio} ${s.azimuth_direction}`
+  ).join(', ')
 
-  const systemPrompt = `You are an expert architectural draftsman specializing in roof measurement diagrams for the roofing industry. You produce clean, professional SVG diagrams that match EagleView / Roofr report standards.
+  // Compute approximate dimensions for the roof rectangle
+  const roofSide = Math.sqrt(footprint)
+  const w = Math.round(roofSide * 1.2) // slightly wider than deep
+  const d = Math.round(roofSide / 1.2)
 
-Your diagrams always include:
-- Clean white background
-- Fine diagonal crosshatch pattern fills (45° diamond pattern) on each roof facet
-- Bold black perimeter outline tracing the exact drip-line/gutter edge shape
-- Color-coded edges: Eave=#0d9668 (green), Hip=#d97706 (amber), Ridge=#dc2626 (red), Valley=#2563eb (blue), Rake=#7c3aed (purple)
-- Architectural dimension lines with extension lines, tick marks, and "XX.X ft" labels
-- Numbered facets (plain large numbers centered in each polygon)
-- Edge-type legend in top-left corner
-- Compass rose (N arrow) in top-right corner
-- Dark navy footer bar (#002244) with: FACETS | PITCH | SQUARES | LINEAR FT
+  const prompt = `Generate an SVG roof measurement diagram. viewBox="0 0 700 660". White background.
 
-CRITICAL RULES:
-- Output ONLY valid SVG code, nothing else. No markdown, no explanation.
-- viewBox must be "0 0 700 660"
-- The roof shape must match the ACTUAL roof outline visible in the satellite image
-- Use the REAL measurements provided (do not invent numbers)
-- Every perimeter edge must have a dimension line with its length in feet
-- Facet numbers must be centered in each polygon`
+Roof: ${facetCount} facets, ${footprint}sqft footprint, ~${w}ft × ${d}ft, ${pitch} pitch, hip roof.
+Edges: eave=${es.total_eave_ft}ft ridge=${es.total_ridge_ft}ft hip=${es.total_hip_ft}ft valley=${es.total_valley_ft}ft
+Facets: ${segDetail}
+Footer: ${facetCount} FACETS | ${pitch} PITCH | ${grossSq} SQUARES | ${totalLinFt} LINEAR FT
 
-  const userPrompt = `Generate a professional SVG roof measurement diagram for this property.
+Requirements:
+- Draw a hip roof polygon centered in the SVG (padding 60px sides, 80px bottom for footer)
+- Diamond crosshatch pattern fill (id="xh", stroke="#c0c0c0", 6px spacing, 45° + 135° lines)
+- Perimeter edges: Eave=#0d9668(green) Hip=#d97706(amber) Ridge=#dc2626(red) stroke-width 2.5
+- Dimension lines outside perimeter with "XX.X ft" labels, font-size 9
+- Number each facet (centered, font-size 16, fill #333)
+- Ridge line at top center, hip lines from corners to ridge endpoints
+- Legend box top-left: colored dots + labels for Eave/Hip/Ridge
+- Compass "N" arrow top-right
+- Footer bar: rect y=620 height=40 fill=#002244, white text with stats
 
-MEASUREMENTS:
-- Footprint: ${footprint} sq ft | True Area: ${trueArea} sq ft
-- Pitch: ${pitch} | ${facetCount} Facets | ${grossSq} Squares | ${totalLinFt} Linear Ft
-- Eave: ${es.total_eave_ft}ft | Ridge: ${es.total_ridge_ft}ft | Hip: ${es.total_hip_ft}ft | Valley: ${es.total_valley_ft}ft${es.total_rake_ft > 0 ? ` | Rake: ${es.total_rake_ft}ft` : ''}
-
-FACETS:
-${segDetail}
-
-Create a realistic ${facetCount}-facet roof shape matching a typical Alberta residential hip roof. Output ONLY the SVG code.`
+Output ONLY the SVG. No markdown. No explanation.`
 
   try {
-    console.log(`[GPT Diagram] Sending measurement data to GPT-5-mini for diagram generation...`)
+    console.log(`[GPT Diagram] Requesting SVG diagram from claude-haiku-4-5...`)
     const startMs = Date.now()
 
     const response = await fetch(`${baseUrl}/chat/completions`, {
@@ -2825,13 +2814,10 @@ Create a realistic ${facetCount}-facet roof shape matching a typical Alberta res
         'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: 'gpt-5-mini',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
-        ],
-        max_tokens: 16000,
-        temperature: 0.3,
+        model: 'claude-haiku-4-5',
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 8000,
+        temperature: 0.2,
       }),
     })
 
