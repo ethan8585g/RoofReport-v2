@@ -2483,8 +2483,7 @@ function generateProfessionalReportHTML(report: RoofReport): string {
   const pipeBoots = Math.max(2, Math.floor(report.segments.length / 2))
   const chimneys = report.segments.length >= 6 ? 1 : 0
   const exhaustVents = Math.max(1, Math.floor(report.segments.length / 3))
-  const nailLbs = Math.ceil(grossSquares * 1.5)
-  const cementTubes = Math.max(2, Math.ceil(grossSquares / 15))
+  const nailLbs = Math.ceil(grossSquares * 1.5) // kept for potential future use
   const satelliteUrl = report.imagery?.satellite_url || ''
   const overheadUrl = report.imagery?.satellite_overhead_url || satelliteUrl
   const mediumUrl = (report.imagery as any)?.satellite_medium_url || report.imagery?.medium_url || ''
@@ -2504,73 +2503,38 @@ function generateProfessionalReportHTML(report: RoofReport): string {
   const seUrl = (report.imagery as any)?.closeup_se_url || (report.imagery as any)?.se_closeup_url || ''
   const facetColors = ['#4A90D9','#E8634A','#5CB85C','#F5A623','#9B59B6','#E84393','#2ECC71','#F39C12','#3498DB','#8E44AD','#E67E22','#27AE60']
 
+  // Predominant pitch from the largest segment (must be computed before SVG generators)  
+  const largestSeg = [...report.segments].sort((a, b) => b.true_area_sqft - a.true_area_sqft)[0]
+  const predominantPitch = largestSeg?.pitch_ratio || report.roof_pitch_ratio
+  const predominantPitchDeg = largestSeg?.pitch_degrees || report.roof_pitch_degrees
+
+  // Computed values
+  const totalLinearFt = es.total_ridge_ft + es.total_hip_ft + es.total_valley_ft + es.total_eave_ft + es.total_rake_ft
+  const providerLabel = report.metadata?.provider === 'mock' ? 'Simulated'
+    : report.metadata?.provider === 'google_solar_datalayers' ? 'Google Solar DataLayers'
+    : 'Google Solar API'
+
   // Generate satellite overlay SVG from AI geometry (kept for Page 2 top view only)
   const overlaySVG = generateSatelliteOverlaySVG(report.ai_geometry, report.segments, report.edges, es, facetColors, report.total_footprint_sqft, report.roof_pitch_degrees)
   const hasOverlay = overlaySVG.length > 0
   const overlayLegend = hasOverlay ? generateOverlayLegend(es, !!(report.ai_geometry?.obstructions?.length)) : ''
 
-  // ── NEW: Professional CAD-style Blueprint SVGs (white background, no satellite) ──
-  // These replace the satellite overlays on pages 5-7 with Roofr-standard wireframe diagrams
+  // ── Professional CAD-style Blueprint SVG (white background, no satellite) ──
   const blueprintLengthSVG = generateBlueprintSVG(report.ai_geometry, report.segments, report.edges, es, report.total_footprint_sqft, report.roof_pitch_degrees, 'LENGTH')
-  const blueprintAreaSVG = generateBlueprintSVG(report.ai_geometry, report.segments, report.edges, es, report.total_footprint_sqft, report.roof_pitch_degrees, 'AREA')
-  const blueprintPitchSVG = generateBlueprintSVG(report.ai_geometry, report.segments, report.edges, es, report.total_footprint_sqft, report.roof_pitch_degrees, 'PITCH')
+
+  // ── AI Point-by-Point Blueprint SVG (satellite background + geometry overlay) for Page 3 ──
+  const aiPointByPointSVG = generateAIPointByPointSVG(
+    report.ai_geometry, report.segments, report.edges, es,
+    report.total_footprint_sqft, report.roof_pitch_degrees,
+    overheadUrl, predominantPitch, grossSquares
+  )
 
   // Generate perimeter side data
   const perimeterData = generatePerimeterSideData(report.ai_geometry, es)
 
-  // Computed values
-  const totalLinearFt = es.total_ridge_ft + es.total_hip_ft + es.total_valley_ft + es.total_eave_ft + es.total_rake_ft
-  const bundleCount3Tab = Math.ceil(grossSquares * 3)
-  const providerLabel = report.metadata?.provider === 'mock' ? 'Simulated'
-    : report.metadata?.provider === 'google_solar_datalayers' ? 'Google Solar DataLayers'
-    : 'Google Solar API'
-
-  // Predominant pitch from the largest segment
-  const largestSeg = [...report.segments].sort((a, b) => b.true_area_sqft - a.true_area_sqft)[0]
-  const predominantPitch = largestSeg?.pitch_ratio || report.roof_pitch_ratio
-  const predominantPitchDeg = largestSeg?.pitch_degrees || report.roof_pitch_degrees
-
-  // ── Professional Roof Measurement Diagram (NEW PAGE 3) ──
-  // Full-page diagram matching the Gemini-quality reference: crosshatch fills,
-  // numbered facets, dimension lines with ft labels, all eaves measured edge-to-edge
-  const professionalDiagramSVG = generateProfessionalDiagramSVG(
-    report.ai_geometry, report.segments, report.edges, es,
-    report.total_footprint_sqft, report.roof_pitch_degrees,
-    predominantPitch, grossSquares
-  )
-
   // Structure complexity
   const numEdgeTypes = [es.total_ridge_ft, es.total_hip_ft, es.total_valley_ft].filter(v => v > 0).length
   const complexity = numEdgeTypes <= 1 ? 'Simple' : numEdgeTypes === 2 ? 'Normal' : 'Complex'
-
-  // Waste calculation table rows — using the standardized percentages matching Roofr
-  const wasteRows = [0, 10, 12, 15, 17, 20].map(pct => {
-    const area = Math.round(report.total_true_area_sqft * (1 + pct / 100))
-    const sq = Math.ceil(area / 100 * 10) / 10
-    const bundles = Math.ceil(sq * 3)
-    const label = pct === 0 ? 'Measured' : pct === Math.round(mat.waste_pct) ? 'Suggested' : ''
-    return { pct, area, squares: sq.toFixed(1), bundles, label, isSuggested: pct === Math.round(mat.waste_pct) }
-  })
-
-  // Areas per pitch table — Pitch Class Summary
-  const pitchGroups: Record<string, { area: number; count: number }> = {}
-  report.segments.forEach(seg => {
-    const key = seg.pitch_ratio
-    if (!pitchGroups[key]) pitchGroups[key] = { area: 0, count: 0 }
-    pitchGroups[key].area += seg.true_area_sqft
-    pitchGroups[key].count += 1
-  })
-  const pitchRows = Object.entries(pitchGroups)
-    .sort((a, b) => parseFloat(a[0]) - parseFloat(b[0]))
-    .map(([pitch, data]) => ({
-      pitch,
-      area: Math.round(data.area * 10) / 10,
-      count: data.count,
-      pct: ((data.area / report.total_true_area_sqft) * 100).toFixed(1)
-    }))
-
-  // Estimated attic area (footprint minus 10% for walls/overhangs)
-  const estAttic = Math.round(report.total_footprint_sqft * 0.9)
 
   // Penetration counts
   const penetrations = {
@@ -2603,10 +2567,11 @@ function generateProfessionalReportHTML(report: RoofReport): string {
   </div>`
 
   // ========== Helper: page footer ==========
+  const TOTAL_PAGES = 6
   const ftr = (pageNum: number) => `
   <div style="position:absolute;bottom:0;left:0;right:0;background:#f7f8fa;border-top:1px solid #dde;padding:5px 32px;display:flex;justify-content:space-between;font-size:7.5px;color:#888">
     <span style="font-weight:600;color:#003366">RoofReporterAI</span>
-    <span>Report: ${reportNum} &bull; Page ${pageNum} of 10 &bull; &copy; ${new Date().getFullYear()} RoofReporterAI. All imagery &copy; Google.</span>
+    <span>Report: ${reportNum} &bull; Page ${pageNum} of ${TOTAL_PAGES} &bull; &copy; ${new Date().getFullYear()} RoofReporterAI. All imagery &copy; Google.</span>
   </div>`
 
   return `<!DOCTYPE html>
@@ -2716,14 +2681,10 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
     <div style="border:1px solid #d5dae3;border-radius:5px;overflow:hidden">
       ${[
         ['Images &mdash; Top View', '2'],
-        ['Professional Roof Measurement Diagram', '3'],
+        ['AI Point-by-Point Blueprint', '3'],
         ['Images &mdash; Rotated Side Views (N/S/E/W)', '4'],
         ['Close-Up Detail &amp; Property Context', '5'],
         ['Length Blueprint &amp; Edge Summary', '6'],
-        ['Pitch Blueprint', '7'],
-        ['Area Blueprint', '8'],
-        ['Pitch Class Summary, Waste Table &amp; Flashing', '9'],
-        ['All Structures Totals &amp; Materials', '10']
       ].map(([title, pg], i) => `<div style="display:flex;justify-content:space-between;padding:6px 14px;font-size:10px;${i % 2 === 0 ? 'background:#f8f9fb' : 'background:#fff'};border-bottom:1px solid #eef0f4"><span style="font-weight:600;color:#1a1a2e">${title}</span><span style="color:#003366;font-weight:700">${pg}</span></div>`).join('')}
     </div>
 
@@ -2789,47 +2750,57 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
   ${ftr(2)}
 </div>
 
-<!-- ==================== PAGE 3: PROFESSIONAL ROOF MEASUREMENT DIAGRAM ==================== -->
+<!-- ==================== PAGE 3: AI POINT-BY-POINT BLUEPRINT ==================== -->
 <div class="page">
   <div style="background:#002244;padding:10px 32px;display:flex;justify-content:space-between;align-items:center">
-    <div style="color:#fff;font-size:13px;font-weight:700;letter-spacing:1px">PROFESSIONAL ROOF MEASUREMENT REPORT</div>
-    <div style="color:#7eafd4;font-size:9px;text-align:right">Overhead Diagram &mdash; All Edges Measured</div>
+    <div style="color:#fff;font-size:13px;font-weight:700;letter-spacing:1px">AI POINT-BY-POINT BLUEPRINT</div>
+    <div style="color:#7eafd4;font-size:9px;text-align:right">Satellite Overlay &mdash; Gemini Vision Geometry</div>
   </div>
   <div style="background:#003366;padding:6px 32px;display:flex;justify-content:space-between;align-items:center">
     <div style="color:#fff;font-size:10px;font-weight:600">${fullAddress}</div>
     <div style="color:#8eb8db;font-size:9px">Report: ${reportNum} &bull; ${reportDateShort}</div>
   </div>
-  <div style="padding:10px 20px 10px">
-    <div style="font-size:10px;color:#4a5568;font-style:italic;margin-bottom:6px">Overhead view of the structure for your reference. All roof perimeter edges are measured edge-to-edge including all eaves, hips, rakes, and ridges.</div>
+  <div style="padding:8px 20px 8px">
+    <div style="font-size:9px;color:#4a5568;font-style:italic;margin-bottom:6px">High-resolution satellite image with AI-detected roof geometry overlaid. Cyan lines show perimeter edges; red lines show internal ridges, hips, and valleys. Measurements combine Google Solar plan &amp; true lengths with Gemini 2.5 Pro point analysis.</div>
 
-    <!-- The professional diagram SVG -->
-    <div style="border:1px solid #d5dae3;border-radius:4px;overflow:hidden;background:#fff">
-      ${professionalDiagramSVG}
+    <!-- AI Point-by-Point Blueprint SVG with satellite background -->
+    <div style="border:2px solid #003366;border-radius:4px;overflow:hidden;background:#111">
+      ${aiPointByPointSVG}
+    </div>
+
+    <!-- Legend bar -->
+    <div style="display:flex;flex-wrap:wrap;gap:10px;padding:6px 12px;background:#f4f6f9;border:1px solid #d5dae3;border-radius:4px;margin-top:6px;font-size:8px;font-weight:600">
+      <div style="display:flex;align-items:center;gap:4px"><span style="width:20px;height:3px;background:#00e5ff;display:inline-block;border-radius:1px"></span>Perimeter Edge</div>
+      <div style="display:flex;align-items:center;gap:4px"><span style="width:20px;height:3px;background:#ff1744;display:inline-block;border-radius:1px"></span>Ridge</div>
+      <div style="display:flex;align-items:center;gap:4px"><span style="width:20px;height:3px;background:#ffab00;display:inline-block;border-radius:1px"></span>Hip</div>
+      <div style="display:flex;align-items:center;gap:4px"><span style="width:20px;height:3px;background:#2979ff;display:inline-block;border-radius:1px;border-top:1px dashed #2979ff"></span>Valley</div>
+      <div style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;background:#00e5ff;border-radius:50%;display:inline-block;border:1px solid #fff"></span>Vertex Point</div>
+      <div style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:10px;background:rgba(0,229,255,0.15);display:inline-block;border:1px solid #00e5ff;border-radius:2px"></span>Facet Fill</div>
     </div>
   </div>
 
   <!-- Footer bar: FACETS | PITCH | SQUARES -->
   <div style="position:absolute;bottom:30px;left:0;right:0;padding:0 20px">
     <div style="background:#002244;display:flex;border-radius:4px;overflow:hidden">
-      <div style="flex:1;text-align:center;padding:10px 8px;border-right:1px solid #003366">
-        <div style="font-size:7.5px;color:#7eafd4;font-weight:700;text-transform:uppercase;letter-spacing:1px">Facets</div>
-        <div style="font-size:22px;font-weight:900;color:#fff;margin-top:1px">${report.segments.length}</div>
+      <div style="flex:1;text-align:center;padding:8px 6px;border-right:1px solid #003366">
+        <div style="font-size:7px;color:#7eafd4;font-weight:700;text-transform:uppercase;letter-spacing:1px">Facets</div>
+        <div style="font-size:20px;font-weight:900;color:#fff;margin-top:1px">${report.segments.length}</div>
       </div>
-      <div style="flex:1;text-align:center;padding:10px 8px;border-right:1px solid #003366">
-        <div style="font-size:7.5px;color:#7eafd4;font-weight:700;text-transform:uppercase;letter-spacing:1px">Pitch</div>
-        <div style="font-size:22px;font-weight:900;color:#fff;margin-top:1px">${predominantPitch}</div>
+      <div style="flex:1;text-align:center;padding:8px 6px;border-right:1px solid #003366">
+        <div style="font-size:7px;color:#7eafd4;font-weight:700;text-transform:uppercase;letter-spacing:1px">Pitch</div>
+        <div style="font-size:20px;font-weight:900;color:#fff;margin-top:1px">${predominantPitch}</div>
       </div>
-      <div style="flex:1;text-align:center;padding:10px 8px;border-right:1px solid #003366">
-        <div style="font-size:7.5px;color:#7eafd4;font-weight:700;text-transform:uppercase;letter-spacing:1px">Squares</div>
-        <div style="font-size:22px;font-weight:900;color:#fff;margin-top:1px">${grossSquares}</div>
+      <div style="flex:1;text-align:center;padding:8px 6px;border-right:1px solid #003366">
+        <div style="font-size:7px;color:#7eafd4;font-weight:700;text-transform:uppercase;letter-spacing:1px">Squares</div>
+        <div style="font-size:20px;font-weight:900;color:#fff;margin-top:1px">${grossSquares}</div>
       </div>
-      <div style="flex:1;text-align:center;padding:10px 8px;border-right:1px solid #003366">
-        <div style="font-size:7.5px;color:#7eafd4;font-weight:700;text-transform:uppercase;letter-spacing:1px">Ridges</div>
-        <div style="font-size:22px;font-weight:900;color:#fff;margin-top:1px">${ridgeHipFt}</div>
+      <div style="flex:1;text-align:center;padding:8px 6px;border-right:1px solid #003366">
+        <div style="font-size:7px;color:#7eafd4;font-weight:700;text-transform:uppercase;letter-spacing:1px">Ridges/Hips</div>
+        <div style="font-size:20px;font-weight:900;color:#fff;margin-top:1px">${ridgeHipFt}</div>
       </div>
-      <div style="flex:1;text-align:center;padding:10px 8px">
-        <div style="font-size:7.5px;color:#7eafd4;font-weight:700;text-transform:uppercase;letter-spacing:1px">Eaves</div>
-        <div style="font-size:22px;font-weight:900;color:#fff;margin-top:1px">${es.total_eave_ft}</div>
+      <div style="flex:1;text-align:center;padding:8px 6px">
+        <div style="font-size:7px;color:#7eafd4;font-weight:700;text-transform:uppercase;letter-spacing:1px">Eaves</div>
+        <div style="font-size:20px;font-weight:900;color:#fff;margin-top:1px">${es.total_eave_ft}</div>
       </div>
     </div>
   </div>
@@ -2999,298 +2970,7 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
   ${ftr(6)}
 </div>
 
-<!-- ==================== PAGE 7: PITCH DIAGRAM ==================== -->
-<div class="page">
-  ${hdr('PITCH BLUEPRINT', 'Roof Pitch by Facet')}
-  <div style="padding:14px 32px 50px">
-    <div style="font-size:10px;color:#4a5568;font-style:italic;margin-bottom:8px">Pitch values are shown in rise per 12 inches of run. Blue shading indicates a pitch of 3/12 or greater. Gray shading indicates flat or low pitches.</div>
-
-    <!-- Pitch legend -->
-    <div style="display:flex;gap:16px;margin-bottom:10px;font-size:9px">
-      <div style="display:flex;align-items:center;gap:5px"><span style="width:18px;height:14px;background:#d6e8f7;border:1px solid #90caf9;display:inline-block;border-radius:2px"></span><span style="font-weight:600">Pitch &ge; 3/12</span></div>
-      <div style="display:flex;align-items:center;gap:5px"><span style="width:18px;height:14px;background:#eeeeee;border:1px solid #bdbdbd;display:inline-block;border-radius:2px"></span><span style="font-weight:600">Flat / Low Pitch (&lt; 3/12)</span></div>
-    </div>
-
-    <!-- CAD-style Blueprint: PITCH MODE (white background, no satellite) -->
-    <div style="text-align:center;border:1px solid #d5dae3;border-radius:4px;overflow:hidden;background:#fff">
-      <svg viewBox="0 0 500 500" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-height:260px">${blueprintPitchSVG}</svg>
-    </div>
-
-    <!-- Pitch Breakdown Table -->
-    <div style="margin-top:12px">
-      <table class="ev-tbl">
-        <thead><tr><th>Facet</th><th>Name</th><th style="text-align:center">Pitch</th><th style="text-align:center">Pitch (&deg;)</th><th style="text-align:center">Facing</th><th>Area (sq ft)</th></tr></thead>
-        <tbody>
-          ${report.segments.map((seg, i) => {
-            const pitchNum = parseFloat(seg.pitch_ratio.split(':')[0]) || parseFloat(seg.pitch_ratio.split('/')[0]) || 0
-            const bgColor = pitchNum >= 3 ? '#e8f2fc' : '#f5f5f5'
-            return `<tr style="background:${bgColor}">
-              <td style="font-weight:800;color:#003366">${String.fromCharCode(65 + i)}</td>
-              <td>${seg.name}</td>
-              <td style="text-align:center;font-weight:700">${seg.pitch_ratio}</td>
-              <td style="text-align:center">${seg.pitch_degrees}&deg;</td>
-              <td style="text-align:center">${seg.azimuth_direction}</td>
-              <td>${seg.true_area_sqft.toLocaleString()}</td>
-            </tr>`
-          }).join('')}
-        </tbody>
-      </table>
-    </div>
-
-    <!-- Penetrations section -->
-    <div style="margin-top:14px;border:1px solid #d5dae3;border-radius:5px;padding:12px 16px;background:#f8f9fb">
-      <div style="font-size:10px;font-weight:800;color:#003366;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Penetrations &amp; Notes</div>
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;font-size:9px">
-        <div><span style="color:#6b7a8d">Pipe Boots:</span> <span style="font-weight:700;color:#1a1a2e">${pipeBoots}</span></div>
-        <div><span style="color:#6b7a8d">Chimneys:</span> <span style="font-weight:700;color:#1a1a2e">${chimneys}</span></div>
-        <div><span style="color:#6b7a8d">Exhaust Vents:</span> <span style="font-weight:700;color:#1a1a2e">${exhaustVents}</span></div>
-        <div><span style="color:#6b7a8d">Skylights:</span> <span style="font-weight:700;color:#1a1a2e">0</span></div>
-      </div>
-    </div>
-  </div>
-  ${ftr(7)}
-</div>
-
-<!-- ==================== PAGE 8: AREA DIAGRAM ==================== -->
-<div class="page">
-  ${hdr('AREA BLUEPRINT', 'True Surface Area by Facet')}
-  <div style="padding:14px 32px 50px">
-    <div style="font-size:10px;color:#4a5568;font-style:italic;margin-bottom:8px">Professional CAD-style blueprint showing true 3D surface area (sq ft) for each roof facet, accounting for pitch slope factor.</div>
-
-    <!-- CAD-style Blueprint: AREA MODE (white background, no satellite) -->
-    <div style="text-align:center;border:1px solid #d5dae3;border-radius:4px;overflow:hidden;background:#fff;margin-bottom:10px">
-      <svg viewBox="0 0 500 500" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-height:320px">${blueprintAreaSVG}</svg>
-    </div>
-
-    <!-- Facet Color Legend -->
-    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;padding:6px 10px;background:#f8f9fb;border:1px solid #d5dae3;border-radius:4px">
-      ${report.segments.map((seg, i) => `
-        <div style="display:flex;align-items:center;gap:4px;font-size:8px">
-          <span style="width:10px;height:10px;border-radius:2px;background:${facetColors[i % facetColors.length]};display:inline-block;border:1px solid rgba(0,0,0,0.2)"></span>
-          <span style="font-weight:700;color:#003366">${String.fromCharCode(65 + i)}</span>
-          <span style="color:#6b7a8d">${seg.true_area_sqft.toLocaleString()} ft²</span>
-        </div>
-      `).join('')}
-    </div>
-
-    <!-- Facet cards grid -->
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px">
-      ${report.segments.map((seg, i) => `
-        <div style="border:1px solid #d5dae3;border-radius:5px;padding:6px 8px;background:#fff;border-left:3px solid ${facetColors[i % facetColors.length]}">
-          <div style="display:flex;align-items:center;gap:4px;margin-bottom:2px">
-            <span style="font-size:10px;font-weight:900;color:${facetColors[i % facetColors.length]}">${String.fromCharCode(65 + i)}</span>
-            <span style="font-size:8px;font-weight:700;color:#003366;text-transform:uppercase">${seg.name}</span>
-          </div>
-          <div style="font-size:14px;font-weight:900;color:#003366">${seg.true_area_sqft.toLocaleString()} <span style="font-size:8px;font-weight:600">sq ft</span></div>
-          <div style="font-size:7.5px;color:#6b7a8d;margin-top:1px">Pitch: ${seg.pitch_ratio} &bull; ${seg.azimuth_direction} &bull; ${((seg.true_area_sqft / report.total_true_area_sqft) * 100).toFixed(1)}%</div>
-        </div>
-      `).join('')}
-    </div>
-
-    <!-- Area Breakdown Table -->
-    <table class="ev-tbl">
-      <thead><tr><th>Facet</th><th>Name</th><th style="text-align:center">Footprint (sq ft)</th><th style="text-align:center">True Area (sq ft)</th><th style="text-align:center">Pitch</th><th>% of Total</th></tr></thead>
-      <tbody>
-        ${report.segments.map((seg, i) => `<tr>
-          <td style="font-weight:800;color:#003366">${String.fromCharCode(65 + i)}</td>
-          <td>${seg.name}</td>
-          <td style="text-align:center">${seg.footprint_area_sqft.toLocaleString()}</td>
-          <td style="text-align:center;font-weight:700">${seg.true_area_sqft.toLocaleString()}</td>
-          <td style="text-align:center">${seg.pitch_ratio}</td>
-          <td>${((seg.true_area_sqft / report.total_true_area_sqft) * 100).toFixed(1)}%</td>
-        </tr>`).join('')}
-        <tr class="row-total">
-          <td colspan="2">Total</td>
-          <td style="text-align:center">${report.total_footprint_sqft.toLocaleString()}</td>
-          <td style="text-align:center">${report.total_true_area_sqft.toLocaleString()}</td>
-          <td style="text-align:center"></td>
-          <td>100%</td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
-  ${ftr(8)}
-</div>
-
-<!-- ==================== PAGE 9: REPORT SUMMARY ==================== -->
-<div class="page">
-  ${hdr('REPORT SUMMARY', 'Pitch Class Summary, Complexity &amp; Waste Calculation')}
-  <div style="padding:14px 32px 50px">
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
-      <!-- Left column: Pitch Class Summary -->
-      <div>
-        <div style="font-size:11px;font-weight:800;color:#003366;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Pitch Class Summary</div>
-        <div style="font-size:7.5px;color:#6b7a8d;margin-bottom:6px;font-style:italic">Segments aggregated by pitch ratio showing total area and percentage of roof for each pitch class.</div>
-        <table class="ev-tbl">
-          <thead><tr><th>Pitch Class</th><th style="text-align:center">Facets</th><th style="text-align:center">Area (sq ft)</th><th>% of Roof</th></tr></thead>
-          <tbody>
-            ${pitchRows.map(r => `<tr>
-              <td style="font-weight:700;color:#003366">${r.pitch}</td>
-              <td style="text-align:center">${r.count}</td>
-              <td style="text-align:center;font-weight:700">${r.area.toLocaleString()}</td>
-              <td>${r.pct}%</td>
-            </tr>`).join('')}
-            <tr class="row-total">
-              <td>Total</td>
-              <td style="text-align:center">${report.segments.length}</td>
-              <td style="text-align:center">${report.total_true_area_sqft.toLocaleString()}</td>
-              <td>100%</td>
-            </tr>
-          </tbody>
-        </table>
-
-        <!-- Pitch class visual bar chart -->
-        <div style="margin-top:10px">
-          ${pitchRows.map((r, i) => {
-            const barWidth = Math.max(8, parseFloat(r.pct))
-            const barColor = facetColors[i % facetColors.length]
-            return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-              <div style="width:50px;font-size:8.5px;font-weight:700;color:#003366;text-align:right">${r.pitch}</div>
-              <div style="flex:1;background:#f0f3f7;border-radius:3px;height:16px;position:relative">
-                <div style="width:${barWidth}%;height:100%;background:${barColor};border-radius:3px;min-width:8px"></div>
-              </div>
-              <div style="width:60px;font-size:8px;font-weight:600;color:#4a5568">${r.area.toLocaleString()} ft²</div>
-            </div>`
-          }).join('')}
-        </div>
-
-        <div style="font-size:11px;font-weight:800;color:#003366;text-transform:uppercase;letter-spacing:0.5px;margin:14px 0 6px">Structure Complexity</div>
-        <div class="cx-bar">
-          <span ${complexity === 'Simple' ? 'class="cx-active"' : ''}>Simple</span>
-          <span ${complexity === 'Normal' ? 'class="cx-active"' : ''}>Normal</span>
-          <span ${complexity === 'Complex' ? 'class="cx-active"' : ''}>Complex</span>
-        </div>
-
-        <div style="margin-top:14px;border:1px solid #d5dae3;border-radius:5px;padding:10px 14px;background:#f8f9fb">
-          <div style="font-size:9px;font-weight:800;color:#003366;text-transform:uppercase;margin-bottom:4px">Property Information</div>
-          <div class="kv"><span class="kv-l">Estimated Attic Area</span><span class="kv-r">${estAttic.toLocaleString()} sq ft</span></div>
-          <div class="kv"><span class="kv-l">Property Type</span><span class="kv-r">Residential</span></div>
-          <div class="kv"><span class="kv-l">Latitude</span><span class="kv-r">${prop.latitude?.toFixed(6) || 'N/A'}</span></div>
-          <div class="kv"><span class="kv-l">Longitude</span><span class="kv-r">${prop.longitude?.toFixed(6) || 'N/A'}</span></div>
-        </div>
-      </div>
-
-      <!-- Right column: Waste Calculation Table -->
-      <div>
-        <div style="font-size:11px;font-weight:800;color:#003366;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Waste Calculation</div>
-        <div style="font-size:7.5px;color:#6b7a8d;margin-bottom:6px;font-style:italic">Waste factors for asphalt shingle roofing. 1 Square = 100 sq ft. All pitched areas (≥3/12) included.</div>
-        <table class="ev-tbl">
-          <thead><tr><th>Waste %</th><th style="text-align:center">Total Area (sq ft)</th><th style="text-align:center">Squares</th><th style="text-align:center">Bundles</th><th style="text-align:right"></th></tr></thead>
-          <tbody>
-            ${wasteRows.map(r => `<tr ${r.isSuggested ? 'class="row-hl"' : ''}>
-              <td style="font-weight:${r.isSuggested ? '800' : '600'}">${r.pct}%</td>
-              <td style="text-align:center">${r.area.toLocaleString()}</td>
-              <td style="text-align:center;font-weight:700">${r.squares}</td>
-              <td style="text-align:center">${r.bundles}</td>
-              <td style="font-size:7.5px;color:${r.isSuggested ? '#003366' : '#888'};font-weight:700;text-align:right">${r.label}</td>
-            </tr>`).join('')}
-          </tbody>
-        </table>
-        <div style="font-size:7px;color:#888;margin-top:3px">* 1 Square = 100 sq ft &bull; 3 bundles per square (architectural shingles)</div>
-        <div style="font-size:7px;color:#003366;font-weight:600;margin-top:2px">* Suggested waste: ${mat.waste_pct}% based on ${mat.complexity_class} roof complexity</div>
-
-        <!-- Flashing & Special Edge Summary -->
-        <div style="font-size:11px;font-weight:800;color:#003366;text-transform:uppercase;letter-spacing:0.5px;margin:16px 0 6px">Flashing &amp; Special Edges</div>
-        <div style="font-size:7.5px;color:#6b7a8d;margin-bottom:6px;font-style:italic">Estimated from AI geometry analysis of roof-to-wall junctions, pitch transitions, and parapets.</div>
-        <table class="ev-tbl">
-          <thead><tr><th>Edge Type</th><th style="text-align:center">Length (ft)</th><th>Notes</th></tr></thead>
-          <tbody>
-            <tr><td style="font-weight:600"><span style="display:inline-block;width:10px;height:3px;background:#E65100;border-radius:1px;margin-right:5px"></span>Step Flashing</td><td style="text-align:center;font-weight:700">${stepFlashingFt}</td><td style="font-size:8px;color:#6b7a8d">Roof-to-wall junction (sloped)</td></tr>
-            <tr><td style="font-weight:600"><span style="display:inline-block;width:10px;height:3px;background:#6A1B9A;border-radius:1px;margin-right:5px"></span>Wall Flashing</td><td style="text-align:center;font-weight:700">${wallFlashingFt}</td><td style="font-size:8px;color:#6b7a8d">Headwall / counter flashing</td></tr>
-            <tr><td style="font-weight:600"><span style="display:inline-block;width:10px;height:3px;background:#00838F;border-radius:1px;margin-right:5px"></span>Transitions</td><td style="text-align:center;font-weight:700">${transitionFt}</td><td style="font-size:8px;color:#6b7a8d">Pitch change junctions</td></tr>
-            <tr><td style="font-weight:600"><span style="display:inline-block;width:10px;height:3px;background:#4E342E;border-radius:1px;margin-right:5px"></span>Parapet Walls</td><td style="text-align:center;font-weight:700">${parapetFt}</td><td style="font-size:8px;color:#6b7a8d">Flat roof edge walls</td></tr>
-            <tr class="row-total"><td>Total Flashing</td><td style="text-align:center">${stepFlashingFt + wallFlashingFt + transitionFt + parapetFt}</td><td></td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-  ${ftr(9)}
-</div>
-
-<!-- ==================== PAGE 10: ALL STRUCTURES TOTALS & MATERIALS ==================== -->
-<div class="page">
-  ${hdr('ALL STRUCTURES TOTALS', 'Lengths, Areas, Pitches &amp; Material Order')}
-  <div style="padding:14px 32px 50px">
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
-      <!-- Left column: Lengths, Areas, Pitches -->
-      <div>
-        <div style="font-size:10px;font-weight:800;color:#003366;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Length Measurement Summary</div>
-        <div class="kv"><span class="kv-l">Ridges</span><span class="kv-r">${es.total_ridge_ft} ft (${report.edges.filter(e => e.edge_type === 'ridge').length} Ridges)</span></div>
-        <div class="kv"><span class="kv-l">Hips</span><span class="kv-r">${es.total_hip_ft} ft (${report.edges.filter(e => e.edge_type === 'hip').length} Hips)</span></div>
-        <div class="kv"><span class="kv-l">Valleys</span><span class="kv-r">${es.total_valley_ft} ft (${report.edges.filter(e => e.edge_type === 'valley').length} Valleys)</span></div>
-        <div class="kv"><span class="kv-l">Rakes</span><span class="kv-r">${es.total_rake_ft} ft (${report.edges.filter(e => e.edge_type === 'rake').length} Rakes)</span></div>
-        <div class="kv"><span class="kv-l">Eaves / Starter</span><span class="kv-r">${es.total_eave_ft} ft (${report.edges.filter(e => e.edge_type === 'eave').length} Eaves)</span></div>
-        <div class="kv"><span class="kv-l">Drip Edge (Eaves + Rakes)</span><span class="kv-r">${totalDripEdge} ft</span></div>
-        <div class="kv"><span class="kv-l">Hips + Ridges</span><span class="kv-r">${ridgeHipFt} ft</span></div>
-        ${stepFlashingFt > 0 ? `<div class="kv"><span class="kv-l" style="color:#E65100">Step Flashing</span><span class="kv-r">${stepFlashingFt} ft</span></div>` : ''}
-        ${wallFlashingFt > 0 ? `<div class="kv"><span class="kv-l" style="color:#6A1B9A">Wall Flashing</span><span class="kv-r">${wallFlashingFt} ft</span></div>` : ''}
-        ${transitionFt > 0 ? `<div class="kv"><span class="kv-l" style="color:#00838F">Transitions</span><span class="kv-r">${transitionFt} ft</span></div>` : ''}
-        ${parapetFt > 0 ? `<div class="kv"><span class="kv-l" style="color:#4E342E">Parapet Walls</span><span class="kv-r">${parapetFt} ft</span></div>` : ''}
-
-        <div style="margin-top:8px;padding-top:8px;border-top:2px solid #003366">
-          <div class="kv"><span class="kv-l" style="font-weight:800;color:#003366">Total Roof Area</span><span class="kv-r" style="font-size:13px;color:#003366">${report.total_true_area_sqft.toLocaleString()} sq ft</span></div>
-        </div>
-        <div class="kv"><span class="kv-l">Predominant Pitch</span><span class="kv-r">${predominantPitch} (${predominantPitchDeg.toFixed(1)}&deg;)</span></div>
-        <div class="kv"><span class="kv-l">Area Multiplier</span><span class="kv-r">&times;${report.area_multiplier.toFixed(3)}</span></div>
-
-        <div style="margin-top:12px;font-size:10px;font-weight:800;color:#003366;text-transform:uppercase;letter-spacing:0.5px">Property Location</div>
-        <div class="kv"><span class="kv-l">Latitude</span><span class="kv-r">${prop.latitude?.toFixed(6) || 'N/A'}</span></div>
-        <div class="kv"><span class="kv-l">Longitude</span><span class="kv-r">${prop.longitude?.toFixed(6) || 'N/A'}</span></div>
-        <div class="kv"><span class="kv-l">Data Source</span><span class="kv-r">${providerLabel}</span></div>
-        <div class="kv"><span class="kv-l">Imagery Quality</span><span class="kv-r">${quality.imagery_quality || 'BASE'}</span></div>
-      </div>
-
-      <!-- Right column: Material Order Summary -->
-      <div>
-        <div style="font-size:10px;font-weight:800;color:#003366;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Material Order Summary</div>
-        <table class="ev-tbl">
-          <thead><tr><th>Material</th><th style="text-align:center">Qty</th><th>Unit</th></tr></thead>
-          <tbody>
-            <tr><td>Shingle Bundles (3-tab)</td><td style="text-align:center;font-weight:800">${bundleCount3Tab}</td><td>bundles</td></tr>
-            <tr><td>Roofing Squares</td><td style="text-align:center;font-weight:800">${grossSquares}</td><td>squares</td></tr>
-            <tr><td>Underlayment</td><td style="text-align:center;font-weight:800">${Math.ceil(grossSquares / 4)}</td><td>rolls</td></tr>
-            <tr><td>Ice &amp; Water Shield</td><td style="text-align:center;font-weight:800">${Math.ceil(es.total_eave_ft / 66)}</td><td>rolls</td></tr>
-            <tr><td>Drip Edge</td><td style="text-align:center;font-weight:800">${Math.ceil(totalDripEdge / 10)}</td><td>10ft pcs</td></tr>
-            <tr><td>Starter Strip</td><td style="text-align:center;font-weight:800">${Math.ceil(starterStripFt / 120)}</td><td>bundles</td></tr>
-            <tr><td>Ridge/Hip Cap</td><td style="text-align:center;font-weight:800">${Math.ceil(ridgeHipFt / 20)}</td><td>bundles</td></tr>
-            <tr><td>Step Flashing</td><td style="text-align:center;font-weight:800">${stepFlashingFt > 0 ? Math.ceil(stepFlashingFt * 1.5) : Math.max(0, chimneys * 20)}</td><td>pieces</td></tr>
-            <tr><td>Wall Flashing</td><td style="text-align:center;font-weight:800">${wallFlashingFt > 0 ? Math.ceil(wallFlashingFt / 10) : 0}</td><td>10ft pcs</td></tr>
-            <tr><td>Pipe Boots</td><td style="text-align:center;font-weight:800">${pipeBoots}</td><td>pieces</td></tr>
-            <tr><td>Roofing Nails</td><td style="text-align:center;font-weight:800">${nailLbs}</td><td>lbs</td></tr>
-            <tr><td>Roofing Cement</td><td style="text-align:center;font-weight:800">${cementTubes}</td><td>tubes</td></tr>
-          </tbody>
-        </table>
-
-        <!-- Estimate Summary Box -->
-        <div style="background:#f4f7fb;border:1px solid #d5dae3;border-radius:5px;padding:10px 14px;margin-top:8px">
-          <div style="font-size:9px;font-weight:800;color:#003366;text-transform:uppercase;margin-bottom:4px">Estimate Summary</div>
-          <div class="kv"><span class="kv-l">Net Area</span><span class="kv-r">${report.total_true_area_sqft.toLocaleString()} sq ft</span></div>
-          <div class="kv"><span class="kv-l">Waste Factor</span><span class="kv-r">${mat.waste_pct}%</span></div>
-          <div class="kv"><span class="kv-l">Gross Area</span><span class="kv-r">${mat.gross_area_sqft.toLocaleString()} sq ft</span></div>
-          <div style="padding:4px 0;border-top:2px solid #003366;margin-top:4px">
-            <div class="kv"><span class="kv-l" style="font-weight:800;color:#003366">Total Squares</span><span class="kv-r" style="font-size:14px;color:#003366">${grossSquares}</span></div>
-          </div>
-          <div class="kv"><span class="kv-l">Complexity</span><span class="kv-r">${mat.complexity_class || complexity}</span></div>
-          ${mat.total_material_cost_cad > 0 ? `<div class="kv" style="margin-top:4px"><span class="kv-l" style="font-weight:800">Est. Material Cost</span><span class="kv-r" style="color:#003366;font-size:13px">$${mat.total_material_cost_cad.toLocaleString()} CAD</span></div>` : ''}
-        </div>
-      </div>
-    </div>
-  </div>
-  ${ftr(10)}
-</div>
-
-<!-- ==================== LEGAL DISCLAIMER ==================== -->
-<div class="page" style="min-height:auto;page-break-after:auto">
-  ${hdr('LEGAL NOTICE', 'Disclaimer &amp; Terms of Use')}
-  <div style="padding:24px 32px 50px;font-size:8.5px;color:#4a5568;line-height:1.6">
-    <p style="margin-bottom:10px"><b style="color:#003366">DISCLAIMER:</b> This report is generated using satellite imagery and computational analysis provided by Google Solar API data. Measurements are estimates based on aerial imagery analysis and should be verified through physical inspection before use in construction, material ordering, or other applications where precision is critical.</p>
-    <p style="margin-bottom:10px">RoofReporterAI makes no warranties, expressed or implied, regarding the accuracy, completeness, or fitness for a particular purpose of the information contained in this report. The measurements and data provided herein are approximations derived from available satellite and aerial imagery.</p>
-    <p style="margin-bottom:10px">It is the responsibility of the user to verify all measurements and data before relying on them for any purpose. RoofReporterAI shall not be liable for any damages or losses resulting from the use of this report or reliance on the information contained herein.</p>
-    <p style="margin-bottom:10px">All satellite imagery is &copy; Google. Property and location data may be subject to additional third-party copyrights and terms of service.</p>
-    <p><b style="color:#003366">For questions or concerns about this report, please contact your RoofReporterAI representative.</b></p>
-  </div>
-</div>
+<!-- Pages 7-10 and Legal Disclaimer removed — report truncated to 6 pages -->
 
 <script>
 // Street View grey-detection: if image is mostly grey, it's a Google placeholder
@@ -3703,6 +3383,319 @@ function smartEdgeFootage(
 // No satellite image backgrounds. No semi-transparent overlays.
 // No fallback generic shapes — renders the real roof.
 // ============================================================
+
+// ============================================================
+// AI POINT-BY-POINT BLUEPRINT — Satellite Background + Geometry Overlay
+// High-res satellite image with AI-detected roof geometry plotted:
+//   - Cyan perimeter lines (eave, rake edges)
+//   - Red lines for ridges, amber for hips, blue dashed for valleys
+//   - Vertex points at every corner
+//   - Mid-point measurement labels with plan_length_ft & true_length_ft
+//   - Semi-transparent facet fills for visual clarity
+// ============================================================
+function generateAIPointByPointSVG(
+  aiGeometry: AIMeasurementAnalysis | null | undefined,
+  segments: RoofSegment[],
+  edges: EdgeMeasurement[],
+  edgeSummary: { total_ridge_ft: number; total_hip_ft: number; total_valley_ft: number; total_eave_ft: number; total_rake_ft: number },
+  totalFootprintSqft: number,
+  avgPitchDeg: number,
+  satelliteUrl: string,
+  predominantPitch: string,
+  grossSquares: number
+): string {
+  const W = 640, H = 640
+
+  // Fallback when no AI geometry available
+  if (!aiGeometry || (!aiGeometry.perimeter?.length && !aiGeometry.facets?.length)) {
+    return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;display:block;background:#111">
+      ${satelliteUrl ? `<image href="${satelliteUrl}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice" opacity="0.85"/>` : `<rect width="${W}" height="${H}" fill="#1a1a2e"/>`}
+      <rect x="160" y="280" width="320" height="80" rx="8" fill="rgba(0,0,0,0.75)"/>
+      <text x="${W/2}" y="310" text-anchor="middle" fill="#00e5ff" font-size="14" font-weight="700" font-family="Inter,system-ui,sans-serif">AI Geometry Not Available</text>
+      <text x="${W/2}" y="335" text-anchor="middle" fill="#7eafd4" font-size="11" font-family="Inter,system-ui,sans-serif">Run AI Enhancement to generate point-by-point blueprint</text>
+    </svg>`
+  }
+
+  const hasPerimeter = aiGeometry.perimeter && aiGeometry.perimeter.length >= 3
+  const hasFacets = aiGeometry.facets && aiGeometry.facets.length >= 2
+
+  // AI coordinates are already in 0-640 pixel space (matching the satellite image)
+  // No scaling needed — direct mapping
+  const tx = (x: number) => Math.max(0, Math.min(W, x))
+  const ty = (y: number) => Math.max(0, Math.min(H, y))
+
+  // ── DISTRIBUTE FOOTAGE ──
+  const measuredByType = smartEdgeFootage(edgeSummary)
+  let perimSideFt: number[] = []
+  let perimSideTrueFt: number[] = []
+  if (hasPerimeter) {
+    const perim = aiGeometry.perimeter
+    const n = perim.length
+    const sidesByType: Record<string, { idx: number; pxLen: number }[]> = {}
+    for (let i = 0; i < n; i++) {
+      const p1 = perim[i], p2 = perim[(i + 1) % n]
+      const pxLen = Math.sqrt((p2.x - p1.x) ** 2 + (p2.y - p1.y) ** 2)
+      const type = p1.edge_to_next || 'EAVE'
+      if (!sidesByType[type]) sidesByType[type] = []
+      sidesByType[type].push({ idx: i, pxLen })
+    }
+    perimSideFt = new Array(n).fill(0)
+    perimSideTrueFt = new Array(n).fill(0)
+    for (const [type, sides] of Object.entries(sidesByType)) {
+      const totalPx = sides.reduce((s, sd) => s + sd.pxLen, 0)
+      const totalFt = measuredByType[type] || 0
+      // True length uses pitch factor for non-horizontal edges
+      const pitchRad = (avgPitchDeg || 0) * Math.PI / 180
+      const pitchFactor = type === 'EAVE' || type === 'RAKE' ? 1 : (Math.cos(pitchRad) > 0.01 ? 1 / Math.cos(pitchRad) : 1.15)
+      if (totalPx > 0 && totalFt > 0) {
+        sides.forEach(sd => {
+          const planFt = (sd.pxLen / totalPx) * totalFt
+          perimSideFt[sd.idx] = planFt
+          perimSideTrueFt[sd.idx] = Math.round(planFt * pitchFactor * 10) / 10
+        })
+      }
+    }
+  }
+
+  // Internal line footage
+  const internalMeasured: Record<string, number> = {
+    'RIDGE': edgeSummary.total_ridge_ft,
+    'HIP': edgeSummary.total_hip_ft,
+    'VALLEY': edgeSummary.total_valley_ft,
+  }
+  const internalLinesByType: Record<string, { line: typeof aiGeometry.lines[0]; pxLen: number }[]> = {}
+  if (aiGeometry.lines) {
+    aiGeometry.lines.forEach(l => {
+      if (l.type === 'EAVE' || l.type === 'RAKE') return
+      if (!internalLinesByType[l.type]) internalLinesByType[l.type] = []
+      const pxLen = Math.sqrt((l.end.x - l.start.x) ** 2 + (l.end.y - l.start.y) ** 2)
+      internalLinesByType[l.type].push({ line: l, pxLen })
+    })
+  }
+
+  // Derive internal lines from facets if missing
+  if ((!aiGeometry.lines || aiGeometry.lines.length === 0) && hasFacets) {
+    const edgeKey = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+      `${Math.round(Math.min(a.x, b.x))},${Math.round(Math.min(a.y, b.y))}-${Math.round(Math.max(a.x, b.x))},${Math.round(Math.max(a.y, b.y))}`
+    const edgeMap: Record<string, { start: { x: number; y: number }; end: { x: number; y: number }; count: number }> = {}
+    aiGeometry.facets.forEach(facet => {
+      if (!facet.points || facet.points.length < 3) return
+      for (let j = 0; j < facet.points.length; j++) {
+        const a = facet.points[j]
+        const b = facet.points[(j + 1) % facet.points.length]
+        const key = edgeKey(a, b)
+        if (!edgeMap[key]) edgeMap[key] = { start: a, end: b, count: 0 }
+        edgeMap[key].count++
+      }
+    })
+    const derivedLines: typeof aiGeometry.lines = []
+    for (const [, edge] of Object.entries(edgeMap)) {
+      if (edge.count >= 2) {
+        const dx = Math.abs(edge.end.x - edge.start.x)
+        const dy = Math.abs(edge.end.y - edge.start.y)
+        const lineType = dy < dx * 0.3 ? 'RIDGE' : 'HIP'
+        derivedLines.push({ type: lineType as any, start: edge.start, end: edge.end })
+      }
+    }
+    if (derivedLines.length > 0) {
+      aiGeometry.lines = derivedLines
+      derivedLines.forEach(l => {
+        if (!internalLinesByType[l.type]) internalLinesByType[l.type] = []
+        const pxLen = Math.sqrt((l.end.x - l.start.x) ** 2 + (l.end.y - l.start.y) ** 2)
+        internalLinesByType[l.type].push({ line: l, pxLen })
+      })
+    }
+  }
+
+  // ── BUILD SVG ──
+  let svg = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" style="width:100%;height:auto;display:block">`
+
+  // Definitions for glow effects and patterns
+  svg += `<defs>
+    <filter id="glow-cyan" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="2" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="glow-red" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="1.5" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="label-shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="1" stdDeviation="1.5" flood-color="#000" flood-opacity="0.6"/>
+    </filter>
+  </defs>`
+
+  // Satellite image background
+  if (satelliteUrl) {
+    svg += `<image href="${satelliteUrl}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice"/>`
+    // Dark overlay for contrast
+    svg += `<rect x="0" y="0" width="${W}" height="${H}" fill="rgba(0,0,0,0.15)"/>`
+  } else {
+    svg += `<rect x="0" y="0" width="${W}" height="${H}" fill="#1a2744"/>`
+  }
+
+  // ── FACET FILLS (semi-transparent cyan) ──
+  if (hasFacets) {
+    aiGeometry.facets.forEach((facet) => {
+      if (!facet.points || facet.points.length < 3) return
+      const points = facet.points.map(p => `${tx(p.x).toFixed(1)},${ty(p.y).toFixed(1)}`).join(' ')
+      svg += `<polygon points="${points}" fill="rgba(0,229,255,0.08)" stroke="rgba(0,229,255,0.35)" stroke-width="0.5"/>`
+    })
+  }
+
+  // ── PERIMETER: Bright cyan lines with glow ──
+  if (hasPerimeter) {
+    const perim = aiGeometry.perimeter
+    const n = perim.length
+
+    // Thick cyan perimeter outline with glow
+    const perimPoints = perim.map(p => `${tx(p.x).toFixed(1)},${ty(p.y).toFixed(1)}`).join(' ')
+    svg += `<polygon points="${perimPoints}" fill="none" stroke="#00e5ff" stroke-width="2.5" stroke-linejoin="round" filter="url(#glow-cyan)"/>`
+
+    // Vertex dots at every corner
+    for (let i = 0; i < n; i++) {
+      const cx = tx(perim[i].x), cy = ty(perim[i].y)
+      svg += `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="4" fill="#00e5ff" stroke="#fff" stroke-width="1" filter="url(#glow-cyan)"/>`
+    }
+  }
+
+  // ── INTERNAL STRUCTURAL LINES with color coding ──
+  const lineColors: Record<string, string> = {
+    'RIDGE': '#ff1744',  // Bright red
+    'HIP': '#ffab00',    // Amber
+    'VALLEY': '#2979ff', // Blue
+  }
+  if (aiGeometry.lines && aiGeometry.lines.length > 0) {
+    aiGeometry.lines.forEach(line => {
+      if (line.type === 'EAVE' || line.type === 'RAKE') return
+      const color = lineColors[line.type] || '#00e5ff'
+      const dash = line.type === 'VALLEY' ? ' stroke-dasharray="8,4"' : ''
+      svg += `<line x1="${tx(line.start.x).toFixed(1)}" y1="${ty(line.start.y).toFixed(1)}" x2="${tx(line.end.x).toFixed(1)}" y2="${ty(line.end.y).toFixed(1)}" stroke="${color}" stroke-width="2.5"${dash} stroke-linecap="round" filter="url(#glow-red)"/>`
+      // End points for internal lines
+      svg += `<circle cx="${tx(line.start.x).toFixed(1)}" cy="${ty(line.start.y).toFixed(1)}" r="3" fill="${color}" stroke="#fff" stroke-width="0.8"/>`
+      svg += `<circle cx="${tx(line.end.x).toFixed(1)}" cy="${ty(line.end.y).toFixed(1)}" r="3" fill="${color}" stroke="#fff" stroke-width="0.8"/>`
+    })
+  }
+
+  // ── FACET NUMBERS (circled, semi-transparent background) ──
+  if (hasFacets) {
+    aiGeometry.facets.forEach((facet, i) => {
+      if (!facet.points || facet.points.length < 3) return
+      const cx = facet.points.reduce((s, p) => s + tx(p.x), 0) / facet.points.length
+      const cy = facet.points.reduce((s, p) => s + ty(p.y), 0) / facet.points.length
+      svg += `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="13" fill="rgba(0,34,68,0.85)" stroke="#00e5ff" stroke-width="1.5"/>`
+      svg += `<text x="${cx.toFixed(1)}" y="${(cy + 5).toFixed(1)}" text-anchor="middle" font-size="14" font-weight="800" fill="#fff" font-family="Inter,system-ui,sans-serif">${i + 1}</text>`
+    })
+  }
+
+  // ── PERIMETER EDGE MEASUREMENT LABELS (plan_ft / true_ft) ──
+  if (hasPerimeter) {
+    const perim = aiGeometry.perimeter
+    const n = perim.length
+    for (let i = 0; i < n; i++) {
+      const planFt = perimSideFt[i]
+      const trueFt = perimSideTrueFt[i]
+      if (planFt < 0.5) continue
+
+      const p1 = perim[i], p2 = perim[(i + 1) % n]
+      const sx = tx(p1.x), sy = ty(p1.y)
+      const ex = tx(p2.x), ey = ty(p2.y)
+      const segLen = Math.sqrt((ex - sx) ** 2 + (ey - sy) ** 2)
+      if (segLen < 15) continue
+
+      // Offset outward from perimeter
+      const dx = ex - sx, dy = ey - sy
+      const len = Math.sqrt(dx * dx + dy * dy)
+      const nx = -dy / len, ny = dx / len
+      const offset = 20
+      const mx = (sx + ex) / 2 + nx * offset
+      const my = (sy + ey) / 2 + ny * offset
+
+      // Angle for rotated label
+      let angle = Math.atan2(ey - sy, ex - sx) * 180 / Math.PI
+      if (angle > 90) angle -= 180
+      if (angle < -90) angle += 180
+
+      // Two-line label: plan ft on top, true ft below
+      const planLabel = `${planFt.toFixed(1)}'`
+      const trueLabel = `(${trueFt.toFixed(1)}' true)`
+      const bgW = Math.max(planLabel.length * 6 + 14, 55)
+
+      svg += `<g transform="translate(${mx.toFixed(1)},${my.toFixed(1)}) rotate(${angle.toFixed(1)})" filter="url(#label-shadow)">`
+      svg += `<rect x="${(-bgW / 2).toFixed(1)}" y="-12" width="${bgW.toFixed(1)}" height="22" rx="3" fill="rgba(0,34,68,0.9)" stroke="#00e5ff" stroke-width="0.5"/>`
+      svg += `<text x="0" y="-1" text-anchor="middle" font-size="9" font-weight="700" fill="#00e5ff" font-family="Inter,system-ui,sans-serif">${planLabel}</text>`
+      svg += `<text x="0" y="8" text-anchor="middle" font-size="6.5" font-weight="500" fill="#7eafd4" font-family="Inter,system-ui,sans-serif">${trueLabel}</text>`
+      svg += `</g>`
+    }
+  }
+
+  // ── INTERNAL LINE MEASUREMENT LABELS ──
+  for (const [type, items] of Object.entries(internalLinesByType)) {
+    const totalPx = items.reduce((s, it) => s + it.pxLen, 0)
+    const totalFt = internalMeasured[type] || 0
+    const color = lineColors[type] || '#00e5ff'
+    const pitchRad = (avgPitchDeg || 0) * Math.PI / 180
+
+    items.forEach(({ line: l, pxLen }) => {
+      const planFt = totalPx > 0 && totalFt > 0 ? (pxLen / totalPx) * totalFt : 0
+      if (planFt < 0.5) return
+
+      // True length for internal lines (accounting for slope)
+      let trueFt = planFt
+      if (type === 'RIDGE') trueFt = planFt // ridges are horizontal
+      else if (type === 'HIP' || type === 'VALLEY') {
+        // Hip/valley slope factor ≈ √(1 + tan²(pitch) / 2) for hip at 45° to ridge
+        const hipFactor = Math.sqrt(1 + Math.tan(pitchRad) ** 2 / 2)
+        trueFt = planFt * (hipFactor > 1 ? hipFactor : 1.05)
+      }
+      trueFt = Math.round(trueFt * 10) / 10
+
+      const mx = (tx(l.start.x) + tx(l.end.x)) / 2
+      const my = (ty(l.start.y) + ty(l.end.y)) / 2
+      let angle = Math.atan2(ty(l.end.y) - ty(l.start.y), tx(l.end.x) - tx(l.start.x)) * 180 / Math.PI
+      if (angle > 90) angle -= 180
+      if (angle < -90) angle += 180
+
+      const planLabel = `${planFt.toFixed(1)}'`
+      const trueLabel = `(${trueFt.toFixed(1)}' true)`
+      const bgW = Math.max(planLabel.length * 6 + 14, 55)
+
+      svg += `<g transform="translate(${mx.toFixed(1)},${my.toFixed(1)}) rotate(${angle.toFixed(1)})" filter="url(#label-shadow)">`
+      svg += `<rect x="${(-bgW / 2).toFixed(1)}" y="-12" width="${bgW.toFixed(1)}" height="22" rx="3" fill="rgba(50,0,0,0.85)" stroke="${color}" stroke-width="0.5"/>`
+      svg += `<text x="0" y="-1" text-anchor="middle" font-size="9" font-weight="700" fill="${color}" font-family="Inter,system-ui,sans-serif">${planLabel}</text>`
+      svg += `<text x="0" y="8" text-anchor="middle" font-size="6.5" font-weight="500" fill="#ddd" font-family="Inter,system-ui,sans-serif">${trueLabel}</text>`
+      svg += `</g>`
+    })
+  }
+
+  // ── OBSTRUCTIONS ──
+  if (aiGeometry.obstructions && aiGeometry.obstructions.length > 0) {
+    aiGeometry.obstructions.forEach(obs => {
+      const x1 = tx(obs.boundingBox.min.x), y1 = ty(obs.boundingBox.min.y)
+      const x2 = tx(obs.boundingBox.max.x), y2 = ty(obs.boundingBox.max.y)
+      const w = Math.abs(x2 - x1), h = Math.abs(y2 - y1)
+      svg += `<rect x="${Math.min(x1, x2).toFixed(1)}" y="${Math.min(y1, y2).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="none" stroke="#ff6e40" stroke-width="1.5" stroke-dasharray="4,2" rx="2"/>`
+      const label = obs.type.charAt(0) + obs.type.slice(1).toLowerCase()
+      svg += `<text x="${((x1 + x2) / 2).toFixed(1)}" y="${(Math.min(y1, y2) - 3).toFixed(1)}" text-anchor="middle" font-size="7" font-weight="600" fill="#ff6e40" font-family="Inter,system-ui,sans-serif">${label}</text>`
+    })
+  }
+
+  // ── COMPASS ROSE (top-right, on dark semi-transparent circle) ──
+  const compassX = W - 40, compassY = 40
+  svg += `<circle cx="${compassX}" cy="${compassY}" r="22" fill="rgba(0,34,68,0.85)" stroke="#00e5ff" stroke-width="1"/>`
+  svg += `<line x1="${compassX}" y1="${compassY + 14}" x2="${compassX}" y2="${compassY - 14}" stroke="#7eafd4" stroke-width="1.2"/>`
+  svg += `<line x1="${compassX - 14}" y1="${compassY}" x2="${compassX + 14}" y2="${compassY}" stroke="#7eafd4" stroke-width="0.6"/>`
+  svg += `<polygon points="${compassX},${compassY - 16} ${compassX - 4},${compassY - 8} ${compassX + 4},${compassY - 8}" fill="#ff1744"/>`
+  svg += `<text x="${compassX}" y="${compassY - 20}" text-anchor="middle" font-size="11" font-weight="800" fill="#fff" font-family="Inter,system-ui,sans-serif">N</text>`
+
+  // ── INFO BAR (bottom-left, total area & facets) ──
+  svg += `<rect x="10" y="${H - 36}" width="200" height="26" rx="4" fill="rgba(0,34,68,0.9)" stroke="#00e5ff" stroke-width="0.5"/>`
+  svg += `<text x="20" y="${H - 20}" font-size="9" font-weight="700" fill="#00e5ff" font-family="Inter,system-ui,sans-serif">AREA: ${totalFootprintSqft.toLocaleString()} ft² footprint</text>`
+  svg += `<text x="20" y="${H - 11}" font-size="7.5" font-weight="500" fill="#7eafd4" font-family="Inter,system-ui,sans-serif">${segments.length} facets · ${predominantPitch} pitch · ${grossSquares} sq</text>`
+
+  svg += `</svg>`
+  return svg
+}
 
 // ============================================================
 // PROFESSIONAL ROOF MEASUREMENT DIAGRAM — Matches Image 1 reference
