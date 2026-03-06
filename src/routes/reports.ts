@@ -380,44 +380,46 @@ export async function generateReportForOrder(
       reportData = generateMockRoofReport(order, mapsApiKey)
     }
 
-    // Gemini Vision AI overlay — runs as SEPARATE request via /api/reports/:id/enhance
-    // CF Workers has a hard 30s limit on waitUntil(). buildingInsights (~3s) is safe,
-    // but Gemini Pro (~15-30s) pushes total past 30s. The report completes first with
-    // Solar API data, then the client auto-triggers /enhance for AI geometry overlay.
-    console.log(`[GenerateDirect] Report will complete with Solar API data. Gemini Pro overlay available via /enhance endpoint.`)
-
-    // ── GPT ROOF DIAGRAM GENERATION ──
-    // Send the satellite image to GPT Vision to generate a professional SVG roof diagram
-    // This runs for EVERY report, regardless of whether Solar API succeeded or not
-    let gptDiagramSVG: string | null = null
+    // ── GEMINI ROOF GEOMETRY ANALYSIS ──
+    // Send the ACTUAL satellite image to Gemini Vision to get real roof coordinates.
+    // This produces perimeter polygon, facets, ridge/hip/valley lines from the image.
+    // The architectural diagram SVG is then rendered from these real coordinates —
+    // NOT from an LLM making up shapes from text measurements.
     const satImageUrl = reportData.imagery?.satellite_overhead_url || reportData.imagery?.satellite_url
-    if (satImageUrl && env.OPENAI_API_KEY) {
-      console.log(`[GenerateDirect] Generating GPT Vision roof diagram for order ${orderId}...`)
+    if (satImageUrl && (env.GCP_SERVICE_ACCOUNT_KEY || env.GOOGLE_VERTEX_API_KEY)) {
+      console.log(`[GenerateDirect] Calling Gemini to analyze satellite image for real roof geometry...`)
       try {
-        gptDiagramSVG = await generateGPTRoofDiagram(
-          satImageUrl,
-          {
-            total_footprint_sqft: reportData.total_footprint_sqft,
-            total_true_area_sqft: reportData.total_true_area_sqft,
-            roof_pitch_degrees: reportData.roof_pitch_degrees,
-            roof_pitch_ratio: reportData.roof_pitch_ratio,
-            segments: reportData.segments,
-            edge_summary: reportData.edge_summary,
-            materials: { gross_squares: reportData.materials?.gross_squares || 0 },
-          },
-          env
-        )
-        if (gptDiagramSVG) {
-          console.log(`[GenerateDirect] ✅ GPT diagram generated (${gptDiagramSVG.length} chars) for order ${orderId}`)
+        const geminiEnv = {
+          apiKey: env.GOOGLE_VERTEX_API_KEY,
+          project: env.GOOGLE_CLOUD_PROJECT,
+          location: env.GOOGLE_CLOUD_LOCATION || 'us-central1',
+          serviceAccountKey: env.GCP_SERVICE_ACCOUNT_KEY,
         }
-      } catch (diagramErr: any) {
-        console.warn(`[GenerateDirect] GPT diagram generation failed (non-critical): ${diagramErr.message}`)
+        const startGemini = Date.now()
+        const aiGeometry = await analyzeRoofGeometry(satImageUrl, geminiEnv, {
+          maxRetries: 2,
+          timeoutMs: 180000,
+          acceptScore: 15,
+          model: 'gemini-2.5-pro',
+        })
+        const geminiDuration = Date.now() - startGemini
+        if (aiGeometry && aiGeometry.facets && aiGeometry.facets.length > 0) {
+          reportData.ai_geometry = aiGeometry
+          console.log(`[GenerateDirect] ✅ Gemini geometry: ${aiGeometry.facets.length} facets, ${aiGeometry.perimeter?.length || 0} perimeter pts, ${aiGeometry.lines?.length || 0} lines in ${geminiDuration}ms`)
+        } else {
+          console.warn(`[GenerateDirect] Gemini returned no usable geometry in ${geminiDuration}ms — diagram will use fallback`)
+        }
+      } catch (geminiErr: any) {
+        console.warn(`[GenerateDirect] Gemini geometry analysis failed (non-critical): ${geminiErr.message}`)
       }
     } else {
-      console.log(`[GenerateDirect] Skipping GPT diagram: ${!satImageUrl ? 'no satellite image' : 'no OPENAI_API_KEY'}`)
+      console.log(`[GenerateDirect] Skipping Gemini geometry: ${!satImageUrl ? 'no satellite image' : 'no GCP credentials'}`)
     }
 
-    const professionalHtml = generateProfessionalReportHTML(reportData, gptDiagramSVG)
+    // generateProfessionalReportHTML uses reportData.ai_geometry to render the diagram.
+    // If Gemini succeeded, the architectural diagram will be drawn from REAL roof coordinates.
+    // If not, it falls back to a generic shape from segment data.
+    const professionalHtml = generateProfessionalReportHTML(reportData)
     const edgeSummary = reportData.edge_summary
     const materials = reportData.materials
 
@@ -1120,32 +1122,11 @@ reportsRoutes.post('/:orderId/generate-enhanced', async (c) => {
       console.warn(`[Generate DL] ⏱ Skipping Gemini Vision — only ${Math.round(enhancedRemainingMs/1000)}s remaining (need 15s). Solar segments will be used.`)
     }
 
-    // ── GPT ROOF DIAGRAM GENERATION (DataLayers path) ──
-    let gptDiagramSVG_DL: string | null = null
-    const dlSatUrl = reportData.imagery?.satellite_overhead_url || reportData.imagery?.satellite_url || dlAnalysis?.satelliteUrl
-    if (dlSatUrl && c.env.OPENAI_API_KEY) {
-      console.log(`[Generate DL] Generating GPT Vision roof diagram...`)
-      try {
-        gptDiagramSVG_DL = await generateGPTRoofDiagram(
-          dlSatUrl,
-          {
-            total_footprint_sqft: reportData.total_footprint_sqft,
-            total_true_area_sqft: reportData.total_true_area_sqft,
-            roof_pitch_degrees: reportData.roof_pitch_degrees,
-            roof_pitch_ratio: reportData.roof_pitch_ratio,
-            segments: reportData.segments,
-            edge_summary: reportData.edge_summary,
-            materials: { gross_squares: reportData.materials?.gross_squares || 0 },
-          },
-          c.env
-        )
-      } catch (diagramErr: any) {
-        console.warn(`[Generate DL] GPT diagram failed (non-critical): ${diagramErr.message}`)
-      }
-    }
+    // DataLayers path already has Gemini geometry in reportData.ai_geometry (from the block above).
+    // No need for separate GPT diagram — generateProfessionalReportHTML renders from real geometry.
 
     // Generate professional HTML report
-    const professionalHtml = generateProfessionalReportHTML(reportData, gptDiagramSVG_DL)
+    const professionalHtml = generateProfessionalReportHTML(reportData)
 
     // Save to database
     const existing = await c.env.DB.prepare(
@@ -2878,7 +2859,7 @@ Output ONLY the SVG. No markdown. No explanation.`
 //   Page 3: Light theme Detailed Measurements + Roof Diagram
 // High-DPI ready, PDF-convertible, email-embeddable
 // ============================================================
-function generateProfessionalReportHTML(report: RoofReport, gptDiagramSVG?: string | null): string {
+function generateProfessionalReportHTML(report: RoofReport): string {
   const prop = report.property || { address: 'Unknown' } as any
   const mat = report.materials || { net_area_sqft: 0, gross_squares: 0, bundle_count: 0, line_items: [], waste_table: [], waste_pct: 15, gross_area_sqft: 0, total_material_cost_cad: 0, complexity_class: 'simple', complexity_factor: 1, shingle_type: 'architectural' } as any
   const es = report.edge_summary || { total_ridge_ft: 0, total_hip_ft: 0, total_valley_ft: 0, total_eave_ft: 0, total_rake_ft: 0, total_linear_ft: 0, total_step_flashing_ft: 0, total_wall_flashing_ft: 0, total_transition_ft: 0, total_parapet_ft: 0 } as any
@@ -3192,9 +3173,9 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
   <!-- Architectural Measurement Diagram -->
   <div style="padding:6px 12px 0">
     <div style="max-width:700px;margin:0 auto">
-      ${gptDiagramSVG || architecturalDiagramSVG}
+      ${architecturalDiagramSVG}
     </div>
-    ${gptDiagramSVG ? '<div style="text-align:center;margin-top:2px"><span style="font-size:6.5px;color:#94a3b8;font-style:italic">AI-Generated Roof Diagram &mdash; traced from satellite imagery by GPT Vision</span></div>' : ''}
+    ${report.ai_geometry ? '<div style="text-align:center;margin-top:2px"><span style="font-size:6.5px;color:#94a3b8;font-style:italic">AI-Generated Roof Diagram &mdash; traced from satellite imagery by Gemini Vision</span></div>' : ''}
   </div>
 
   <!-- Bottom info row: satellite thumbnail + measurement notes -->
