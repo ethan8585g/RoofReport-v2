@@ -62,7 +62,7 @@ interface GeminiCallOptions {
 
 async function callGemini(opts: GeminiCallOptions): Promise<any> {
   const model = opts.model || 'gemini-2.0-flash'
-  const timeoutMs = opts.timeoutMs || 55000  // 55s default — Pro model needs more time
+  const timeoutMs = opts.timeoutMs || 180000  // 180s default — Pro model needs time for complex roof analysis
 
   // Build request body
   const requestBody: any = {
@@ -289,6 +289,20 @@ For each vertex, classify the segment FROM this point TO the next point:
 • RAKE: the sloped edge of a gable end — ONLY present on houses with visible triangular wall sections under the roof edge. If you cannot see a triangular wall end, it is NOT a rake.
 • RIDGE: the topmost horizontal peak line — rarely part of the outer perimeter.
 
+════════════════════════════════════════════════
+  CRITICAL: EAVE MEASUREMENT ACCURACY
+════════════════════════════════════════════════
+The EAVES (gutterline edges) form the COMPLETE OUTSIDE PERIMETER of the roof at ground level. Every single eave edge must be individually traced and accurately positioned — edge to edge to edge around the entire drip line. The sum of all EAVE-classified perimeter segments represents the total gutter/starter strip length. This is the #1 most important measurement for material ordering.
+
+EAVE REQUIREMENTS:
+• Every horizontal run along the base of any roof slope MUST be classified as EAVE
+• Each eave segment must have precise start/end pixel coordinates
+• On a hip roof: the eaves are the 4 bottom runs between each pair of hip corners
+• On an L-shaped or T-shaped house: every bottom edge segment of every wing is an EAVE
+• On a gable roof: the two long bottom edges are EAVE (the sloped triangular ends are RAKE)
+• DO NOT skip or merge eave segments — each straight run must be a separate edge
+• The total linear footage of all EAVE edges = the full outside perimeter minus hips and rakes
+
 CLASSIFICATION RULES:
 • If the house has smooth slopes meeting at corners with NO visible triangular walls → HIP roof → diagonal edges are HIP
 • If the house has visible triangular wall ends → gable roof → those sloped edges are RAKE
@@ -405,6 +419,7 @@ Execute in this EXACT order:
 
 STEP 1 — PERIMETER TRACE:
 Starting at the top-left-most corner of the target roof, walk CLOCKWISE along the visible drip line (outermost roof edge including overhang). Place a vertex at EVERY direction change — every corner, every jog, every wing junction, every bump-out, every garage step. If the house is L-shaped, T-shaped, or has any non-rectangular features, you MUST include the concave (inward) corners. Classify each edge segment as EAVE, HIP, RAKE, or RIDGE.
+CRITICAL: Every single EAVE edge (horizontal gutterline run) must be individually traced — edge to edge to edge around the ENTIRE outside perimeter. The sum of all EAVE-labeled edges = total starter strip / gutter length. This is the most important measurement. DO NOT skip any eave segment.
 
 STEP 2 — FACET POLYGONS:
 Trace each individual sloped roof plane as a separate closed polygon. Each facet's boundary follows ridge lines (top), hip/valley lines (sides), and eave/rake lines (bottom). Adjacent facets MUST share edges. Estimate each facet's pitch (rise/run like "6/12") and compass azimuth (0=N, 90=E, 180=S, 270=W).
@@ -434,7 +449,7 @@ Return ONLY the JSON object.`
   // /generate-enhanced passes maxRetries=2 when it has time budget.
   // Default: 2 (first attempt + one correction retry)
   const MAX_RETRIES = options?.maxRetries ?? 2
-  const CALL_TIMEOUT = options?.timeoutMs ?? 55000  // 55s default — Pro model needs more time, CF Workers wall time is unlimited
+  const CALL_TIMEOUT = options?.timeoutMs ?? 180000  // 180s default — Pro model needs 60-120s, user confirmed longer is OK
   const ACCEPT_SCORE = options?.acceptScore ?? 20    // Minimum score to accept without retry (lowered for Pro model which is more accurate)
   const GEMINI_MODEL = options?.model ?? 'gemini-2.5-pro'
   let bestAttempt: AIMeasurementAnalysis | null = null
