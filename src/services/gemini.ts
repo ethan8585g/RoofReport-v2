@@ -64,100 +64,116 @@ async function callGemini(opts: GeminiCallOptions): Promise<any> {
   const model = opts.model || 'gemini-2.0-flash'
   const timeoutMs = opts.timeoutMs || 180000  // 180s default — Pro model needs time for complex roof analysis
 
-  // Build request body
-  const requestBody: any = {
-    contents: opts.contents,
-    generationConfig: opts.generationConfig || {}
-  }
-  if (opts.systemInstruction) {
-    requestBody.systemInstruction = opts.systemInstruction
-  }
+  // SHARED abort controller — ALL fallback attempts share ONE timeout budget.
+  // This prevents the total time from exceeding timeoutMs when multiple paths are tried.
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
 
-  // Priority 1: Bearer token auth via Vertex AI Platform (fastest for Pro models)
-  // The Vertex AI regional endpoint routes to the nearest cluster for lower latency.
-  if (opts.accessToken && opts.project && opts.location) {
-    try {
-      const vertexUrl = getVertexAIUrl(opts.project, opts.location, model, 'generateContent')
-      console.log(`[Gemini] Calling Vertex AI Platform: ${model} via ${opts.location}`)
+  try {
+    // Build request body
+    const requestBody: any = {
+      contents: opts.contents,
+      generationConfig: opts.generationConfig || {}
+    }
+    if (opts.systemInstruction) {
+      requestBody.systemInstruction = opts.systemInstruction
+    }
+
+    // Priority 1: Bearer token auth via Vertex AI Platform (fastest for Pro models)
+    // The Vertex AI regional endpoint routes to the nearest cluster for lower latency.
+    if (opts.accessToken && opts.project && opts.location) {
+      try {
+        const vertexUrl = getVertexAIUrl(opts.project, opts.location, model, 'generateContent')
+        console.log(`[Gemini] Calling Vertex AI Platform: ${model} via ${opts.location}`)
+        
+        const vertexResponse = await fetch(vertexUrl, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${opts.accessToken}`,
+            'Content-Type': 'application/json',
+            'X-Goog-User-Project': opts.project
+          },
+          body: JSON.stringify(requestBody),
+          signal: controller.signal
+        })
+
+        if (vertexResponse.ok) {
+          const data: any = await vertexResponse.json()
+          const text = data.candidates?.[0]?.content?.parts?.[0]?.text
+          if (text) return text
+          throw new Error('Empty response from Vertex AI')
+        }
+        const errText = await vertexResponse.text()
+        console.warn(`[Gemini] Vertex AI failed (${vertexResponse.status}): ${errText.substring(0, 200)}`)
+      } catch (e: any) {
+        // Re-throw aborts — they mean we've exhausted our time budget
+        if (controller.signal.aborted || e.name === 'AbortError') {
+          throw new Error(`Gemini timeout after ${timeoutMs}ms (Vertex AI path)`)
+        }
+        console.warn(`[Gemini] Vertex AI error: ${e.message}`)
+      }
+    }
+
+    // Priority 2: Bearer token auth via Generative Language API (fallback)
+    if (opts.accessToken && !controller.signal.aborted) {
+      try {
+        const url = `${GEMINI_REST_BASE}/${model}:generateContent`
+        console.log(`[Gemini] Calling Generative Language API with Bearer token: ${model}`)
+        
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${opts.accessToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(requestBody),
+          signal: controller.signal
+        })
+
+        if (response.ok) {
+          const data: any = await response.json()
+          const text = data.candidates?.[0]?.content?.parts?.[0]?.text
+          if (text) return text
+          throw new Error('Empty response from Gemini (Bearer auth)')
+        }
+
+        const errText = await response.text()
+        console.warn(`[Gemini] Bearer auth failed (${response.status}): ${errText.substring(0, 200)}`)
+      } catch (e: any) {
+        if (controller.signal.aborted || e.name === 'AbortError') {
+          throw new Error(`Gemini timeout after ${timeoutMs}ms (Bearer path)`)
+        }
+        console.warn(`[Gemini] Bearer auth error: ${e.message}`)
+      }
+    }
+
+    // Priority 3: API key auth (fallback — may not work for all models)
+    if (opts.apiKey && !controller.signal.aborted) {
+      const url = `${GEMINI_REST_BASE}/${model}:generateContent?key=${opts.apiKey}`
+      console.log(`[Gemini] Calling REST API with API key (fallback): ${model}`)
       
-      const vertexResponse = await fetch(vertexUrl, {
+      const response = await fetch(url, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${opts.accessToken}`,
-          'Content-Type': 'application/json',
-          'X-Goog-User-Project': opts.project
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestBody),
-        signal: AbortSignal.timeout(timeoutMs)
+        signal: controller.signal
       })
 
-      if (vertexResponse.ok) {
-        const data: any = await vertexResponse.json()
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text
-        if (text) return text
-        throw new Error('Empty response from Vertex AI')
+      if (!response.ok) {
+        const errText = await response.text()
+        throw new Error(`Gemini API error ${response.status}: ${errText.substring(0, 200)}`)
       }
-      const errText = await vertexResponse.text()
-      console.warn(`[Gemini] Vertex AI failed (${vertexResponse.status}): ${errText.substring(0, 200)}`)
-    } catch (e: any) {
-      // Re-throw timeouts — they count against our budget
-      if (e.name === 'AbortError' || e.name === 'TimeoutError' || e.message?.includes('abort') || e.message?.includes('timeout')) {
-        throw e
-      }
-      console.warn(`[Gemini] Vertex AI error: ${e.message}`)
-    }
-  }
 
-  // Priority 2: Bearer token auth via Generative Language API (fallback)
-  if (opts.accessToken) {
-    const url = `${GEMINI_REST_BASE}/${model}:generateContent`
-    console.log(`[Gemini] Calling Generative Language API with Bearer token: ${model}`)
-    
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${opts.accessToken}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(requestBody),
-      signal: AbortSignal.timeout(timeoutMs)
-    })
-
-    if (response.ok) {
       const data: any = await response.json()
       const text = data.candidates?.[0]?.content?.parts?.[0]?.text
-      if (text) return text
-      throw new Error('Empty response from Gemini (Bearer auth)')
+      if (!text) throw new Error('Empty response from Gemini (API key auth)')
+      return text
     }
 
-    const errText = await response.text()
-    console.warn(`[Gemini] Bearer auth failed (${response.status}): ${errText.substring(0, 200)}`)
+    throw new Error('No Gemini API credentials available (need service account key, access token, or API key)')
+  } finally {
+    clearTimeout(timer)
   }
-
-  // Priority 2: API key auth (fallback — may not work for all models)
-  if (opts.apiKey) {
-    const url = `${GEMINI_REST_BASE}/${model}:generateContent?key=${opts.apiKey}`
-    console.log(`[Gemini] Calling REST API with API key (fallback): ${model}`)
-    
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody),
-      signal: AbortSignal.timeout(timeoutMs)
-    })
-
-    if (!response.ok) {
-      const errText = await response.text()
-      throw new Error(`Gemini API error ${response.status}: ${errText.substring(0, 200)}`)
-    }
-
-    const data: any = await response.json()
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text
-    if (!text) throw new Error('Empty response from Gemini (API key auth)')
-    return text
-  }
-
-  throw new Error('No Gemini API credentials available (need service account key, access token, or API key)')
 }
 
 // ============================================================
