@@ -2522,11 +2522,10 @@ function generateProfessionalReportHTML(report: RoofReport): string {
   // ── Professional CAD-style Blueprint SVG (white background, no satellite) ──
   const blueprintLengthSVG = generateBlueprintSVG(report.ai_geometry, report.segments, report.edges, es, report.total_footprint_sqft, report.roof_pitch_degrees, 'LENGTH')
 
-  // ── AI Point-by-Point Blueprint SVG (satellite background + geometry overlay) for Page 3 ──
-  const aiPointByPointSVG = generateAIPointByPointSVG(
-    report.ai_geometry, report.segments, report.edges, es,
-    report.total_footprint_sqft, report.roof_pitch_degrees,
-    overheadUrl, predominantPitch, grossSquares
+  // ── Precise AI Overlay SVG for Page 3 (satellite bg rendered in HTML, SVG overlay on top) ──
+  const preciseOverlaySVG = generatePreciseAIOverlaySVG(
+    report.ai_geometry,
+    report.total_footprint_sqft
   )
 
   // Generate perimeter side data
@@ -2761,11 +2760,17 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
     <div style="color:#8eb8db;font-size:9px">Report: ${reportNum} &bull; ${reportDateShort}</div>
   </div>
   <div style="padding:8px 20px 8px">
-    <div style="font-size:9px;color:#4a5568;font-style:italic;margin-bottom:6px">High-resolution satellite image with AI-detected roof geometry overlaid. Cyan lines show perimeter edges; red lines show internal ridges, hips, and valleys. Measurements combine Google Solar plan &amp; true lengths with Gemini 2.5 Pro point analysis.</div>
+    <div style="font-size:9px;color:#4a5568;font-style:italic;margin-bottom:6px">High-resolution satellite imagery with AI-detected roof geometry. Pixel-to-foot scale computed from footprint area. Cyan lines = perimeter; red = ridges; amber = hips; blue dashed = valleys.</div>
 
-    <!-- AI Point-by-Point Blueprint SVG with satellite background -->
-    <div style="border:2px solid #003366;border-radius:4px;overflow:hidden;background:#111">
-      ${aiPointByPointSVG}
+    <!-- 640 × 640 satellite image base with SVG overlay -->
+    <div style="position:relative;width:640px;max-width:100%;margin:0 auto;border:2px solid #003366;border-radius:4px;overflow:hidden;background:#111">
+      ${overheadUrl
+        ? '<img src="' + overheadUrl + '" alt="Satellite" style="width:640px;height:640px;display:block;object-fit:cover" onerror="this.style.display=\'none\'">'
+        : '<div style="width:640px;height:640px;background:#1a2744;display:flex;align-items:center;justify-content:center;color:#7eafd4;font-size:13px">Satellite Image Not Available</div>'
+      }
+      <div style="position:absolute;top:0;left:0;width:640px;height:640px">
+        ${preciseOverlaySVG}
+      </div>
     </div>
 
     <!-- Legend bar -->
@@ -2779,7 +2784,7 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
     </div>
   </div>
 
-  <!-- Footer bar: FACETS | PITCH | SQUARES -->
+  <!-- Footer bar: FACETS | PITCH | SQUARES | RIDGES/HIPS | EAVES -->
   <div style="position:absolute;bottom:30px;left:0;right:0;padding:0 20px">
     <div style="background:#002244;display:flex;border-radius:4px;overflow:hidden">
       <div style="flex:1;text-align:center;padding:8px 6px;border-right:1px solid #003366">
@@ -3385,161 +3390,98 @@ function smartEdgeFootage(
 // ============================================================
 
 // ============================================================
-// AI POINT-BY-POINT BLUEPRINT — Satellite Background + Geometry Overlay
-// High-res satellite image with AI-detected roof geometry plotted:
-//   - Cyan perimeter lines (eave, rake edges)
-//   - Red lines for ridges, amber for hips, blue dashed for valleys
-//   - Vertex points at every corner
-//   - Mid-point measurement labels with plan_length_ft & true_length_ft
-//   - Semi-transparent facet fills for visual clarity
+
 // ============================================================
-function generateAIPointByPointSVG(
+// PRECISE AI OVERLAY SVG — Pure SVG overlay for Page 3
+//
+// This function generates a TRANSPARENT SVG that is absolutely
+// positioned on top of a 640×640 satellite <img> element.
+// It computes a pixel-to-foot scale from the AI perimeter bbox
+// and the known footprint area, then draws:
+//   - Semi-transparent facet polygon fills
+//   - Thick cyan perimeter lines with vertex dots
+//   - Colour-coded internal lines (ridge=red, hip=amber, valley=blue dashed)
+//   - Length labels (in feet) at each edge midpoint
+//   - Compass rose and info bar
+//
+// Key difference from old generateAIPointByPointSVG:
+//   - Does NOT embed the satellite image in <image> — the HTML does that
+//   - Uses pixel-to-foot conversion for accurate length labels
+//   - Simpler, focused only on geometry overlay
+// ============================================================
+function generatePreciseAIOverlaySVG(
   aiGeometry: AIMeasurementAnalysis | null | undefined,
-  segments: RoofSegment[],
-  edges: EdgeMeasurement[],
-  edgeSummary: { total_ridge_ft: number; total_hip_ft: number; total_valley_ft: number; total_eave_ft: number; total_rake_ft: number },
-  totalFootprintSqft: number,
-  avgPitchDeg: number,
-  satelliteUrl: string,
-  predominantPitch: string,
-  grossSquares: number
+  footprintSqft: number
 ): string {
   const W = 640, H = 640
 
-  // Fallback when no AI geometry available
+  // ── FALLBACK when no AI geometry ──
   if (!aiGeometry || (!aiGeometry.perimeter?.length && !aiGeometry.facets?.length)) {
-    return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;display:block;background:#111">
-      ${satelliteUrl ? `<image href="${satelliteUrl}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice" opacity="0.85"/>` : `<rect width="${W}" height="${H}" fill="#1a1a2e"/>`}
+    return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%;display:block">
       <rect x="160" y="280" width="320" height="80" rx="8" fill="rgba(0,0,0,0.75)"/>
-      <text x="${W/2}" y="310" text-anchor="middle" fill="#00e5ff" font-size="14" font-weight="700" font-family="Inter,system-ui,sans-serif">AI Geometry Not Available</text>
-      <text x="${W/2}" y="335" text-anchor="middle" fill="#7eafd4" font-size="11" font-family="Inter,system-ui,sans-serif">Run AI Enhancement to generate point-by-point blueprint</text>
+      <text x="${W / 2}" y="310" text-anchor="middle" fill="#00e5ff" font-size="14" font-weight="700" font-family="Inter,system-ui,sans-serif">AI Geometry Not Available</text>
+      <text x="${W / 2}" y="335" text-anchor="middle" fill="#7eafd4" font-size="11" font-family="Inter,system-ui,sans-serif">Run AI Enhancement to generate point-by-point blueprint</text>
     </svg>`
   }
 
   const hasPerimeter = aiGeometry.perimeter && aiGeometry.perimeter.length >= 3
   const hasFacets = aiGeometry.facets && aiGeometry.facets.length >= 2
 
-  // AI coordinates are already in 0-640 pixel space (matching the satellite image)
-  // No scaling needed — direct mapping
+  // ── Pixel-to-foot scale ──
+  // Compute from perimeter bounding box vs known footprint area
+  let pxPerFt = 1
+  if (hasPerimeter) {
+    const xs = aiGeometry.perimeter.map(p => p.x)
+    const ys = aiGeometry.perimeter.map(p => p.y)
+    const bboxW = Math.max(...xs) - Math.min(...xs)
+    const bboxH = Math.max(...ys) - Math.min(...ys)
+    const bboxAreaPx = Math.max(bboxW * bboxH, 1)
+    const realSqft = Math.max(footprintSqft, 100)
+    pxPerFt = Math.sqrt(bboxAreaPx / realSqft)
+  } else if (hasFacets) {
+    // Fallback: use facets bounding box
+    const allPts = aiGeometry.facets.flatMap(f => f.points || [])
+    if (allPts.length > 2) {
+      const xs = allPts.map(p => p.x)
+      const ys = allPts.map(p => p.y)
+      const bboxW = Math.max(...xs) - Math.min(...xs)
+      const bboxH = Math.max(...ys) - Math.min(...ys)
+      const bboxAreaPx = Math.max(bboxW * bboxH, 1)
+      pxPerFt = Math.sqrt(bboxAreaPx / Math.max(footprintSqft, 100))
+    }
+  }
+
+  // Coordinate clamping
   const tx = (x: number) => Math.max(0, Math.min(W, x))
   const ty = (y: number) => Math.max(0, Math.min(H, y))
 
-  // ── DISTRIBUTE FOOTAGE ──
-  const measuredByType = smartEdgeFootage(edgeSummary)
-  let perimSideFt: number[] = []
-  let perimSideTrueFt: number[] = []
-  if (hasPerimeter) {
-    const perim = aiGeometry.perimeter
-    const n = perim.length
-    const sidesByType: Record<string, { idx: number; pxLen: number }[]> = {}
-    for (let i = 0; i < n; i++) {
-      const p1 = perim[i], p2 = perim[(i + 1) % n]
-      const pxLen = Math.sqrt((p2.x - p1.x) ** 2 + (p2.y - p1.y) ** 2)
-      const type = p1.edge_to_next || 'EAVE'
-      if (!sidesByType[type]) sidesByType[type] = []
-      sidesByType[type].push({ idx: i, pxLen })
-    }
-    perimSideFt = new Array(n).fill(0)
-    perimSideTrueFt = new Array(n).fill(0)
-    for (const [type, sides] of Object.entries(sidesByType)) {
-      const totalPx = sides.reduce((s, sd) => s + sd.pxLen, 0)
-      const totalFt = measuredByType[type] || 0
-      // True length uses pitch factor for non-horizontal edges
-      const pitchRad = (avgPitchDeg || 0) * Math.PI / 180
-      const pitchFactor = type === 'EAVE' || type === 'RAKE' ? 1 : (Math.cos(pitchRad) > 0.01 ? 1 / Math.cos(pitchRad) : 1.15)
-      if (totalPx > 0 && totalFt > 0) {
-        sides.forEach(sd => {
-          const planFt = (sd.pxLen / totalPx) * totalFt
-          perimSideFt[sd.idx] = planFt
-          perimSideTrueFt[sd.idx] = Math.round(planFt * pitchFactor * 10) / 10
-        })
-      }
-    }
-  }
+  // Pixel distance to feet
+  const pxToFt = (px: number) => pxPerFt > 0.01 ? px / pxPerFt : 0
 
-  // Internal line footage
-  const internalMeasured: Record<string, number> = {
-    'RIDGE': edgeSummary.total_ridge_ft,
-    'HIP': edgeSummary.total_hip_ft,
-    'VALLEY': edgeSummary.total_valley_ft,
-  }
-  const internalLinesByType: Record<string, { line: typeof aiGeometry.lines[0]; pxLen: number }[]> = {}
-  if (aiGeometry.lines) {
-    aiGeometry.lines.forEach(l => {
-      if (l.type === 'EAVE' || l.type === 'RAKE') return
-      if (!internalLinesByType[l.type]) internalLinesByType[l.type] = []
-      const pxLen = Math.sqrt((l.end.x - l.start.x) ** 2 + (l.end.y - l.start.y) ** 2)
-      internalLinesByType[l.type].push({ line: l, pxLen })
-    })
-  }
+  // ── BUILD SVG (transparent background — overlays the satellite <img>) ──
+  let svg = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%;display:block">`
 
-  // Derive internal lines from facets if missing
-  if ((!aiGeometry.lines || aiGeometry.lines.length === 0) && hasFacets) {
-    const edgeKey = (a: { x: number; y: number }, b: { x: number; y: number }) =>
-      `${Math.round(Math.min(a.x, b.x))},${Math.round(Math.min(a.y, b.y))}-${Math.round(Math.max(a.x, b.x))},${Math.round(Math.max(a.y, b.y))}`
-    const edgeMap: Record<string, { start: { x: number; y: number }; end: { x: number; y: number }; count: number }> = {}
-    aiGeometry.facets.forEach(facet => {
-      if (!facet.points || facet.points.length < 3) return
-      for (let j = 0; j < facet.points.length; j++) {
-        const a = facet.points[j]
-        const b = facet.points[(j + 1) % facet.points.length]
-        const key = edgeKey(a, b)
-        if (!edgeMap[key]) edgeMap[key] = { start: a, end: b, count: 0 }
-        edgeMap[key].count++
-      }
-    })
-    const derivedLines: typeof aiGeometry.lines = []
-    for (const [, edge] of Object.entries(edgeMap)) {
-      if (edge.count >= 2) {
-        const dx = Math.abs(edge.end.x - edge.start.x)
-        const dy = Math.abs(edge.end.y - edge.start.y)
-        const lineType = dy < dx * 0.3 ? 'RIDGE' : 'HIP'
-        derivedLines.push({ type: lineType as any, start: edge.start, end: edge.end })
-      }
-    }
-    if (derivedLines.length > 0) {
-      aiGeometry.lines = derivedLines
-      derivedLines.forEach(l => {
-        if (!internalLinesByType[l.type]) internalLinesByType[l.type] = []
-        const pxLen = Math.sqrt((l.end.x - l.start.x) ** 2 + (l.end.y - l.start.y) ** 2)
-        internalLinesByType[l.type].push({ line: l, pxLen })
-      })
-    }
-  }
-
-  // ── BUILD SVG ──
-  let svg = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" style="width:100%;height:auto;display:block">`
-
-  // Definitions for glow effects and patterns
+  // Defs for glow effects
   svg += `<defs>
-    <filter id="glow-cyan" x="-50%" y="-50%" width="200%" height="200%">
+    <filter id="ov-glow-cyan" x="-50%" y="-50%" width="200%" height="200%">
       <feGaussianBlur stdDeviation="2" result="blur"/>
       <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
-    <filter id="glow-red" x="-50%" y="-50%" width="200%" height="200%">
+    <filter id="ov-glow-line" x="-50%" y="-50%" width="200%" height="200%">
       <feGaussianBlur stdDeviation="1.5" result="blur"/>
       <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
-    <filter id="label-shadow" x="-10%" y="-10%" width="120%" height="120%">
+    <filter id="ov-label-shadow" x="-10%" y="-10%" width="120%" height="120%">
       <feDropShadow dx="0" dy="1" stdDeviation="1.5" flood-color="#000" flood-opacity="0.6"/>
     </filter>
   </defs>`
 
-  // Satellite image background
-  if (satelliteUrl) {
-    svg += `<image href="${satelliteUrl}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice"/>`
-    // Dark overlay for contrast
-    svg += `<rect x="0" y="0" width="${W}" height="${H}" fill="rgba(0,0,0,0.15)"/>`
-  } else {
-    svg += `<rect x="0" y="0" width="${W}" height="${H}" fill="#1a2744"/>`
-  }
-
-  // ── FACET FILLS (semi-transparent cyan) ──
+  // ── FACET FILLS (semi-transparent cyan polygons) ──
   if (hasFacets) {
-    aiGeometry.facets.forEach((facet) => {
+    aiGeometry.facets.forEach(facet => {
       if (!facet.points || facet.points.length < 3) return
-      const points = facet.points.map(p => `${tx(p.x).toFixed(1)},${ty(p.y).toFixed(1)}`).join(' ')
-      svg += `<polygon points="${points}" fill="rgba(0,229,255,0.08)" stroke="rgba(0,229,255,0.35)" stroke-width="0.5"/>`
+      const pts = facet.points.map(p => `${tx(p.x).toFixed(1)},${ty(p.y).toFixed(1)}`).join(' ')
+      svg += `<polygon points="${pts}" fill="rgba(0,229,255,0.08)" stroke="rgba(0,229,255,0.35)" stroke-width="0.5"/>`
     })
   }
 
@@ -3548,36 +3490,118 @@ function generateAIPointByPointSVG(
     const perim = aiGeometry.perimeter
     const n = perim.length
 
-    // Thick cyan perimeter outline with glow
-    const perimPoints = perim.map(p => `${tx(p.x).toFixed(1)},${ty(p.y).toFixed(1)}`).join(' ')
-    svg += `<polygon points="${perimPoints}" fill="none" stroke="#00e5ff" stroke-width="2.5" stroke-linejoin="round" filter="url(#glow-cyan)"/>`
+    // Thick cyan perimeter polygon
+    const perimPts = perim.map(p => `${tx(p.x).toFixed(1)},${ty(p.y).toFixed(1)}`).join(' ')
+    svg += `<polygon points="${perimPts}" fill="none" stroke="#00e5ff" stroke-width="2.5" stroke-linejoin="round" filter="url(#ov-glow-cyan)"/>`
 
     // Vertex dots at every corner
     for (let i = 0; i < n; i++) {
-      const cx = tx(perim[i].x), cy = ty(perim[i].y)
-      svg += `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="4" fill="#00e5ff" stroke="#fff" stroke-width="1" filter="url(#glow-cyan)"/>`
+      svg += `<circle cx="${tx(perim[i].x).toFixed(1)}" cy="${ty(perim[i].y).toFixed(1)}" r="4" fill="#00e5ff" stroke="#fff" stroke-width="1" filter="url(#ov-glow-cyan)"/>`
+    }
+
+    // ── PERIMETER EDGE LENGTH LABELS ──
+    for (let i = 0; i < n; i++) {
+      const p1 = perim[i], p2 = perim[(i + 1) % n]
+      const sx = tx(p1.x), sy = ty(p1.y)
+      const ex = tx(p2.x), ey = ty(p2.y)
+      const segPx = Math.sqrt((ex - sx) ** 2 + (ey - sy) ** 2)
+      if (segPx < 15) continue
+
+      const ftVal = pxToFt(segPx)
+      if (ftVal < 0.5) continue
+
+      // Offset label outward from the perimeter
+      const dx = ex - sx, dy = ey - sy
+      const len = Math.sqrt(dx * dx + dy * dy)
+      const nx = -dy / len, ny = dx / len
+      const offset = 18
+      const mx = (sx + ex) / 2 + nx * offset
+      const my = (sy + ey) / 2 + ny * offset
+
+      // Rotation so label follows the edge
+      let angle = Math.atan2(ey - sy, ex - sx) * 180 / Math.PI
+      if (angle > 90) angle -= 180
+      if (angle < -90) angle += 180
+
+      const label = `${ftVal.toFixed(1)}'`
+      const bgW = Math.max(label.length * 7 + 10, 44)
+
+      svg += `<g transform="translate(${mx.toFixed(1)},${my.toFixed(1)}) rotate(${angle.toFixed(1)})" filter="url(#ov-label-shadow)">`
+      svg += `<rect x="${(-bgW / 2).toFixed(1)}" y="-9" width="${bgW.toFixed(1)}" height="18" rx="3" fill="rgba(0,34,68,0.9)" stroke="#00e5ff" stroke-width="0.5"/>`
+      svg += `<text x="0" y="4" text-anchor="middle" font-size="9" font-weight="700" fill="#00e5ff" font-family="Inter,system-ui,sans-serif">${label}</text>`
+      svg += `</g>`
     }
   }
 
-  // ── INTERNAL STRUCTURAL LINES with color coding ──
+  // ── INTERNAL STRUCTURAL LINES (ridges, hips, valleys) ──
   const lineColors: Record<string, string> = {
-    'RIDGE': '#ff1744',  // Bright red
-    'HIP': '#ffab00',    // Amber
-    'VALLEY': '#2979ff', // Blue
-  }
-  if (aiGeometry.lines && aiGeometry.lines.length > 0) {
-    aiGeometry.lines.forEach(line => {
-      if (line.type === 'EAVE' || line.type === 'RAKE') return
-      const color = lineColors[line.type] || '#00e5ff'
-      const dash = line.type === 'VALLEY' ? ' stroke-dasharray="8,4"' : ''
-      svg += `<line x1="${tx(line.start.x).toFixed(1)}" y1="${ty(line.start.y).toFixed(1)}" x2="${tx(line.end.x).toFixed(1)}" y2="${ty(line.end.y).toFixed(1)}" stroke="${color}" stroke-width="2.5"${dash} stroke-linecap="round" filter="url(#glow-red)"/>`
-      // End points for internal lines
-      svg += `<circle cx="${tx(line.start.x).toFixed(1)}" cy="${ty(line.start.y).toFixed(1)}" r="3" fill="${color}" stroke="#fff" stroke-width="0.8"/>`
-      svg += `<circle cx="${tx(line.end.x).toFixed(1)}" cy="${ty(line.end.y).toFixed(1)}" r="3" fill="${color}" stroke="#fff" stroke-width="0.8"/>`
-    })
+    'RIDGE': '#ff1744',
+    'HIP': '#ffab00',
+    'VALLEY': '#2979ff',
   }
 
-  // ── FACET NUMBERS (circled, semi-transparent background) ──
+  // Derive internal lines from facet shared edges if geometry.lines is empty
+  let effectiveLines = aiGeometry.lines || []
+  if (effectiveLines.length === 0 && hasFacets) {
+    const edgeKey = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+      `${Math.round(Math.min(a.x, b.x))},${Math.round(Math.min(a.y, b.y))}-${Math.round(Math.max(a.x, b.x))},${Math.round(Math.max(a.y, b.y))}`
+    const edgeMap: Record<string, { start: { x: number; y: number }; end: { x: number; y: number }; count: number }> = {}
+    aiGeometry.facets.forEach(facet => {
+      if (!facet.points || facet.points.length < 3) return
+      for (let j = 0; j < facet.points.length; j++) {
+        const a = facet.points[j], b = facet.points[(j + 1) % facet.points.length]
+        const key = edgeKey(a, b)
+        if (!edgeMap[key]) edgeMap[key] = { start: a, end: b, count: 0 }
+        edgeMap[key].count++
+      }
+    })
+    const derived: typeof effectiveLines = []
+    for (const [, edge] of Object.entries(edgeMap)) {
+      if (edge.count >= 2) {
+        const dx = Math.abs(edge.end.x - edge.start.x)
+        const dy = Math.abs(edge.end.y - edge.start.y)
+        const lineType = dy < dx * 0.3 ? 'RIDGE' : 'HIP'
+        derived.push({ type: lineType as any, start: edge.start, end: edge.end })
+      }
+    }
+    effectiveLines = derived
+  }
+
+  // Draw internal lines
+  effectiveLines.forEach(line => {
+    if (line.type === 'EAVE' || line.type === 'RAKE') return
+    const color = lineColors[line.type] || '#00e5ff'
+    const dash = line.type === 'VALLEY' ? ' stroke-dasharray="8,4"' : ''
+    svg += `<line x1="${tx(line.start.x).toFixed(1)}" y1="${ty(line.start.y).toFixed(1)}" x2="${tx(line.end.x).toFixed(1)}" y2="${ty(line.end.y).toFixed(1)}" stroke="${color}" stroke-width="2.5"${dash} stroke-linecap="round" filter="url(#ov-glow-line)"/>`
+    svg += `<circle cx="${tx(line.start.x).toFixed(1)}" cy="${ty(line.start.y).toFixed(1)}" r="3" fill="${color}" stroke="#fff" stroke-width="0.8"/>`
+    svg += `<circle cx="${tx(line.end.x).toFixed(1)}" cy="${ty(line.end.y).toFixed(1)}" r="3" fill="${color}" stroke="#fff" stroke-width="0.8"/>`
+  })
+
+  // Internal line length labels
+  effectiveLines.forEach(line => {
+    if (line.type === 'EAVE' || line.type === 'RAKE') return
+    const color = lineColors[line.type] || '#00e5ff'
+    const sx = tx(line.start.x), sy = ty(line.start.y)
+    const ex = tx(line.end.x), ey = ty(line.end.y)
+    const segPx = Math.sqrt((ex - sx) ** 2 + (ey - sy) ** 2)
+    const ftVal = pxToFt(segPx)
+    if (ftVal < 0.5 || segPx < 20) return
+
+    const mx = (sx + ex) / 2, my = (sy + ey) / 2
+    let angle = Math.atan2(ey - sy, ex - sx) * 180 / Math.PI
+    if (angle > 90) angle -= 180
+    if (angle < -90) angle += 180
+
+    const label = `${ftVal.toFixed(1)}'`
+    const bgW = Math.max(label.length * 7 + 10, 44)
+
+    svg += `<g transform="translate(${mx.toFixed(1)},${my.toFixed(1)}) rotate(${angle.toFixed(1)})" filter="url(#ov-label-shadow)">`
+    svg += `<rect x="${(-bgW / 2).toFixed(1)}" y="-9" width="${bgW.toFixed(1)}" height="18" rx="3" fill="rgba(50,0,0,0.85)" stroke="${color}" stroke-width="0.5"/>`
+    svg += `<text x="0" y="4" text-anchor="middle" font-size="9" font-weight="700" fill="${color}" font-family="Inter,system-ui,sans-serif">${label}</text>`
+    svg += `</g>`
+  })
+
+  // ── FACET NUMBER CIRCLES ──
   if (hasFacets) {
     aiGeometry.facets.forEach((facet, i) => {
       if (!facet.points || facet.points.length < 3) return
@@ -3585,86 +3609,6 @@ function generateAIPointByPointSVG(
       const cy = facet.points.reduce((s, p) => s + ty(p.y), 0) / facet.points.length
       svg += `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="13" fill="rgba(0,34,68,0.85)" stroke="#00e5ff" stroke-width="1.5"/>`
       svg += `<text x="${cx.toFixed(1)}" y="${(cy + 5).toFixed(1)}" text-anchor="middle" font-size="14" font-weight="800" fill="#fff" font-family="Inter,system-ui,sans-serif">${i + 1}</text>`
-    })
-  }
-
-  // ── PERIMETER EDGE MEASUREMENT LABELS (plan_ft / true_ft) ──
-  if (hasPerimeter) {
-    const perim = aiGeometry.perimeter
-    const n = perim.length
-    for (let i = 0; i < n; i++) {
-      const planFt = perimSideFt[i]
-      const trueFt = perimSideTrueFt[i]
-      if (planFt < 0.5) continue
-
-      const p1 = perim[i], p2 = perim[(i + 1) % n]
-      const sx = tx(p1.x), sy = ty(p1.y)
-      const ex = tx(p2.x), ey = ty(p2.y)
-      const segLen = Math.sqrt((ex - sx) ** 2 + (ey - sy) ** 2)
-      if (segLen < 15) continue
-
-      // Offset outward from perimeter
-      const dx = ex - sx, dy = ey - sy
-      const len = Math.sqrt(dx * dx + dy * dy)
-      const nx = -dy / len, ny = dx / len
-      const offset = 20
-      const mx = (sx + ex) / 2 + nx * offset
-      const my = (sy + ey) / 2 + ny * offset
-
-      // Angle for rotated label
-      let angle = Math.atan2(ey - sy, ex - sx) * 180 / Math.PI
-      if (angle > 90) angle -= 180
-      if (angle < -90) angle += 180
-
-      // Two-line label: plan ft on top, true ft below
-      const planLabel = `${planFt.toFixed(1)}'`
-      const trueLabel = `(${trueFt.toFixed(1)}' true)`
-      const bgW = Math.max(planLabel.length * 6 + 14, 55)
-
-      svg += `<g transform="translate(${mx.toFixed(1)},${my.toFixed(1)}) rotate(${angle.toFixed(1)})" filter="url(#label-shadow)">`
-      svg += `<rect x="${(-bgW / 2).toFixed(1)}" y="-12" width="${bgW.toFixed(1)}" height="22" rx="3" fill="rgba(0,34,68,0.9)" stroke="#00e5ff" stroke-width="0.5"/>`
-      svg += `<text x="0" y="-1" text-anchor="middle" font-size="9" font-weight="700" fill="#00e5ff" font-family="Inter,system-ui,sans-serif">${planLabel}</text>`
-      svg += `<text x="0" y="8" text-anchor="middle" font-size="6.5" font-weight="500" fill="#7eafd4" font-family="Inter,system-ui,sans-serif">${trueLabel}</text>`
-      svg += `</g>`
-    }
-  }
-
-  // ── INTERNAL LINE MEASUREMENT LABELS ──
-  for (const [type, items] of Object.entries(internalLinesByType)) {
-    const totalPx = items.reduce((s, it) => s + it.pxLen, 0)
-    const totalFt = internalMeasured[type] || 0
-    const color = lineColors[type] || '#00e5ff'
-    const pitchRad = (avgPitchDeg || 0) * Math.PI / 180
-
-    items.forEach(({ line: l, pxLen }) => {
-      const planFt = totalPx > 0 && totalFt > 0 ? (pxLen / totalPx) * totalFt : 0
-      if (planFt < 0.5) return
-
-      // True length for internal lines (accounting for slope)
-      let trueFt = planFt
-      if (type === 'RIDGE') trueFt = planFt // ridges are horizontal
-      else if (type === 'HIP' || type === 'VALLEY') {
-        // Hip/valley slope factor ≈ √(1 + tan²(pitch) / 2) for hip at 45° to ridge
-        const hipFactor = Math.sqrt(1 + Math.tan(pitchRad) ** 2 / 2)
-        trueFt = planFt * (hipFactor > 1 ? hipFactor : 1.05)
-      }
-      trueFt = Math.round(trueFt * 10) / 10
-
-      const mx = (tx(l.start.x) + tx(l.end.x)) / 2
-      const my = (ty(l.start.y) + ty(l.end.y)) / 2
-      let angle = Math.atan2(ty(l.end.y) - ty(l.start.y), tx(l.end.x) - tx(l.start.x)) * 180 / Math.PI
-      if (angle > 90) angle -= 180
-      if (angle < -90) angle += 180
-
-      const planLabel = `${planFt.toFixed(1)}'`
-      const trueLabel = `(${trueFt.toFixed(1)}' true)`
-      const bgW = Math.max(planLabel.length * 6 + 14, 55)
-
-      svg += `<g transform="translate(${mx.toFixed(1)},${my.toFixed(1)}) rotate(${angle.toFixed(1)})" filter="url(#label-shadow)">`
-      svg += `<rect x="${(-bgW / 2).toFixed(1)}" y="-12" width="${bgW.toFixed(1)}" height="22" rx="3" fill="rgba(50,0,0,0.85)" stroke="${color}" stroke-width="0.5"/>`
-      svg += `<text x="0" y="-1" text-anchor="middle" font-size="9" font-weight="700" fill="${color}" font-family="Inter,system-ui,sans-serif">${planLabel}</text>`
-      svg += `<text x="0" y="8" text-anchor="middle" font-size="6.5" font-weight="500" fill="#ddd" font-family="Inter,system-ui,sans-serif">${trueLabel}</text>`
-      svg += `</g>`
     })
   }
 
@@ -3680,7 +3624,7 @@ function generateAIPointByPointSVG(
     })
   }
 
-  // ── COMPASS ROSE (top-right, on dark semi-transparent circle) ──
+  // ── COMPASS ROSE (top-right) ──
   const compassX = W - 40, compassY = 40
   svg += `<circle cx="${compassX}" cy="${compassY}" r="22" fill="rgba(0,34,68,0.85)" stroke="#00e5ff" stroke-width="1"/>`
   svg += `<line x1="${compassX}" y1="${compassY + 14}" x2="${compassX}" y2="${compassY - 14}" stroke="#7eafd4" stroke-width="1.2"/>`
@@ -3688,10 +3632,23 @@ function generateAIPointByPointSVG(
   svg += `<polygon points="${compassX},${compassY - 16} ${compassX - 4},${compassY - 8} ${compassX + 4},${compassY - 8}" fill="#ff1744"/>`
   svg += `<text x="${compassX}" y="${compassY - 20}" text-anchor="middle" font-size="11" font-weight="800" fill="#fff" font-family="Inter,system-ui,sans-serif">N</text>`
 
-  // ── INFO BAR (bottom-left, total area & facets) ──
-  svg += `<rect x="10" y="${H - 36}" width="200" height="26" rx="4" fill="rgba(0,34,68,0.9)" stroke="#00e5ff" stroke-width="0.5"/>`
-  svg += `<text x="20" y="${H - 20}" font-size="9" font-weight="700" fill="#00e5ff" font-family="Inter,system-ui,sans-serif">AREA: ${totalFootprintSqft.toLocaleString()} ft² footprint</text>`
-  svg += `<text x="20" y="${H - 11}" font-size="7.5" font-weight="500" fill="#7eafd4" font-family="Inter,system-ui,sans-serif">${segments.length} facets · ${predominantPitch} pitch · ${grossSquares} sq</text>`
+  // ── SCALE BAR + INFO (bottom-left) ──
+  const scaleBarFt = 10
+  const scaleBarPx = scaleBarFt * pxPerFt
+  if (scaleBarPx > 10 && scaleBarPx < W * 0.5) {
+    const sbX = 16, sbY = H - 46
+    svg += `<line x1="${sbX}" y1="${sbY}" x2="${sbX + scaleBarPx}" y2="${sbY}" stroke="#00e5ff" stroke-width="2"/>`
+    svg += `<line x1="${sbX}" y1="${sbY - 4}" x2="${sbX}" y2="${sbY + 4}" stroke="#00e5ff" stroke-width="1.5"/>`
+    svg += `<line x1="${sbX + scaleBarPx}" y1="${sbY - 4}" x2="${sbX + scaleBarPx}" y2="${sbY + 4}" stroke="#00e5ff" stroke-width="1.5"/>`
+    svg += `<text x="${sbX + scaleBarPx / 2}" y="${sbY - 6}" text-anchor="middle" font-size="8" font-weight="700" fill="#00e5ff" font-family="Inter,system-ui,sans-serif">${scaleBarFt} ft</text>`
+  }
+
+  // Info badge
+  svg += `<rect x="10" y="${H - 36}" width="210" height="26" rx="4" fill="rgba(0,34,68,0.9)" stroke="#00e5ff" stroke-width="0.5"/>`
+  svg += `<text x="20" y="${H - 20}" font-size="9" font-weight="700" fill="#00e5ff" font-family="Inter,system-ui,sans-serif">FOOTPRINT: ${footprintSqft.toLocaleString()} ft²</text>`
+  const facetCount = aiGeometry.facets?.length || 0
+  const perimCount = aiGeometry.perimeter?.length || 0
+  svg += `<text x="20" y="${H - 11}" font-size="7.5" font-weight="500" fill="#7eafd4" font-family="Inter,system-ui,sans-serif">${facetCount} facets · ${perimCount} perimeter pts · Scale: 1 px = ${(1 / pxPerFt).toFixed(2)} ft</text>`
 
   svg += `</svg>`
   return svg
