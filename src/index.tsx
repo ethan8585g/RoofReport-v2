@@ -867,7 +867,7 @@ function getMainPageHTML(mapsApiKey: string) {
     <p class="text-sm">&copy; 2026 RoofReporterAI. All rights reserved.</p>
     <p class="text-xs mt-1">Professional Roof Measurement Reports & Business Management CRM</p>
   </footer>
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=${Date.now()}"></script>
 </body>
 </html>`
 }
@@ -2119,7 +2119,7 @@ function getCustomerOrderPageHTML(mapsApiKey: string) {
       if (!c) { window.location.href = '/customer/login'; return; }
     })();
   </script>
-  <script src="/static/customer-order.js"></script>
+  <script src="/static/customer-order.js?v=${Date.now()}"></script>
   ${getRoverWidget()}
 </body>
 </html>`
