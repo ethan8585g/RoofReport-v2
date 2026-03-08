@@ -507,6 +507,20 @@ export interface RoofReport {
   // ---- RAS YIELD ANALYSIS (RoofReporterAI value-add) ----
   ras_yield?: RASYieldAnalysis
 
+  // ---- SEGMENT EXCLUSION (Property Overlap Control) ----
+  /** Indices of segments excluded by the user (0-based, matching roofSegmentStats order).
+   *  When segments are excluded, area/material calculations are re-derived from remaining segments.
+   *  This is the "kill switch" for merged buildings — users toggle off neighbor's roof sections. */
+  excluded_segments?: number[]
+
+  /** True if Google Solar's building bounding box exceeds 60 ft (≈18m) in width or depth.
+   *  Indicates the API may have merged two adjacent buildings into one model.
+   *  When true, the UI should highlight segments for manual review. */
+  property_overlap_flag?: boolean
+
+  /** Human-readable details about why the overlap flag was raised */
+  property_overlap_details?: string[]
+
   // ---- METADATA ----
   metadata: {
     /** 'google_solar_api' or 'mock' */

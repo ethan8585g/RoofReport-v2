@@ -535,7 +535,7 @@ function renderOrdersTable(orders) {
           <td class="px-3 py-2 text-gray-500 text-xs">${fmtDate(o.created_at)}</td>
           <td class="px-3 py-2">
             <div class="flex gap-0.5">
-              ${o.status === 'completed' ? `<a href="/api/reports/${o.id}/html" target="_blank" class="p-1 text-gray-400 hover:text-blue-600" title="View Report"><i class="fas fa-file-alt"></i></a><button onclick="emailReport(${o.id})" class="p-1 text-gray-400 hover:text-green-600" title="Email"><i class="fas fa-envelope"></i></button>` : `<button onclick="generateReport(${o.id})" class="p-1 text-gray-400 hover:text-indigo-600" title="Generate"><i class="fas fa-cog"></i></button>`}
+              ${o.status === 'completed' ? `<a href="/api/reports/${o.id}/html" target="_blank" class="p-1 text-gray-400 hover:text-blue-600" title="View Report"><i class="fas fa-file-alt"></i></a><button onclick="emailReport(${o.id})" class="p-1 text-gray-400 hover:text-green-600" title="Email"><i class="fas fa-envelope"></i></button><button onclick="openSegmentToggle(${o.id})" class="p-1 text-gray-400 hover:text-orange-600" title="Toggle Segments"><i class="fas fa-layer-group"></i></button>` : `<button onclick="generateReport(${o.id})" class="p-1 text-gray-400 hover:text-indigo-600" title="Generate"><i class="fas fa-cog"></i></button>`}
             </div>
           </td>
         </tr>`).join('')}
@@ -862,6 +862,145 @@ async function emailReport(id) {
     if (r.ok && d.success) alert('Sent to ' + to + ' via ' + d.email_method);
     else alert('Failed: ' + (d.error||''));
   } catch(e) { alert('Error: ' + e.message); }
+}
+
+// ============================================================
+// SEGMENT TOGGLE — Property Overlap Kill Switch
+// ============================================================
+// Opens a modal showing all roof segments with toggle checkboxes.
+// When Google Solar returns merged buildings (bounding box > 60ft),
+// users can uncheck neighbor's segments and recalculate.
+
+async function openSegmentToggle(orderId) {
+  try {
+    const r = await fetch('/api/reports/' + orderId + '/segments');
+    if (!r.ok) { const d = await r.json(); alert('Error: ' + (d.error||'')); return; }
+    const data = await r.json();
+
+    // Build modal HTML
+    const overlapBanner = data.property_overlap_flag
+      ? `<div class="bg-amber-50 border-l-4 border-amber-500 p-3 mb-4 rounded-r">
+           <div class="flex items-center gap-2 text-amber-800 font-bold text-sm"><i class="fas fa-exclamation-triangle"></i> Potential Property Overlap Detected</div>
+           <p class="text-amber-700 text-xs mt-1">${(data.property_overlap_details||[]).join('. ')}. The Google Solar model may include a neighbor's roof. Toggle off any segments that don't belong to this property.</p>
+         </div>`
+      : '';
+
+    const segRows = data.segments.map(s => {
+      const checked = !s.excluded ? 'checked' : '';
+      const excludedClass = s.excluded ? 'opacity-50 bg-red-50' : '';
+      const dir = s.azimuth_direction || '';
+      return `<tr class="hover:bg-gray-50 transition-colors ${excludedClass}" id="seg-row-${s.index}">
+        <td class="px-3 py-2 text-center">
+          <label class="relative inline-flex items-center cursor-pointer">
+            <input type="checkbox" ${checked} onchange="toggleSegmentRow(${s.index}, this.checked)" class="sr-only peer seg-toggle" data-seg-idx="${s.index}">
+            <div class="w-9 h-5 bg-gray-300 peer-focus:ring-2 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+          </label>
+        </td>
+        <td class="px-3 py-2 text-xs font-mono">${s.index}</td>
+        <td class="px-3 py-2 text-sm font-medium text-gray-800">${s.name}</td>
+        <td class="px-3 py-2 text-sm text-right">${s.footprint_area_sqft.toLocaleString()} ft&sup2;</td>
+        <td class="px-3 py-2 text-sm text-right">${s.true_area_sqft.toLocaleString()} ft&sup2;</td>
+        <td class="px-3 py-2 text-sm text-center">${s.pitch_degrees}&deg; (${s.pitch_ratio})</td>
+        <td class="px-3 py-2 text-sm text-center">${Math.round(s.azimuth_degrees)}&deg; ${dir}</td>
+      </tr>`;
+    }).join('');
+
+    const modalHtml = `
+    <div id="segToggleModal" class="fixed inset-0 bg-black/50 z-[9999] flex items-center justify-center p-4" onclick="if(event.target===this)closeSegToggle()">
+      <div class="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[85vh] overflow-hidden flex flex-col" onclick="event.stopPropagation()">
+        <div class="px-6 py-4 border-b bg-gradient-to-r from-blue-600 to-blue-800 text-white flex items-center justify-between">
+          <div>
+            <h2 class="text-lg font-bold"><i class="fas fa-layer-group mr-2"></i>Roof Segment Toggle</h2>
+            <p class="text-blue-200 text-xs mt-0.5">Order #${orderId} &mdash; ${data.total_segments} segments (${data.active_count} active, ${data.excluded_count} excluded)</p>
+          </div>
+          <button onclick="closeSegToggle()" class="text-white/80 hover:text-white text-xl"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="overflow-auto flex-1 px-6 py-4">
+          ${overlapBanner}
+          <div class="mb-3 flex items-center justify-between">
+            <span class="text-sm text-gray-600"><i class="fas fa-info-circle mr-1 text-blue-500"></i>Toggle off segments from neighboring roofs. Area and materials will be recalculated.</span>
+            <div id="seg-summary" class="text-xs text-gray-500">
+              Footprint: <strong>${data.active_totals.footprint_sqft.toLocaleString()} ft&sup2;</strong> |
+              True Area: <strong>${data.active_totals.true_area_sqft.toLocaleString()} ft&sup2;</strong> |
+              Squares: <strong>${data.active_totals.gross_squares}</strong>
+            </div>
+          </div>
+          <table class="w-full text-left">
+            <thead><tr class="bg-gray-100 border-b">
+              <th class="px-3 py-2 text-xs font-semibold text-gray-500 text-center w-16">Active</th>
+              <th class="px-3 py-2 text-xs font-semibold text-gray-500 w-10">#</th>
+              <th class="px-3 py-2 text-xs font-semibold text-gray-500">Name</th>
+              <th class="px-3 py-2 text-xs font-semibold text-gray-500 text-right">Footprint</th>
+              <th class="px-3 py-2 text-xs font-semibold text-gray-500 text-right">True Area</th>
+              <th class="px-3 py-2 text-xs font-semibold text-gray-500 text-center">Pitch</th>
+              <th class="px-3 py-2 text-xs font-semibold text-gray-500 text-center">Azimuth</th>
+            </tr></thead>
+            <tbody>${segRows}</tbody>
+          </table>
+        </div>
+        <div class="px-6 py-3 border-t bg-gray-50 flex items-center justify-between">
+          <button onclick="closeSegToggle()" class="px-4 py-2 text-gray-600 hover:text-gray-800 text-sm">Cancel</button>
+          <button onclick="applySegmentToggle(${orderId})" id="seg-apply-btn"
+            class="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg text-sm transition-all shadow">
+            <i class="fas fa-check mr-1"></i>Apply & Recalculate
+          </button>
+        </div>
+      </div>
+    </div>`;
+
+    // Remove any existing modal
+    const existing = document.getElementById('segToggleModal');
+    if (existing) existing.remove();
+
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    window._segToggleOrderId = orderId;
+  } catch(e) {
+    alert('Error loading segments: ' + e.message);
+  }
+}
+
+function toggleSegmentRow(idx, checked) {
+  const row = document.getElementById('seg-row-' + idx);
+  if (row) {
+    row.classList.toggle('opacity-50', !checked);
+    row.classList.toggle('bg-red-50', !checked);
+  }
+}
+
+function closeSegToggle() {
+  const m = document.getElementById('segToggleModal');
+  if (m) m.remove();
+}
+
+async function applySegmentToggle(orderId) {
+  const btn = document.getElementById('seg-apply-btn');
+  const checkboxes = document.querySelectorAll('.seg-toggle');
+  const excluded = [];
+  checkboxes.forEach(cb => {
+    if (!cb.checked) excluded.push(parseInt(cb.dataset.segIdx));
+  });
+
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>Recalculating...'; }
+
+  try {
+    const r = await fetch('/api/reports/' + orderId + '/toggle-segments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ excluded_segments: excluded })
+    });
+    const d = await r.json();
+    if (r.ok && d.success) {
+      closeSegToggle();
+      alert('Report recalculated! ' + d.active_segments + ' of ' + d.total_segments + ' segments active.\nNew footprint: ' + d.updated_metrics.total_footprint_sqft.toLocaleString() + ' sqft\nNew squares: ' + d.updated_metrics.gross_squares);
+      await loadAll(); render();
+    } else {
+      alert('Failed: ' + (d.error||'Unknown error'));
+    }
+  } catch(e) {
+    alert('Error: ' + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-check mr-1"></i>Apply & Recalculate'; }
+  }
 }
 
 function emailUser(email) {

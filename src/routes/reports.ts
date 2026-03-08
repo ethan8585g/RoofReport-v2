@@ -151,6 +151,60 @@ reportsRoutes.use('/*', async (c, next) => {
 })
 
 // ============================================================
+// GET segments for toggle UI — Returns all segments with exclusion state
+// ============================================================
+reportsRoutes.get('/:orderId/segments', async (c) => {
+  try {
+    const orderId = c.req.param('orderId')
+    const report = await c.env.DB.prepare(
+      'SELECT api_response_raw FROM reports WHERE order_id = ?'
+    ).bind(orderId).first<any>()
+
+    if (!report) return c.json({ error: 'Report not found' }, 404)
+
+    let reportData: RoofReport
+    try {
+      reportData = JSON.parse(report.api_response_raw) as RoofReport
+    } catch (e) {
+      return c.json({ error: 'Cannot parse stored report data' }, 400)
+    }
+
+    const excludedSet = new Set(reportData.excluded_segments || [])
+    const segments = reportData.segments.map((seg, i) => ({
+      index: i,
+      name: seg.name,
+      footprint_area_sqft: seg.footprint_area_sqft,
+      true_area_sqft: seg.true_area_sqft,
+      pitch_degrees: seg.pitch_degrees,
+      pitch_ratio: seg.pitch_ratio,
+      azimuth_degrees: seg.azimuth_degrees,
+      azimuth_direction: seg.azimuth_direction,
+      bounding_box: seg.bounding_box || null,
+      excluded: excludedSet.has(i)
+    }))
+
+    return c.json({
+      order_id: parseInt(orderId as string),
+      total_segments: segments.length,
+      excluded_count: excludedSet.size,
+      active_count: segments.length - excludedSet.size,
+      property_overlap_flag: reportData.property_overlap_flag || false,
+      property_overlap_details: reportData.property_overlap_details || [],
+      segments,
+      // Summary of active-only calculations
+      active_totals: {
+        footprint_sqft: reportData.total_footprint_sqft,
+        true_area_sqft: reportData.total_true_area_sqft,
+        gross_squares: reportData.materials?.gross_squares || 0,
+        pitch_degrees: reportData.roof_pitch_degrees
+      }
+    })
+  } catch (err: any) {
+    return c.json({ error: 'Failed to fetch segments', details: err.message }, 500)
+  }
+})
+
+// ============================================================
 // GET report for an order
 // ============================================================
 reportsRoutes.get('/:orderId', async (c) => {
@@ -699,6 +753,192 @@ reportsRoutes.post('/:orderId/retry', async (c) => {
     })
   } catch (err: any) {
     return c.json({ error: 'Retry failed', details: err.message }, 500)
+  }
+})
+
+// ============================================================
+// SEGMENT TOGGLE — Exclude/include individual roof segments
+// ============================================================
+// The "kill switch" for merged buildings. When Google Solar API returns
+// a model that includes a neighbor's roof, users can toggle off those
+// segments. The report is recalculated using only the remaining segments.
+//
+// POST /api/reports/:orderId/toggle-segments
+// Body: { excluded_segments: [0, 5, 7] }  ← 0-based indices
+//
+// This endpoint:
+// 1. Loads the stored RoofReport JSON from api_response_raw
+// 2. Sets report.excluded_segments = the provided array
+// 3. Recalculates totals (footprint, true area, edges, materials) from remaining segments
+// 4. Regenerates the professional HTML report
+// 5. Saves everything back to the DB
+//
+// No API calls are made — this is pure recalculation from stored data.
+// Speed: <100ms (deterministic computation)
+reportsRoutes.post('/:orderId/toggle-segments', async (c) => {
+  try {
+    const orderId = c.req.param('orderId')
+    const body = await c.req.json()
+    const { excluded_segments } = body as { excluded_segments: number[] }
+
+    if (!Array.isArray(excluded_segments)) {
+      return c.json({ error: 'excluded_segments must be an array of segment indices (0-based)' }, 400)
+    }
+
+    // Validate all indices are non-negative integers
+    for (const idx of excluded_segments) {
+      if (!Number.isInteger(idx) || idx < 0) {
+        return c.json({ error: `Invalid segment index: ${idx}. Must be a non-negative integer.` }, 400)
+      }
+    }
+
+    // Load existing report data
+    const report = await c.env.DB.prepare(
+      'SELECT id, api_response_raw, professional_report_html FROM reports WHERE order_id = ?'
+    ).bind(orderId).first<any>()
+
+    if (!report) return c.json({ error: 'Report not found' }, 404)
+
+    // Parse the stored RoofReport JSON
+    let reportData: RoofReport
+    try {
+      reportData = JSON.parse(report.api_response_raw) as RoofReport
+      if (!reportData?.segments || !Array.isArray(reportData.segments)) {
+        throw new Error('No segments array in stored report')
+      }
+    } catch (e: any) {
+      return c.json({ error: 'Cannot parse stored report data', details: e.message }, 400)
+    }
+
+    // Validate indices are within range
+    const maxIdx = reportData.segments.length - 1
+    for (const idx of excluded_segments) {
+      if (idx > maxIdx) {
+        return c.json({ error: `Segment index ${idx} out of range. Report has ${reportData.segments.length} segments (0-${maxIdx}).` }, 400)
+      }
+    }
+
+    // ── APPLY SEGMENT EXCLUSIONS ──
+    const excludedSet = new Set(excluded_segments)
+    reportData.excluded_segments = excluded_segments
+
+    // Filter to only included segments
+    const activeSegments = reportData.segments.filter((_, i) => !excludedSet.has(i))
+    const excludedCount = excluded_segments.length
+    const activeCount = activeSegments.length
+
+    if (activeCount === 0) {
+      return c.json({ error: 'Cannot exclude ALL segments. At least one segment must remain.' }, 400)
+    }
+
+    console.log(`[SegmentToggle] Order ${orderId}: excluding ${excludedCount} of ${reportData.segments.length} segments → ${activeCount} active`)
+
+    // ── RECALCULATE TOTALS FROM ACTIVE SEGMENTS ──
+    const newFootprintSqft = activeSegments.reduce((s, seg) => s + seg.footprint_area_sqft, 0)
+    const newTrueAreaSqft = activeSegments.reduce((s, seg) => s + seg.true_area_sqft, 0)
+    const newTrueAreaSqm = activeSegments.reduce((s, seg) => s + seg.true_area_sqm, 0)
+    const newFootprintSqm = Math.round(newFootprintSqft * 0.0929)
+
+    // Weighted pitch from active segments only
+    const totalActiveArea = activeSegments.reduce((s, seg) => s + seg.true_area_sqft, 0)
+    const newWeightedPitch = totalActiveArea > 0
+      ? activeSegments.reduce((s, seg) => s + seg.pitch_degrees * seg.true_area_sqft, 0) / totalActiveArea
+      : reportData.roof_pitch_degrees
+
+    // Dominant azimuth from active segments
+    const largestActive = activeSegments.reduce((max, s) => s.true_area_sqft > max.true_area_sqft ? s : max, activeSegments[0])
+
+    // Recalculate edges and materials from active segments
+    const newEdges = generateEdgesFromSegments(activeSegments, newFootprintSqft)
+    const newEdgeSummary = computeEdgeSummary(newEdges)
+    const newMaterials = computeMaterialEstimate(newTrueAreaSqft, newEdges, activeSegments)
+
+    // Update report data
+    reportData.total_footprint_sqft = newFootprintSqft
+    reportData.total_footprint_sqm = newFootprintSqm
+    reportData.total_true_area_sqft = newTrueAreaSqft
+    reportData.total_true_area_sqm = Math.round(newTrueAreaSqm * 10) / 10
+    reportData.area_multiplier = Math.round((newTrueAreaSqft / (newFootprintSqft || 1)) * 1000) / 1000
+    reportData.roof_pitch_degrees = Math.round(newWeightedPitch * 10) / 10
+    reportData.roof_pitch_ratio = pitchToRatio(newWeightedPitch)
+    reportData.roof_azimuth_degrees = largestActive?.azimuth_degrees || 0
+    reportData.edges = newEdges
+    reportData.edge_summary = newEdgeSummary
+    reportData.materials = newMaterials
+
+    // Update quality notes
+    if (excludedCount > 0) {
+      const existingNotes = reportData.quality?.notes || []
+      const filteredNotes = existingNotes.filter(n => !n.includes('segments excluded'))
+      filteredNotes.push(`${excludedCount} of ${reportData.segments.length} roof segments excluded by user (indices: ${excluded_segments.join(', ')}). Measurements recalculated from ${activeCount} active segments.`)
+      reportData.quality.notes = filteredNotes
+    }
+
+    // ── REBUILD AI GEOMETRY (exclude toggled-off segments from the polygon overlay) ──
+    if (reportData.ai_geometry && reportData.ai_geometry.facets?.length > 0) {
+      // Filter out facets that correspond to excluded segments
+      // Facet IDs follow pattern "segment_N" (1-based) or "solar-seg-N" or "fN"
+      const originalFacets = reportData.ai_geometry.facets
+      const activeFacets = originalFacets.filter((facet) => {
+        // Try to extract segment index from facet ID
+        const match = facet.id.match(/segment_(\d+)/i) || facet.id.match(/solar-seg-(\d+)/i)
+        if (match) {
+          const facetIdx = parseInt(match[1]) - 1  // segment_1 → index 0
+          return !excludedSet.has(facetIdx)
+        }
+        // For Gemini-generated facets (f1, f2...), keep them all
+        // (Gemini facets don't map cleanly to Solar segments)
+        return true
+      })
+      reportData.ai_geometry.facets = activeFacets
+
+      // Rebuild perimeter from remaining facets if needed
+      // (Leave lines as-is — they'll be approximately correct)
+    }
+
+    // ── REGENERATE HTML ──
+    const professionalHtml = generateProfessionalReportHTML(reportData)
+
+    // ── SAVE ──
+    await c.env.DB.prepare(`
+      UPDATE reports SET
+        roof_area_sqft = ?, roof_area_sqm = ?,
+        roof_footprint_sqft = ?, roof_footprint_sqm = ?,
+        roof_pitch_degrees = ?,
+        roof_segments = ?,
+        professional_report_html = ?,
+        api_response_raw = ?,
+        updated_at = datetime('now')
+      WHERE order_id = ?
+    `).bind(
+      newTrueAreaSqft, newTrueAreaSqm,
+      newFootprintSqft, newFootprintSqm,
+      Math.round(newWeightedPitch * 10) / 10,
+      JSON.stringify(reportData.segments),
+      professionalHtml,
+      JSON.stringify(reportData),
+      orderId
+    ).run()
+
+    console.log(`[SegmentToggle] ✅ Order ${orderId}: recalculated with ${activeCount} segments → ${newFootprintSqft} sqft footprint, ${Math.round(newMaterials.gross_squares * 10) / 10} squares`)
+
+    return c.json({
+      success: true,
+      message: `${excludedCount} segment(s) excluded, report recalculated`,
+      excluded_segments,
+      active_segments: activeCount,
+      total_segments: reportData.segments.length,
+      updated_metrics: {
+        total_footprint_sqft: newFootprintSqft,
+        total_true_area_sqft: newTrueAreaSqft,
+        gross_squares: newMaterials.gross_squares,
+        roof_pitch_degrees: Math.round(newWeightedPitch * 10) / 10,
+        property_overlap_flag: reportData.property_overlap_flag || false
+      }
+    })
+  } catch (err: any) {
+    console.error(`[SegmentToggle] Error:`, err)
+    return c.json({ error: 'Failed to toggle segments', details: err.message }, 500)
   }
 })
 
@@ -2016,13 +2256,28 @@ async function callGoogleSolarAPI(
   orderId: number, order: any, mapsKey?: string
 ): Promise<RoofReport> {
   const imageKey = mapsKey || apiKey  // Prefer MAPS key for image APIs
+
+  // ── ENFORCE PRECISE COORDINATES (≥6 decimal places) ──
+  // 6 decimal places = ~0.11m accuracy at equator, ~0.07m at lat 53°N (Alberta).
+  // This prevents Google from snapping to the wrong building centroid, which is the
+  // #1 cause of "merged building" results where a neighbor's roof appears in the data.
+  // We preserve the original precision and ensure at least 6 decimal places in the URL.
+  const preciseLat = parseFloat(lat.toFixed(7))  // 7 decimal places = ~11mm
+  const preciseLng = parseFloat(lng.toFixed(7))
+  if (Math.abs(preciseLat) < 0.001 || Math.abs(preciseLng) < 0.001) {
+    throw new Error('Invalid coordinates: latitude and longitude must be precise (≥6 decimal places)')
+  }
+  console.log(`[SolarAPI] Using precise coordinates: lat=${preciseLat} (${lat.toString().split('.')[1]?.length || 0} → 7 decimals), lng=${preciseLng}`)
+
   // Optimal API parameters from deep research:
   // - requiredQuality=HIGH: 0.1m/pixel resolution from low-altitude aerial imagery
   // - This gives us 98.77% accuracy validated against industry benchmarks
   // - DSM (Digital Surface Model) always at 0.1m/pixel regardless of quality setting
   // - pitchDegrees from API: 0-90° range, direct slope measurement
+  // - PREFER 404 over low-quality data — we'd rather fall back to GPT Vision than get
+  //   a blobby outline from MEDIUM/BASE quality imagery
   // Cost: ~$0.075/query vs $50-200 for EagleView professional reports
-  const url = `https://solar.googleapis.com/v1/buildingInsights:findClosest?location.latitude=${lat}&location.longitude=${lng}&requiredQuality=HIGH&key=${apiKey}`
+  const url = `https://solar.googleapis.com/v1/buildingInsights:findClosest?location.latitude=${preciseLat}&location.longitude=${preciseLng}&requiredQuality=HIGH&key=${apiKey}`
 
   const response = await fetch(url)
   if (!response.ok) {
@@ -2035,6 +2290,46 @@ async function callGoogleSolarAPI(
 
   if (!solarPotential) {
     throw new Error('No solar potential data returned for this location')
+  }
+
+  // ── BOUNDING BOX OVERLAP DETECTION ──
+  // Google Solar API sometimes returns a merged model that includes neighboring buildings.
+  // If the building bounding box width or depth > 60 ft (≈18.288m), flag as overlap.
+  // At lat ~53°N (Alberta): 1° lat ≈ 111,320m, 1° lng ≈ 66,700m
+  const OVERLAP_THRESHOLD_M = 18.288  // 60 feet in meters
+  let propertyOverlapFlag = false
+  let overlapDetails: string[] = []
+
+  if (data.boundingBox) {
+    const bb = data.boundingBox
+    const swLat = bb.sw?.latitude || bb.southWest?.latitude
+    const swLng = bb.sw?.longitude || bb.southWest?.longitude
+    const neLat = bb.ne?.latitude || bb.northEast?.latitude
+    const neLng = bb.ne?.longitude || bb.northEast?.longitude
+
+    if (swLat && swLng && neLat && neLng) {
+      const latDiffM = Math.abs(neLat - swLat) * 111320  // meters N-S
+      const lngDiffM = Math.abs(neLng - swLng) * 111320 * Math.cos(preciseLat * Math.PI / 180)  // meters E-W
+
+      const widthFt = Math.round(lngDiffM * 3.28084)
+      const depthFt = Math.round(latDiffM * 3.28084)
+
+      console.log(`[SolarAPI] Building bounding box: ${widthFt} ft wide × ${depthFt} ft deep (${Math.round(lngDiffM)}m × ${Math.round(latDiffM)}m)`)
+
+      if (latDiffM > OVERLAP_THRESHOLD_M) {
+        propertyOverlapFlag = true
+        overlapDetails.push(`Depth ${depthFt} ft (${Math.round(latDiffM)}m) exceeds 60 ft threshold`)
+      }
+      if (lngDiffM > OVERLAP_THRESHOLD_M) {
+        propertyOverlapFlag = true
+        overlapDetails.push(`Width ${widthFt} ft (${Math.round(lngDiffM)}m) exceeds 60 ft threshold`)
+      }
+
+      if (propertyOverlapFlag) {
+        console.warn(`[SolarAPI] ⚠️ POTENTIAL PROPERTY OVERLAP detected for order ${orderId}: ${overlapDetails.join('; ')}`)
+        console.warn(`[SolarAPI] → The Google Solar model may include a neighbor's roof. Segment toggle recommended.`)
+      }
+    }
   }
 
   // ── BUILD AI GEOMETRY FROM SOLAR API DATA ──
@@ -2060,6 +2355,7 @@ async function callGoogleSolarAPI(
   }
 
   // Parse roof segments from Google's roofSegmentStats
+  // Include bounding_box for each segment so the UI can display and toggle them
   const rawSegments = solarPotential.roofSegmentStats || []
   const segments: RoofSegment[] = rawSegments.map((seg: any, i: number) => {
     const pitchDeg = seg.pitchDegrees || 0
@@ -2068,6 +2364,16 @@ async function callGoogleSolarAPI(
     const footprintSqft = footprintSqm * 10.7639
     const trueAreaSqft = trueAreaFromFootprint(footprintSqft, pitchDeg)
     const trueAreaSqm = trueAreaFromFootprint(footprintSqm, pitchDeg)
+
+    // Extract bounding box [minLat, minLng, maxLat, maxLng] for segment toggle UI
+    let boundingBox: number[] | undefined
+    if (seg.boundingBox) {
+      const bb = seg.boundingBox
+      boundingBox = [
+        bb.sw?.latitude || 0, bb.sw?.longitude || 0,
+        bb.ne?.latitude || 0, bb.ne?.longitude || 0
+      ]
+    }
 
     return {
       name: `Segment ${i + 1}`,
@@ -2078,7 +2384,8 @@ async function callGoogleSolarAPI(
       pitch_ratio: pitchToRatio(pitchDeg),
       azimuth_degrees: Math.round(azimuthDeg * 10) / 10,
       azimuth_direction: degreesToCardinal(azimuthDeg),
-      plane_height_meters: seg.planeHeightAtCenterMeters || undefined
+      plane_height_meters: seg.planeHeightAtCenterMeters || undefined,
+      bounding_box: boundingBox
     }
   })
 
@@ -2206,12 +2513,27 @@ async function callGoogleSolarAPI(
     // Gemini can override this later with higher-quality vision-based geometry.
     ai_geometry: solarGeometry || undefined,
 
+    // ── PROPERTY OVERLAP DETECTION ──
+    // If Google Solar's building bounding box exceeds 60 ft in any dimension,
+    // the model likely includes a neighbor's roof. Flag it for the user.
+    excluded_segments: [],  // No segments excluded initially — user toggles via UI
+    property_overlap_flag: propertyOverlapFlag,
+    property_overlap_details: overlapDetails.length > 0 ? overlapDetails : undefined,
+
     quality: {
       imagery_quality: imageryQuality as any,
       imagery_date: imageryDate,
-      field_verification_recommended: imageryQuality !== 'HIGH',
-      confidence_score: imageryQuality === 'HIGH' ? (solarGeometry ? 95 : 90) : imageryQuality === 'MEDIUM' ? 75 : 60,
-      notes: qualityNotes
+      field_verification_recommended: imageryQuality !== 'HIGH' || propertyOverlapFlag,
+      confidence_score: propertyOverlapFlag
+        ? Math.min(imageryQuality === 'HIGH' ? (solarGeometry ? 85 : 80) : 65, 85)  // Lower confidence when overlap detected
+        : (imageryQuality === 'HIGH' ? (solarGeometry ? 95 : 90) : imageryQuality === 'MEDIUM' ? 75 : 60),
+      notes: [
+        ...qualityNotes,
+        ...(propertyOverlapFlag ? [
+          `⚠️ POTENTIAL PROPERTY OVERLAP: ${overlapDetails.join('. ')}`,
+          'Google Solar API may include neighboring roof segments. Review segments and toggle off any that don\'t belong to this property.'
+        ] : [])
+      ]
     },
     metadata: {
       provider: 'google_solar_api',
@@ -3005,6 +3327,8 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
       <span style="padding:3px 10px;border-radius:3px;font-size:8px;font-weight:700;background:#f1f5f9;color:#475569;border:1px solid #c5cdd9">${providerLabel}</span>
       <span style="padding:3px 10px;border-radius:3px;font-size:8px;font-weight:700;background:${quality.confidence_score >= 90 ? '#ecfdf5' : quality.confidence_score >= 75 ? '#fffbeb' : '#fef2f2'};color:${quality.confidence_score >= 90 ? '#059669' : quality.confidence_score >= 75 ? '#d97706' : '#dc2626'};border:1px solid ${quality.confidence_score >= 90 ? '#6ee7b7' : quality.confidence_score >= 75 ? '#fcd34d' : '#fca5a5'}">CONFIDENCE: ${quality.confidence_score}%</span>
       ${report.ai_geometry?.facets?.length ? `<span style="padding:3px 10px;border-radius:3px;font-size:8px;font-weight:700;background:#ecfdf5;color:#059669;border:1px solid #6ee7b7">AI OVERLAY: ${report.ai_geometry.facets.length} FACETS</span>` : ''}
+      ${report.property_overlap_flag ? `<span style="padding:3px 10px;border-radius:3px;font-size:8px;font-weight:700;background:#fffbeb;color:#b45309;border:1px solid #fbbf24">&#9888; POTENTIAL OVERLAP</span>` : ''}
+      ${(report.excluded_segments?.length || 0) > 0 ? `<span style="padding:3px 10px;border-radius:3px;font-size:8px;font-weight:700;background:#f0f9ff;color:#0369a1;border:1px solid #7dd3fc">${report.excluded_segments!.length} SEGMENTS EXCLUDED</span>` : ''}
     </div>
   </div>
 
