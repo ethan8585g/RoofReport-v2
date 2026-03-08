@@ -14,6 +14,39 @@ import {
 import { buildSolarGeometry, extractSolarGeometryData, getZoomForFootprint } from './solar-geometry'
 import type { SolarBuildingInsights } from './solar-geometry'
 
+/**
+ * Compute the area of a geographic polygon (array of {lat, lng} points) in square feet.
+ * Uses the Shoelace formula on projected coordinates (meters) then converts to sqft.
+ * Accurate for building-scale polygons (< 1 km).
+ */
+function computeGeoPolygonAreaSqft(points: { lat: number; lng: number }[]): number {
+  if (points.length < 3) return 0
+  // Project to local meters using center of polygon as origin
+  const cLat = points.reduce((s, p) => s + p.lat, 0) / points.length
+  const cLng = points.reduce((s, p) => s + p.lng, 0) / points.length
+  const cosLat = Math.cos(cLat * Math.PI / 180)
+  const M_PER_DEG_LAT = 111320
+  const M_PER_DEG_LNG = 111320 * cosLat
+
+  const projected = points.map(p => ({
+    x: (p.lng - cLng) * M_PER_DEG_LNG,
+    y: (p.lat - cLat) * M_PER_DEG_LAT
+  }))
+
+  // Shoelace formula for polygon area
+  let areaM2 = 0
+  const n = projected.length
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n
+    areaM2 += projected[i].x * projected[j].y
+    areaM2 -= projected[j].x * projected[i].y
+  }
+  areaM2 = Math.abs(areaM2) / 2
+
+  // Convert m² to sqft (1 m² = 10.7639 sqft)
+  return areaM2 * 10.7639
+}
+
 export function generateEnhancedImagery(lat: number, lng: number, apiKey: string, footprintSqft: number = 1500) {
   // Calculate zoom based on roof size — TIGHT on the roof for measurement.
   // Google Maps zoom at scale=2 (1280px actual):
@@ -495,11 +528,39 @@ export async function callGoogleSolarAPI(
   const wholeRoofAreaM2 = solarPotential.wholeRoofStats?.areaMeters2 || 0
   const wholeRoofFootprintSqft = wholeRoofAreaM2 * 10.7639
 
-  // Decide final footprint: prefer wholeRoofStats when it's larger than segment sum
-  // This fixes the consistent 20-35% undercount from buildingInsights segment data
+  // ── USER-TRACED EAVES POLYGON AREA OVERRIDE ──
+  // When the user has manually traced the eaves outline on satellite imagery,
+  // compute the polygon area and use it as the most authoritative footprint.
+  // This fixes inaccuracy where Google's buildingInsights merges neighbor roofs
+  // or under-counts area from small/complex buildings.
+  let tracedFootprintSqft = 0
+  if (order.roof_trace_json) {
+    try {
+      const trace = typeof order.roof_trace_json === 'string' ? JSON.parse(order.roof_trace_json) : order.roof_trace_json
+      if (trace.eaves && trace.eaves.length >= 3) {
+        tracedFootprintSqft = computeGeoPolygonAreaSqft(trace.eaves)
+        console.log(`[SolarAPI] User-traced eaves polygon area: ${Math.round(tracedFootprintSqft)} sqft (${trace.eaves.length} vertices)`)
+      }
+    } catch (e: any) {
+      console.warn(`[SolarAPI] Failed to compute traced polygon area:`, e.message)
+    }
+  }
+
+  // Decide final footprint: priority order:
+  // 1. User-traced eaves polygon (most accurate - directly measured by human on satellite)
+  // 2. wholeRoofStats (Google's total model)
+  // 3. Segment sum (least accurate)
   let totalFootprintSqft: number
   let areaScaleApplied = false
-  if (wholeRoofFootprintSqft > segmentSumFootprintSqft * 1.05 && wholeRoofFootprintSqft > 200) {
+  let areaSourceLabel = 'segment_sum'
+
+  if (tracedFootprintSqft > 200 && tracedFootprintSqft > segmentSumFootprintSqft * 0.7) {
+    // User-traced polygon is our best source
+    totalFootprintSqft = Math.round(tracedFootprintSqft)
+    areaScaleApplied = segmentSumFootprintSqft > 0 && Math.abs(totalFootprintSqft - segmentSumFootprintSqft) / segmentSumFootprintSqft > 0.05
+    areaSourceLabel = 'user_traced_eaves'
+    console.log(`[SolarAPI] Using USER-TRACED eaves area: ${totalFootprintSqft} sqft (vs wholeRoof=${Math.round(wholeRoofFootprintSqft)}, segmentSum=${segmentSumFootprintSqft})`)
+  } else if (wholeRoofFootprintSqft > segmentSumFootprintSqft * 1.05 && wholeRoofFootprintSqft > 200) {
     // wholeRoofStats is meaningfully larger — use it as the true footprint
     totalFootprintSqft = Math.round(wholeRoofFootprintSqft)
     areaScaleApplied = true
@@ -560,7 +621,11 @@ export async function callGoogleSolarAPI(
     qualityNotes.push(`Imagery quality is ${imageryQuality}. HIGH quality (0.1m/px) recommended for exact material orders.`)
   }
   if (areaScaleApplied) {
-    qualityNotes.push(`Roof area corrected using wholeRoofStats (${Math.round(wholeRoofFootprintSqft)} sqft) — segment sum was ${segmentSumFootprintSqft} sqft (+${Math.round((wholeRoofFootprintSqft / segmentSumFootprintSqft - 1) * 100)}% correction).`)
+    if (areaSourceLabel === 'user_traced_eaves') {
+      qualityNotes.push(`Roof area validated using user-traced eaves polygon (${totalFootprintSqft} sqft) — segment sum was ${segmentSumFootprintSqft} sqft. Traced outline provides highest accuracy.`)
+    } else {
+      qualityNotes.push(`Roof area corrected using wholeRoofStats (${Math.round(wholeRoofFootprintSqft)} sqft) — segment sum was ${segmentSumFootprintSqft} sqft (+${Math.round((wholeRoofFootprintSqft / segmentSumFootprintSqft - 1) * 100)}% correction).`)
+    }
   }
   if (segments.length < 2) {
     qualityNotes.push('Low segment count may indicate incomplete building model.')

@@ -515,6 +515,8 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
 
 <!-- Pages 7-10 and Legal Disclaimer removed — report truncated to 6 pages -->
 
+${report.customer_price_per_bundle ? buildCustomerPricingHTML(report) : ''}
+
 ${report.vision_findings ? buildVisionFindingsHTML(report.vision_findings) : ''}
 
 <script>
@@ -699,4 +701,111 @@ export function generatePerimeterSideData(
 
   const totalFt = Math.round(sides.reduce((s, side) => s + side.ft, 0) * 10) / 10
   return { sides, totalFt }
+}
+
+// ============================================================
+// Customer Pricing Estimate — Page Section
+// Shows cost estimate based on customer-provided price per bundle
+// ============================================================
+function buildCustomerPricingHTML(report: RoofReport): string {
+  const pricePerBundle = report.customer_price_per_bundle || 0
+  const grossSquares = report.customer_gross_squares || 0
+  const totalCost = report.customer_total_cost_estimate || 0
+  const trueArea = report.total_true_area_sqft || 0
+  const netSquares = Math.round(trueArea / 100 * 10) / 10
+  const wasteArea = Math.round(trueArea * 0.15)
+
+  return `
+<div style="page-break-before:always;max-width:1050px;margin:0 auto;padding:35px 40px;font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:#fff">
+  <!-- Header -->
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;padding-bottom:16px;border-bottom:3px solid #f59e0b">
+    <div>
+      <div style="font-size:18px;font-weight:900;color:#92400e;letter-spacing:0.3px">
+        <span style="display:inline-block;width:28px;height:28px;background:#f59e0b;color:white;text-align:center;line-height:28px;border-radius:4px;font-size:14px;margin-right:8px">$</span>
+        CUSTOMER COST ESTIMATE
+      </div>
+      <div style="font-size:10px;color:#92400e;margin-top:4px;font-weight:500">Roof Replacement Pricing — Based on Client-Provided Rate</div>
+    </div>
+    <div style="text-align:right">
+      <div style="font-size:9px;color:#6b7a8d;text-transform:uppercase;letter-spacing:0.5px">Property</div>
+      <div style="font-size:11px;font-weight:700;color:#003366">${report.property?.address || ''}</div>
+    </div>
+  </div>
+
+  <!-- Summary Cards -->
+  <div style="display:flex;gap:16px;margin-bottom:24px">
+    <!-- Net Roof Area -->
+    <div style="flex:1;background:linear-gradient(135deg,#fef3c7,#fde68a);border-radius:10px;padding:18px;text-align:center;border:1px solid #f59e0b30">
+      <div style="font-size:9px;color:#92400e;font-weight:700;text-transform:uppercase;letter-spacing:0.8px">Net Roof Area</div>
+      <div style="font-size:26px;font-weight:900;color:#92400e;margin:6px 0">${trueArea.toLocaleString()}</div>
+      <div style="font-size:10px;color:#b45309">sq ft</div>
+    </div>
+    <!-- Waste Allowance -->
+    <div style="flex:1;background:linear-gradient(135deg,#fff7ed,#fed7aa);border-radius:10px;padding:18px;text-align:center;border:1px solid #f59e0b30">
+      <div style="font-size:9px;color:#92400e;font-weight:700;text-transform:uppercase;letter-spacing:0.8px">15% Waste Allowance</div>
+      <div style="font-size:26px;font-weight:900;color:#ea580c;margin:6px 0">+${wasteArea.toLocaleString()}</div>
+      <div style="font-size:10px;color:#b45309">sq ft</div>
+    </div>
+    <!-- Gross Squares -->
+    <div style="flex:1;background:linear-gradient(135deg,#f59e0b,#d97706);border-radius:10px;padding:18px;text-align:center;color:white">
+      <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;opacity:0.85">Total Squares</div>
+      <div style="font-size:26px;font-weight:900;margin:6px 0">${grossSquares}</div>
+      <div style="font-size:10px;opacity:0.85">(with 15% waste)</div>
+    </div>
+    <!-- Price Per Square -->
+    <div style="flex:1;background:linear-gradient(135deg,#eef2ff,#c7d2fe);border-radius:10px;padding:18px;text-align:center;border:1px solid #818cf830">
+      <div style="font-size:9px;color:#3730a3;font-weight:700;text-transform:uppercase;letter-spacing:0.8px">Rate Per Square</div>
+      <div style="font-size:26px;font-weight:900;color:#4338ca;margin:6px 0">$${pricePerBundle.toLocaleString()}</div>
+      <div style="font-size:10px;color:#6366f1">CAD</div>
+    </div>
+  </div>
+
+  <!-- Total Cost Estimate -->
+  <div style="background:linear-gradient(135deg,#1e3a5f,#0f172a);border-radius:12px;padding:28px 32px;color:white;text-align:center;margin-bottom:24px;position:relative;overflow:hidden">
+    <div style="position:absolute;top:-20px;right:-20px;width:120px;height:120px;background:rgba(245,158,11,0.15);border-radius:50%"></div>
+    <div style="position:absolute;bottom:-30px;left:-10px;width:80px;height:80px;background:rgba(245,158,11,0.1);border-radius:50%"></div>
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;opacity:0.7;margin-bottom:8px">Estimated Roof Replacement Cost</div>
+    <div style="font-size:48px;font-weight:900;color:#fbbf24;text-shadow:0 2px 8px rgba(0,0,0,0.3)">$${totalCost.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+    <div style="font-size:12px;margin-top:6px;opacity:0.6">Canadian Dollars (CAD)</div>
+  </div>
+
+  <!-- Calculation Breakdown -->
+  <div style="background:#f8fafc;border-radius:10px;border:1px solid #e2e8f0;padding:20px;margin-bottom:20px">
+    <div style="font-size:12px;font-weight:700;color:#334155;margin-bottom:12px">
+      <span style="display:inline-block;width:18px;height:18px;background:#f59e0b;color:white;text-align:center;line-height:18px;border-radius:3px;font-size:10px;margin-right:6px">&#8614;</span>
+      Calculation Breakdown
+    </div>
+    <table style="width:100%;font-size:11px;border-collapse:collapse">
+      <tr style="border-bottom:1px solid #e2e8f0">
+        <td style="padding:8px 0;color:#64748b">Net Roof Area (3D true area)</td>
+        <td style="padding:8px 0;text-align:right;font-weight:700;color:#334155">${trueArea.toLocaleString()} sq ft</td>
+      </tr>
+      <tr style="border-bottom:1px solid #e2e8f0">
+        <td style="padding:8px 0;color:#64748b">Net Squares (area \u00F7 100)</td>
+        <td style="padding:8px 0;text-align:right;font-weight:700;color:#334155">${netSquares}</td>
+      </tr>
+      <tr style="border-bottom:1px solid #e2e8f0">
+        <td style="padding:8px 0;color:#64748b">Waste Factor</td>
+        <td style="padding:8px 0;text-align:right;font-weight:700;color:#ea580c">+15%</td>
+      </tr>
+      <tr style="border-bottom:1px solid #e2e8f0">
+        <td style="padding:8px 0;color:#64748b">Gross Squares (with waste)</td>
+        <td style="padding:8px 0;text-align:right;font-weight:700;color:#334155">${grossSquares}</td>
+      </tr>
+      <tr style="border-bottom:1px solid #e2e8f0">
+        <td style="padding:8px 0;color:#64748b">Price Per Square (client rate)</td>
+        <td style="padding:8px 0;text-align:right;font-weight:700;color:#4338ca">$${pricePerBundle.toLocaleString()} CAD</td>
+      </tr>
+      <tr style="background:#f1f5f9">
+        <td style="padding:10px 0;font-weight:800;color:#0f172a;font-size:12px">TOTAL ESTIMATED COST</td>
+        <td style="padding:10px 0;text-align:right;font-weight:900;color:#d97706;font-size:14px">$${totalCost.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} CAD</td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- Disclaimer -->
+  <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:14px 16px;font-size:9px;color:#92400e;line-height:1.6">
+    <strong style="font-size:10px">ESTIMATE DISCLAIMER:</strong> This cost estimate is based on the client-provided rate of $${pricePerBundle}/square and AI-measured roof area with 15% waste factor. Actual costs may vary depending on: roof complexity, existing material removal, structural repairs, flashing details, code requirements, and regional pricing. This estimate does not include additional materials (underlayment, flashing, vents, etc.). A professional on-site assessment is recommended for a final quote.
+  </div>
+</div>`
 }

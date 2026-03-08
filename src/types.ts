@@ -441,6 +441,23 @@ export interface RoofReport {
   // ---- MATERIAL ESTIMATE (Section 5) ----
   materials: MaterialEstimate
 
+  // ---- CUSTOMER PRICING (Section 6 — optional) ----
+  /** Price per roofing square (bundle) in CAD, as input by the customer/roofer */
+  customer_price_per_bundle?: number | null
+  /** Computed: total squares with 15% waste */
+  customer_gross_squares?: number
+  /** Computed: customer_price_per_bundle × customer_gross_squares */
+  customer_total_cost_estimate?: number
+
+  // ---- USER-DRAWN ROOF TRACE (optional — enhances Solar API accuracy) ----
+  roof_trace?: {
+    eaves: { lat: number; lng: number }[]
+    ridges: { lat: number; lng: number }[][]
+    hips: { lat: number; lng: number }[][]
+    valleys: { lat: number; lng: number }[][]
+    traced_at: string
+  } | null
+
   // ---- SOLAR DATA ----
   max_sunshine_hours: number
   num_panels_possible: number

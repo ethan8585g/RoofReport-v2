@@ -278,6 +278,111 @@ reportsRoutes.post('/:orderId/enhance', async (c) => {
 })
 
 // ============================================================
+// POST /:orderId/trace-insights — Compile traced coordinates for
+// Solar API roofSegmentStats-focused analysis
+// ============================================================
+reportsRoutes.post('/:orderId/trace-insights', async (c) => {
+  const orderId = c.req.param('orderId')
+  const order = await repo.getOrderById(c.env.DB, orderId)
+  if (!order) return c.json({ error: 'Order not found' }, 404)
+
+  if (!order.roof_trace_json) {
+    return c.json({ error: 'No roof trace data found for this order. User must trace the roof outline first.' }, 400)
+  }
+
+  const trace = typeof order.roof_trace_json === 'string' ? JSON.parse(order.roof_trace_json) : order.roof_trace_json
+
+  if (!trace.eaves || trace.eaves.length < 3) {
+    return c.json({ error: 'Invalid trace data — eaves polygon requires at least 3 points' }, 400)
+  }
+
+  // Compute polygon area from eaves outline
+  const eavePoints = trace.eaves as { lat: number; lng: number }[]
+  const cLat = eavePoints.reduce((s: number, p: { lat: number }) => s + p.lat, 0) / eavePoints.length
+  const cLng = eavePoints.reduce((s: number, p: { lng: number }) => s + p.lng, 0) / eavePoints.length
+  const cosLat = Math.cos(cLat * Math.PI / 180)
+  const M_PER_DEG_LAT = 111320
+  const M_PER_DEG_LNG = 111320 * cosLat
+
+  const projected = eavePoints.map(p => ({
+    x: (p.lng - cLng) * M_PER_DEG_LNG,
+    y: (p.lat - cLat) * M_PER_DEG_LAT
+  }))
+
+  let areaM2 = 0
+  const n = projected.length
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n
+    areaM2 += projected[i].x * projected[j].y
+    areaM2 -= projected[j].x * projected[i].y
+  }
+  areaM2 = Math.abs(areaM2) / 2
+  const areaSqft = Math.round(areaM2 * 10.7639)
+
+  // Compute perimeter from eaves outline
+  let perimeterM = 0
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n
+    const dx = projected[j].x - projected[i].x
+    const dy = projected[j].y - projected[i].y
+    perimeterM += Math.sqrt(dx * dx + dy * dy)
+  }
+  const perimeterFt = Math.round(perimeterM * 3.28084)
+
+  // Count ridge/hip/valley lines and compute their total lengths
+  const computeLineLength = (line: { lat: number; lng: number }[]) => {
+    if (line.length < 2) return 0
+    let len = 0
+    for (let i = 0; i < line.length - 1; i++) {
+      const dx = (line[i + 1].lng - line[i].lng) * M_PER_DEG_LNG
+      const dy = (line[i + 1].lat - line[i].lat) * M_PER_DEG_LAT
+      len += Math.sqrt(dx * dx + dy * dy)
+    }
+    return len
+  }
+
+  const ridgeLengthFt = Math.round((trace.ridges || []).reduce((s: number, l: any) => s + computeLineLength(l), 0) * 3.28084)
+  const hipLengthFt = Math.round((trace.hips || []).reduce((s: number, l: any) => s + computeLineLength(l), 0) * 3.28084)
+  const valleyLengthFt = Math.round((trace.valleys || []).reduce((s: number, l: any) => s + computeLineLength(l), 0) * 3.28084)
+
+  // Build structured roof insights from traced geometry
+  const insights = {
+    order_id: orderId,
+    source: 'user_traced',
+    traced_at: trace.traced_at,
+    eaves_polygon: {
+      vertices: eavePoints.length,
+      area_m2: Math.round(areaM2 * 100) / 100,
+      area_sqft: areaSqft,
+      perimeter_m: Math.round(perimeterM * 100) / 100,
+      perimeter_ft: perimeterFt,
+      center: { lat: cLat, lng: cLng }
+    },
+    edge_summary: {
+      ridge_count: (trace.ridges || []).length,
+      ridge_total_ft: ridgeLengthFt,
+      hip_count: (trace.hips || []).length,
+      hip_total_ft: hipLengthFt,
+      valley_count: (trace.valleys || []).length,
+      valley_total_ft: valleyLengthFt,
+      eave_total_ft: perimeterFt,
+      total_linear_ft: ridgeLengthFt + hipLengthFt + valleyLengthFt + perimeterFt
+    },
+    // Estimate segment count from traced geometry
+    estimated_segment_count: Math.max(2, (trace.ridges?.length || 0) * 2 + (trace.hips?.length || 0)),
+    // This data is designed to enhance or override Google Solar API buildingInsights
+    solar_api_override: {
+      use_traced_footprint: true,
+      footprint_area_sqft: areaSqft,
+      footprint_area_m2: Math.round(areaM2 * 100) / 100,
+      coordinates: { lat: order.latitude, lng: order.longitude }
+    }
+  }
+
+  return c.json({ success: true, insights })
+})
+
+// ============================================================
 // POST /:orderId/generate-enhanced — DataLayers + GeoTIFF pipeline
 // ============================================================
 reportsRoutes.post('/:orderId/generate-enhanced', async (c) => {
@@ -628,6 +733,29 @@ export async function generateReportForOrder(
     if (mergedVision) {
       reportData.vision_findings = mergedVision
       if (mergedVision.heat_score.total >= 60) { reportData.quality.confidence_score = Math.min(reportData.quality.confidence_score, 70); reportData.quality.field_verification_recommended = true }
+    }
+
+    // ── CUSTOMER PRICING & ROOF TRACE INJECTION ──
+    // Parse roof_trace_json from order (if user traced the roof outline)
+    if (order.roof_trace_json) {
+      try {
+        const traceData = typeof order.roof_trace_json === 'string' ? JSON.parse(order.roof_trace_json) : order.roof_trace_json
+        reportData.roof_trace = traceData
+        console.log(`[Generate] Order ${orderId}: roof trace included (${traceData.eaves?.length || 0} eave pts, ${traceData.ridges?.length || 0} ridges, ${traceData.hips?.length || 0} hips)`)
+      } catch (e: any) {
+        console.warn(`[Generate] Order ${orderId}: Failed to parse roof_trace_json:`, e.message)
+      }
+    }
+
+    // Compute customer cost estimate: total squares with 15% waste × price per bundle
+    if (order.price_per_bundle && order.price_per_bundle > 0) {
+      const trueArea = reportData.total_true_area_sqft || 0
+      const wasteMultiplier = 1.15  // 15% waste
+      const grossSquares = Math.ceil((trueArea * wasteMultiplier) / 100 * 10) / 10
+      reportData.customer_price_per_bundle = parseFloat(order.price_per_bundle)
+      reportData.customer_gross_squares = grossSquares
+      reportData.customer_total_cost_estimate = Math.round(grossSquares * parseFloat(order.price_per_bundle) * 100) / 100
+      console.log(`[Generate] Order ${orderId}: Customer pricing — $${order.price_per_bundle}/sq × ${grossSquares} squares = $${reportData.customer_total_cost_estimate} CAD`)
     }
 
     console.log(`[Generate] Order ${orderId}: generating HTML report...`)

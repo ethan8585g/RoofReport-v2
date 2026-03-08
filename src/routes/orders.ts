@@ -49,7 +49,8 @@ ordersRoutes.post('/', async (c) => {
       latitude, longitude,
       homeowner_name, homeowner_phone, homeowner_email,
       requester_name, requester_company, requester_email, requester_phone,
-      service_tier, customer_company_id, notes
+      service_tier, customer_company_id, notes,
+      roof_trace_json, price_per_bundle
     } = body
 
     // Validate required fields
@@ -73,15 +74,18 @@ ordersRoutes.post('/', async (c) => {
         latitude, longitude,
         homeowner_name, homeowner_phone, homeowner_email,
         requester_name, requester_company, requester_email, requester_phone,
-        service_tier, price, status, payment_status, estimated_delivery, notes
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'unpaid', ?, ?)
+        service_tier, price, status, payment_status, estimated_delivery, notes,
+        roof_trace_json, price_per_bundle
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'unpaid', ?, ?, ?, ?)
     `).bind(
       orderNumber, masterCompanyId, customer_company_id || null,
       property_address, property_city || null, property_province || null, property_postal_code || null,
       latitude || null, longitude || null,
       homeowner_name, homeowner_phone || null, homeowner_email || null,
       requester_name, requester_company || null, requester_email || null, requester_phone || null,
-      service_tier, price, estimatedDelivery, notes || null
+      service_tier, price, estimatedDelivery, notes || null,
+      roof_trace_json ? (typeof roof_trace_json === 'string' ? roof_trace_json : JSON.stringify(roof_trace_json)) : null,
+      price_per_bundle || null
     ).run()
 
     // Log the activity

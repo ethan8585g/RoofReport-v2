@@ -10,7 +10,7 @@ const API = '';
 const state = {
   currentStep: 1,
   totalSteps: 5,
-  // Step 2 has two phases: 'address' (autocomplete + form) and 'pin' (satellite roof targeting)
+  // Step 2 has three phases: 'address' (autocomplete + form), 'pin' (satellite roof targeting), 'trace' (draw eaves/ridges)
   addressPhase: 'address',
   formData: {
     // Step 1: Service Tier
@@ -26,6 +26,8 @@ const state = {
     longitude: null,
     pinPlaced: false,
     addressConfirmed: false,
+    // Step 2 Phase C: Roof Tracing
+    roof_trace_json: null,
     // Step 3: Homeowner
     homeowner_name: '',
     homeowner_phone: '',
@@ -36,8 +38,9 @@ const state = {
     requester_email: '',
     requester_phone: '',
     customer_company_id: null,
-    // Step 5: Review
-    notes: ''
+    // Step 5: Review + Pricing
+    notes: '',
+    price_per_bundle: null
   },
   customerCompanies: [],
   // Map instances (separate for each phase)
@@ -47,6 +50,17 @@ const state = {
   pinMap: null,
   pinMarker: null,
   geocoder: null,
+  // Tracing state
+  traceMap: null,
+  traceMode: 'eaves', // 'eaves', 'ridge', 'hip', 'valley'
+  traceEavesPoints: [],
+  traceRidgeLines: [],
+  traceHipLines: [],
+  traceValleyLines: [],
+  traceCurrentLine: [],
+  tracePolylines: [],
+  traceEavesPolygon: null,
+  traceMarkers: [],
   dbInitialized: false,
   submitting: false
 };
@@ -119,19 +133,23 @@ function render() {
     setTimeout(() => {
       if (state.addressPhase === 'address') {
         initAddressMap();
-      } else {
+      } else if (state.addressPhase === 'pin') {
         initPinMap();
+      } else if (state.addressPhase === 'trace') {
+        initTraceMap();
       }
     }, 100);
   }
 }
 
 function renderNavButtons() {
-  // Step 2 has special back logic (pin phase goes back to address phase)
+  // Step 2 has special back logic (pin→address, trace→pin)
   const showBack = state.currentStep > 1;
   let backAction = 'prevStep()';
   if (state.currentStep === 2 && state.addressPhase === 'pin') {
     backAction = 'backToAddressPhase()';
+  } else if (state.currentStep === 2 && state.addressPhase === 'trace') {
+    backAction = 'backToPinPhase()';
   }
 
   // Step 2 address phase: "Next" is replaced by "Confirm & Pin Roof" inside the step
@@ -252,6 +270,9 @@ function selectTier(tier, price) {
 // Phase B: Satellite Roof Pin Confirmation
 // ============================================================
 function renderStep2() {
+  if (state.addressPhase === 'trace') {
+    return renderStep2TracePhase();
+  }
   if (state.addressPhase === 'pin') {
     return renderStep2PinPhase();
   }
@@ -273,12 +294,16 @@ function renderStep2AddressPhase() {
 
       <!-- Phase indicator -->
       <div class="flex items-center justify-center gap-3 mb-6">
-        <div class="flex items-center gap-2 px-4 py-2 bg-brand-100 text-brand-700 rounded-full text-sm font-semibold">
-          <i class="fas fa-search"></i> Step 1: Find Address
+        <div class="flex items-center gap-2 px-3 py-1.5 bg-brand-100 text-brand-700 rounded-full text-xs font-semibold">
+          <i class="fas fa-search"></i> Find Address
         </div>
-        <i class="fas fa-arrow-right text-gray-300"></i>
-        <div class="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-400 rounded-full text-sm">
-          <i class="fas fa-crosshairs"></i> Step 2: Pin Roof
+        <i class="fas fa-arrow-right text-gray-300 text-xs"></i>
+        <div class="flex items-center gap-2 px-3 py-1.5 bg-gray-100 text-gray-400 rounded-full text-xs">
+          <i class="fas fa-crosshairs"></i> Pin Roof
+        </div>
+        <i class="fas fa-arrow-right text-gray-300 text-xs"></i>
+        <div class="flex items-center gap-2 px-3 py-1.5 bg-gray-100 text-gray-400 rounded-full text-xs">
+          <i class="fas fa-draw-polygon"></i> Trace Roof
         </div>
       </div>
 
@@ -402,12 +427,16 @@ function renderStep2PinPhase() {
 
       <!-- Phase indicator -->
       <div class="flex items-center justify-center gap-3 mb-4">
-        <div class="flex items-center gap-2 px-4 py-2 bg-brand-100 text-brand-700 rounded-full text-sm">
-          <i class="fas fa-check-circle"></i> Address Found
+        <div class="flex items-center gap-2 px-3 py-1.5 bg-brand-100 text-brand-700 rounded-full text-xs font-medium">
+          <i class="fas fa-check-circle"></i> Address
         </div>
-        <i class="fas fa-arrow-right text-gray-300"></i>
-        <div class="flex items-center gap-2 px-4 py-2 bg-red-100 text-red-700 rounded-full text-sm font-semibold">
-          <i class="fas fa-crosshairs"></i> Step 2: Pin Roof
+        <i class="fas fa-arrow-right text-gray-300 text-xs"></i>
+        <div class="flex items-center gap-2 px-3 py-1.5 bg-red-100 text-red-700 rounded-full text-xs font-semibold">
+          <i class="fas fa-crosshairs"></i> Pin Roof
+        </div>
+        <i class="fas fa-arrow-right text-gray-300 text-xs"></i>
+        <div class="flex items-center gap-2 px-3 py-1.5 bg-gray-100 text-gray-400 rounded-full text-xs">
+          <i class="fas fa-draw-polygon"></i> Trace Roof
         </div>
       </div>
 
@@ -751,6 +780,481 @@ function updatePinUI() {
 }
 
 // ============================================================
+// PHASE C: Roof Tracing — Draw eaves, ridges, hips, valleys
+// ============================================================
+function renderStep2TracePhase() {
+  const modeInfo = {
+    eaves:  { color: '#22c55e', icon: 'fa-draw-polygon', label: 'Eaves Outline', desc: 'Click around the full eave perimeter of the roof. Close the polygon by clicking the first point.' },
+    ridge:  { color: '#3b82f6', icon: 'fa-grip-lines', label: 'Ridges', desc: 'Click start and end of each ridge line. Double-click to finish each line.' },
+    hip:    { color: '#f59e0b', icon: 'fa-slash', label: 'Hips', desc: 'Click start and end of each hip line. Double-click to finish each line.' },
+    valley: { color: '#ef4444', icon: 'fa-angle-down', label: 'Valleys', desc: 'Click start and end of each valley line. Double-click to finish each line.' }
+  };
+  const m = modeInfo[state.traceMode] || modeInfo.eaves;
+  const eavesCount = state.traceEavesPoints.length;
+  const ridgeCount = state.traceRidgeLines.length;
+  const hipCount = state.traceHipLines.length;
+  const valleyCount = state.traceValleyLines.length;
+  const eavesClosed = eavesCount >= 3 && state.traceEavesPolygon;
+
+  return `
+    <div class="max-w-5xl mx-auto">
+      <div class="text-center mb-4">
+        <h2 class="text-2xl font-bold text-gray-800">
+          <i class="fas fa-draw-polygon mr-2 text-green-500"></i>Trace the Roof
+        </h2>
+        <p class="text-gray-500 mt-1 text-sm">Draw the eaves outline, then mark ridges and hips for accurate measurement</p>
+      </div>
+
+      <!-- Phase indicator -->
+      <div class="flex items-center justify-center gap-3 mb-4">
+        <div class="flex items-center gap-2 px-3 py-1.5 bg-brand-100 text-brand-700 rounded-full text-xs font-medium">
+          <i class="fas fa-check-circle"></i> Address
+        </div>
+        <i class="fas fa-arrow-right text-gray-300 text-xs"></i>
+        <div class="flex items-center gap-2 px-3 py-1.5 bg-brand-100 text-brand-700 rounded-full text-xs font-medium">
+          <i class="fas fa-check-circle"></i> Pinned
+        </div>
+        <i class="fas fa-arrow-right text-gray-300 text-xs"></i>
+        <div class="flex items-center gap-2 px-3 py-1.5 bg-green-100 text-green-700 rounded-full text-xs font-semibold">
+          <i class="fas fa-draw-polygon"></i> Trace Roof
+        </div>
+      </div>
+
+      <!-- Address summary -->
+      <div class="bg-white rounded-lg border border-gray-200 px-4 py-2 mb-3 flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <i class="fas fa-map-marker-alt text-brand-600 text-sm"></i>
+          <span class="text-sm font-medium text-gray-800">${state.formData.property_address}</span>
+          <span class="text-xs text-gray-400">|</span>
+          <span class="text-xs text-gray-500">${state.formData.latitude?.toFixed(6)}, ${state.formData.longitude?.toFixed(6)}</span>
+        </div>
+      </div>
+
+      <div class="grid lg:grid-cols-4 gap-4">
+        <!-- Left: Mode selector + stats -->
+        <div class="lg:col-span-1 space-y-3">
+          <!-- Drawing Mode Selector -->
+          <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+            <h4 class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">Drawing Mode</h4>
+            <div class="space-y-2">
+              ${Object.entries(modeInfo).map(([key, info]) => `
+                <button onclick="setTraceMode('${key}')"
+                  class="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all
+                    ${state.traceMode === key ? 'bg-gray-800 text-white shadow-md' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'}"
+                  style="${state.traceMode === key ? '' : ''}">
+                  <div class="w-3 h-3 rounded-full" style="background:${info.color}"></div>
+                  <i class="fas ${info.icon} text-xs"></i>
+                  <span>${info.label}</span>
+                  <span class="ml-auto text-xs opacity-70">
+                    ${key === 'eaves' ? eavesCount + ' pts' : key === 'ridge' ? ridgeCount : key === 'hip' ? hipCount : valleyCount}
+                  </span>
+                </button>
+              `).join('')}
+            </div>
+          </div>
+
+          <!-- Quick Stats -->
+          <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+            <h4 class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">Trace Summary</h4>
+            <div class="space-y-2 text-sm">
+              <div class="flex justify-between items-center">
+                <span class="text-gray-500"><i class="fas fa-draw-polygon mr-1" style="color:#22c55e"></i>Eaves</span>
+                <span class="font-semibold ${eavesClosed ? 'text-green-600' : 'text-gray-400'}">
+                  ${eavesClosed ? '<i class="fas fa-check-circle mr-1"></i>Closed' : eavesCount + ' points'}
+                </span>
+              </div>
+              <div class="flex justify-between items-center">
+                <span class="text-gray-500"><i class="fas fa-grip-lines mr-1" style="color:#3b82f6"></i>Ridges</span>
+                <span class="font-semibold">${ridgeCount} lines</span>
+              </div>
+              <div class="flex justify-between items-center">
+                <span class="text-gray-500"><i class="fas fa-slash mr-1" style="color:#f59e0b"></i>Hips</span>
+                <span class="font-semibold">${hipCount} lines</span>
+              </div>
+              <div class="flex justify-between items-center">
+                <span class="text-gray-500"><i class="fas fa-angle-down mr-1" style="color:#ef4444"></i>Valleys</span>
+                <span class="font-semibold">${valleyCount} lines</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Actions -->
+          <div class="space-y-2">
+            <button onclick="undoLastTrace()" class="w-full px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg text-sm font-medium transition-all">
+              <i class="fas fa-undo mr-1"></i>Undo Last
+            </button>
+            <button onclick="clearAllTraces()" class="w-full px-3 py-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-sm font-medium transition-all">
+              <i class="fas fa-trash mr-1"></i>Clear All
+            </button>
+          </div>
+        </div>
+
+        <!-- Right: Trace Map -->
+        <div class="lg:col-span-3 bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+          <div class="bg-gray-800 px-4 py-2 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <div class="w-3 h-3 rounded-full" style="background:${m.color}"></div>
+              <span class="text-xs font-medium text-gray-300 uppercase tracking-wide">
+                <i class="fas ${m.icon} mr-1"></i>${m.label} Mode
+              </span>
+            </div>
+            <span class="text-xs text-gray-400">${m.desc}</span>
+          </div>
+          <div id="trace-map" style="height: 520px; cursor: crosshair; background: #1a1a2e;"></div>
+        </div>
+      </div>
+
+      <!-- Confirm + Skip -->
+      <div class="mt-4 flex items-center justify-between">
+        <div class="flex items-center gap-4 text-xs text-gray-500">
+          <span><i class="fas fa-mouse-pointer mr-1"></i>Click = Add point</span>
+          <span><i class="fas fa-mouse mr-1"></i>Double-click = Finish line</span>
+          <span><i class="fas fa-draw-polygon mr-1" style="color:#22c55e"></i>Eaves: click first point to close</span>
+        </div>
+        <div class="flex items-center gap-3">
+          <button onclick="skipTracing()" class="px-4 py-2 text-gray-500 hover:text-gray-700 text-sm font-medium transition-all">
+            Skip Tracing <i class="fas fa-forward ml-1"></i>
+          </button>
+          <button onclick="confirmTraceAndProceed()" id="confirm-trace-btn"
+            class="px-6 py-3 rounded-lg font-semibold text-sm transition-all shadow-md flex items-center gap-2
+              ${eavesClosed ? 'bg-brand-600 hover:bg-brand-700 text-white' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}"
+            ${!eavesClosed ? 'disabled' : ''}>
+            <i class="fas fa-check-circle"></i>
+            Confirm Trace & Continue
+            <i class="fas fa-arrow-right"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// ============================================================
+// TRACE MAP INITIALIZATION & DRAWING LOGIC
+// ============================================================
+function initTraceMap() {
+  const mapDiv = document.getElementById('trace-map');
+  if (!mapDiv || typeof google === 'undefined' || !google.maps) return;
+
+  const center = { lat: state.formData.latitude, lng: state.formData.longitude };
+
+  state.traceMap = new google.maps.Map(mapDiv, {
+    center,
+    zoom: 20,
+    mapTypeId: 'satellite',
+    tilt: 0,
+    fullscreenControl: true,
+    streetViewControl: false,
+    zoomControl: true,
+    mapTypeControl: true,
+    mapTypeControlOptions: {
+      style: google.maps.MapTypeControlStyle.DROPDOWN_MENU,
+      mapTypeIds: ['satellite', 'hybrid']
+    }
+  });
+
+  // Place pin marker
+  new google.maps.Marker({
+    position: center,
+    map: state.traceMap,
+    icon: {
+      url: 'data:image/svg+xml,' + encodeURIComponent(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20"><circle cx="12" cy="12" r="4" fill="%23ef4444" stroke="white" stroke-width="2"/></svg>'
+      ),
+      scaledSize: new google.maps.Size(20, 20),
+      anchor: new google.maps.Point(10, 10),
+    }
+  });
+
+  // Restore existing traces if user comes back
+  restoreTraceOverlays();
+
+  // Map click handler
+  state.traceMap.addListener('click', (e) => {
+    const pt = { lat: e.latLng.lat(), lng: e.latLng.lng() };
+    handleTraceClick(pt);
+  });
+
+  // Double-click to finish line segments (ridge, hip, valley)
+  state.traceMap.addListener('dblclick', (e) => {
+    e.stop();
+    finishCurrentLine();
+  });
+}
+
+function handleTraceClick(pt) {
+  const mode = state.traceMode;
+
+  if (mode === 'eaves') {
+    // Check if clicking near the first point to close the polygon
+    if (state.traceEavesPoints.length >= 3) {
+      const first = state.traceEavesPoints[0];
+      const dist = getLatLngDistance(pt, first);
+      if (dist < 3) { // ~3 meters threshold
+        closeEavesPolygon();
+        return;
+      }
+    }
+
+    state.traceEavesPoints.push(pt);
+    addTraceMarker(pt, '#22c55e', state.traceEavesPoints.length);
+
+    // Draw polyline as user traces
+    if (state.traceEavesPoints.length > 1) {
+      drawTracePolyline(state.traceEavesPoints, '#22c55e', 3, false);
+    }
+  } else {
+    // Ridge, Hip, Valley: collecting points for current line
+    state.traceCurrentLine.push(pt);
+    const colors = { ridge: '#3b82f6', hip: '#f59e0b', valley: '#ef4444' };
+    addTraceMarker(pt, colors[mode], null);
+
+    if (state.traceCurrentLine.length === 2) {
+      // Auto-finish when 2 points are placed for a line
+      finishCurrentLine();
+    } else if (state.traceCurrentLine.length > 1) {
+      drawTracePolyline(state.traceCurrentLine, colors[mode], 2, true);
+    }
+  }
+
+  updateTraceSummaryUI();
+}
+
+function closeEavesPolygon() {
+  if (state.traceEavesPoints.length < 3) return;
+
+  // Remove old eaves polyline
+  clearTraceOverlays();
+
+  // Draw filled polygon
+  state.traceEavesPolygon = new google.maps.Polygon({
+    paths: state.traceEavesPoints.map(p => new google.maps.LatLng(p.lat, p.lng)),
+    map: state.traceMap,
+    strokeColor: '#22c55e',
+    strokeWeight: 3,
+    strokeOpacity: 0.9,
+    fillColor: '#22c55e',
+    fillOpacity: 0.15,
+    editable: true,
+    draggable: false
+  });
+
+  // Listen for polygon edits
+  const path = state.traceEavesPolygon.getPath();
+  google.maps.event.addListener(path, 'set_at', () => updateEavesFromPolygon());
+  google.maps.event.addListener(path, 'insert_at', () => updateEavesFromPolygon());
+
+  // Redraw markers
+  state.traceEavesPoints.forEach((p, i) => {
+    addTraceMarker(p, '#22c55e', i + 1);
+  });
+
+  // Redraw other lines
+  restoreLineOverlays();
+
+  showToast('Eaves outline closed! Now add ridges and hips.', 'success');
+  state.traceMode = 'ridge';
+  updateTraceSummaryUI();
+}
+
+function updateEavesFromPolygon() {
+  if (!state.traceEavesPolygon) return;
+  const path = state.traceEavesPolygon.getPath();
+  state.traceEavesPoints = [];
+  for (let i = 0; i < path.getLength(); i++) {
+    const pt = path.getAt(i);
+    state.traceEavesPoints.push({ lat: pt.lat(), lng: pt.lng() });
+  }
+}
+
+function finishCurrentLine() {
+  if (state.traceCurrentLine.length < 2) {
+    state.traceCurrentLine = [];
+    return;
+  }
+
+  const line = [...state.traceCurrentLine];
+  const mode = state.traceMode;
+  const colors = { ridge: '#3b82f6', hip: '#f59e0b', valley: '#ef4444' };
+
+  if (mode === 'ridge') {
+    state.traceRidgeLines.push(line);
+  } else if (mode === 'hip') {
+    state.traceHipLines.push(line);
+  } else if (mode === 'valley') {
+    state.traceValleyLines.push(line);
+  }
+
+  // Draw permanent line
+  drawTracePolyline(line, colors[mode], 2.5, false);
+
+  state.traceCurrentLine = [];
+  showToast(`${mode.charAt(0).toUpperCase() + mode.slice(1)} line added`, 'success');
+  updateTraceSummaryUI();
+}
+
+function addTraceMarker(pt, color, label) {
+  const marker = new google.maps.Marker({
+    position: { lat: pt.lat, lng: pt.lng },
+    map: state.traceMap,
+    icon: {
+      url: 'data:image/svg+xml,' + encodeURIComponent(
+        `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" width="16" height="16">
+          <circle cx="10" cy="10" r="8" fill="${color}" stroke="white" stroke-width="2" opacity="0.9"/>
+          ${label ? `<text x="10" y="14" text-anchor="middle" fill="white" font-size="9" font-weight="bold" font-family="Arial">${label}</text>` : ''}
+        </svg>`
+      ),
+      scaledSize: new google.maps.Size(16, 16),
+      anchor: new google.maps.Point(8, 8),
+    }
+  });
+  state.traceMarkers.push(marker);
+}
+
+function drawTracePolyline(points, color, weight, isDashed) {
+  const polyline = new google.maps.Polyline({
+    path: points.map(p => new google.maps.LatLng(p.lat, p.lng)),
+    map: state.traceMap,
+    strokeColor: color,
+    strokeWeight: weight,
+    strokeOpacity: isDashed ? 0.6 : 0.9,
+    icons: isDashed ? [{ icon: { path: 'M 0,-1 0,1', strokeOpacity: 0.8, scale: 3 }, offset: '0', repeat: '15px' }] : []
+  });
+  state.tracePolylines.push(polyline);
+}
+
+function clearTraceOverlays() {
+  state.traceMarkers.forEach(m => m.setMap(null));
+  state.traceMarkers = [];
+  state.tracePolylines.forEach(p => p.setMap(null));
+  state.tracePolylines = [];
+  if (state.traceEavesPolygon) {
+    state.traceEavesPolygon.setMap(null);
+    state.traceEavesPolygon = null;
+  }
+}
+
+function restoreTraceOverlays() {
+  // Restore eaves
+  if (state.traceEavesPoints.length >= 3 && state.traceEavesPolygon === null) {
+    // Check if we have a closed polygon
+    closeEavesPolygon();
+  } else if (state.traceEavesPoints.length > 0) {
+    state.traceEavesPoints.forEach((p, i) => addTraceMarker(p, '#22c55e', i + 1));
+    if (state.traceEavesPoints.length > 1) {
+      drawTracePolyline(state.traceEavesPoints, '#22c55e', 3, false);
+    }
+  }
+  restoreLineOverlays();
+}
+
+function restoreLineOverlays() {
+  state.traceRidgeLines.forEach(line => drawTracePolyline(line, '#3b82f6', 2.5, false));
+  state.traceHipLines.forEach(line => drawTracePolyline(line, '#f59e0b', 2.5, false));
+  state.traceValleyLines.forEach(line => drawTracePolyline(line, '#ef4444', 2.5, false));
+}
+
+function setTraceMode(mode) {
+  // Finish any pending line
+  if (state.traceCurrentLine.length > 0) finishCurrentLine();
+  state.traceMode = mode;
+  // Partial re-render of mode selector only
+  updateTraceSummaryUI();
+}
+
+function undoLastTrace() {
+  const mode = state.traceMode;
+  if (mode === 'eaves') {
+    if (state.traceEavesPolygon) {
+      state.traceEavesPolygon.setMap(null);
+      state.traceEavesPolygon = null;
+    }
+    if (state.traceEavesPoints.length > 0) {
+      state.traceEavesPoints.pop();
+    }
+  } else if (mode === 'ridge' && state.traceRidgeLines.length > 0) {
+    state.traceRidgeLines.pop();
+  } else if (mode === 'hip' && state.traceHipLines.length > 0) {
+    state.traceHipLines.pop();
+  } else if (mode === 'valley' && state.traceValleyLines.length > 0) {
+    state.traceValleyLines.pop();
+  }
+  state.traceCurrentLine = [];
+
+  // Redraw everything
+  clearTraceOverlays();
+  restoreTraceOverlays();
+  updateTraceSummaryUI();
+  showToast('Undo complete', 'info');
+}
+
+function clearAllTraces() {
+  if (!confirm('Clear all traced lines? This cannot be undone.')) return;
+  state.traceEavesPoints = [];
+  state.traceRidgeLines = [];
+  state.traceHipLines = [];
+  state.traceValleyLines = [];
+  state.traceCurrentLine = [];
+  clearTraceOverlays();
+  state.formData.roof_trace_json = null;
+  updateTraceSummaryUI();
+  showToast('All traces cleared', 'info');
+}
+
+function updateTraceSummaryUI() {
+  // Do a soft re-render of the left panel + confirm button
+  render();
+}
+
+function getLatLngDistance(a, b) {
+  // Approximate distance in meters between two lat/lng points
+  const R = 6371000;
+  const dLat = (b.lat - a.lat) * Math.PI / 180;
+  const dLng = (b.lng - a.lng) * Math.PI / 180;
+  const lat1 = a.lat * Math.PI / 180;
+  const lat2 = b.lat * Math.PI / 180;
+  const x = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+}
+
+function compileTraceData() {
+  return {
+    eaves: state.traceEavesPoints,
+    ridges: state.traceRidgeLines,
+    hips: state.traceHipLines,
+    valleys: state.traceValleyLines,
+    traced_at: new Date().toISOString()
+  };
+}
+
+function confirmTraceAndProceed() {
+  const eavesClosed = state.traceEavesPoints.length >= 3 && state.traceEavesPolygon;
+  if (!eavesClosed) {
+    showToast('Please draw the complete eaves outline (close the polygon by clicking the first point)', 'error');
+    return;
+  }
+
+  // Update polygon vertices in case user edited them
+  updateEavesFromPolygon();
+
+  // Compile and save trace data
+  state.formData.roof_trace_json = compileTraceData();
+
+  showToast('Roof trace saved!', 'success');
+  state.currentStep = 3;
+  render();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function skipTracing() {
+  state.formData.roof_trace_json = null;
+  state.currentStep = 3;
+  render();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// ============================================================
 // PHASE TRANSITIONS
 // ============================================================
 function confirmAddressAndProceed() {
@@ -784,10 +1288,15 @@ function confirmPinAndProceed() {
     return;
   }
 
-  // Proceed to step 3
-  state.currentStep = 3;
+  // Proceed to trace phase
+  state.addressPhase = 'trace';
   render();
   window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function backToPinPhase() {
+  state.addressPhase = 'pin';
+  render();
 }
 
 // Fallback for non-Google Maps environments
@@ -940,6 +1449,11 @@ function selectCustomerCompany(id) {
   }
 }
 
+function updatePricePerBundle(val) {
+  const num = parseFloat(val);
+  state.formData.price_per_bundle = isNaN(num) || num <= 0 ? null : num;
+}
+
 // ============================================================
 // STEP 5: REVIEW & SUBMIT
 // ============================================================
@@ -1029,6 +1543,69 @@ function renderStep5() {
             class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500 text-sm"
             placeholder="Any special instructions or details about the property...">${state.formData.notes}</textarea>
         </div>
+
+        <!-- Price Per Bundle (Square) for Customer Cost Estimate -->
+        <div class="bg-gradient-to-r from-amber-50 to-orange-50 rounded-xl border border-amber-200 p-5">
+          <h4 class="font-semibold text-gray-700 mb-3 flex items-center">
+            <i class="fas fa-dollar-sign text-amber-500 mr-2"></i>Customer Price Estimate (Optional)
+          </h4>
+          <p class="text-xs text-gray-500 mb-3">Enter your price per square (per bundle) to include a cost estimate in the report. The report will calculate total squares with 15% waste.</p>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs font-medium text-gray-600 mb-1">Price Per Square (CAD)</label>
+              <div class="relative">
+                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 font-bold">$</span>
+                <input type="number" step="0.01" min="0" max="9999"
+                  value="${state.formData.price_per_bundle || ''}"
+                  oninput="updatePricePerBundle(this.value)"
+                  class="w-full pl-8 pr-4 py-3 border border-amber-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-amber-500 text-sm font-medium"
+                  placeholder="e.g. 350" />
+              </div>
+              <p class="text-xs text-gray-400 mt-1">Cost per roofing square (100 sq ft)</p>
+            </div>
+            <div class="flex items-center justify-center">
+              <div class="text-center p-3 bg-white rounded-lg border border-amber-200 w-full">
+                <p class="text-xs text-gray-500 uppercase tracking-wide font-medium">Estimated Customer Cost</p>
+                <p class="text-2xl font-bold ${state.formData.price_per_bundle ? 'text-amber-600' : 'text-gray-300'} mt-1" id="price-estimate-display">
+                  ${state.formData.price_per_bundle ? '(calculated in report)' : '--'}
+                </p>
+                <p class="text-xs text-gray-400 mt-1">Based on roof area + 15% waste</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Roof Trace Summary (if traced) -->
+        ${state.formData.roof_trace_json ? `
+        <div class="bg-green-50 rounded-xl border border-green-200 p-5">
+          <h4 class="font-semibold text-gray-700 mb-2 flex items-center">
+            <i class="fas fa-draw-polygon text-green-500 mr-2"></i>Roof Trace Data
+          </h4>
+          <div class="grid grid-cols-4 gap-3 text-sm">
+            <div class="text-center p-2 bg-white rounded-lg">
+              <div class="font-bold text-green-600">${state.formData.roof_trace_json.eaves?.length || 0}</div>
+              <div class="text-xs text-gray-500">Eave Points</div>
+            </div>
+            <div class="text-center p-2 bg-white rounded-lg">
+              <div class="font-bold text-blue-600">${state.formData.roof_trace_json.ridges?.length || 0}</div>
+              <div class="text-xs text-gray-500">Ridges</div>
+            </div>
+            <div class="text-center p-2 bg-white rounded-lg">
+              <div class="font-bold text-amber-600">${state.formData.roof_trace_json.hips?.length || 0}</div>
+              <div class="text-xs text-gray-500">Hips</div>
+            </div>
+            <div class="text-center p-2 bg-white rounded-lg">
+              <div class="font-bold text-red-600">${state.formData.roof_trace_json.valleys?.length || 0}</div>
+              <div class="text-xs text-gray-500">Valleys</div>
+            </div>
+          </div>
+          <p class="text-xs text-green-600 mt-2"><i class="fas fa-check-circle mr-1"></i>Roof trace will be used for enhanced accuracy</p>
+        </div>
+        ` : `
+        <div class="bg-gray-50 rounded-xl border border-gray-200 p-4">
+          <p class="text-xs text-gray-400 flex items-center"><i class="fas fa-info-circle mr-1"></i>No roof trace provided — standard satellite analysis will be used</p>
+        </div>
+        `}
       </div>
     </div>
   `;
@@ -1076,10 +1653,10 @@ function prevStep() {
   }
 
   if (state.currentStep > 1) {
-    // When going back to step 2, reset to the appropriate phase
+    // When going back to step 2, return to the trace phase (last phase completed)
     if (state.currentStep === 3) {
       state.currentStep = 2;
-      state.addressPhase = state.formData.pinPlaced ? 'pin' : 'address';
+      state.addressPhase = 'trace';
     } else {
       state.currentStep--;
     }
@@ -1130,11 +1707,15 @@ async function submitOrder() {
   render();
 
   try {
-    // 1. Create the order
+    // 1. Create the order (serialize trace data)
+    const submitData = { ...state.formData };
+    if (submitData.roof_trace_json && typeof submitData.roof_trace_json === 'object') {
+      submitData.roof_trace_json = JSON.stringify(submitData.roof_trace_json);
+    }
     const orderRes = await fetch(API + '/api/orders', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(state.formData)
+      body: JSON.stringify(submitData)
     });
     const orderData = await orderRes.json();
 

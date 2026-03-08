@@ -162,6 +162,7 @@ adminRoutes.post('/init-db', async (c) => {
         service_tier TEXT NOT NULL, price REAL NOT NULL,
         status TEXT DEFAULT 'pending', payment_status TEXT DEFAULT 'unpaid',
         payment_intent_id TEXT, estimated_delivery TEXT, delivered_at TEXT, notes TEXT,
+        roof_trace_json TEXT, price_per_bundle REAL,
         created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')),
         FOREIGN KEY (master_company_id) REFERENCES master_companies(id),
         FOREIGN KEY (customer_company_id) REFERENCES customer_companies(id)
