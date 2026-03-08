@@ -21,6 +21,8 @@ import {
   type DataLayersAnalysis
 } from '../services/solar-datalayers'
 import { analyzeRoofGeometry } from '../services/gemini'
+import { buildSolarGeometry, extractSolarGeometryData, getZoomForFootprint } from '../services/solar-geometry'
+import type { SolarBuildingInsights } from '../services/solar-geometry'
 
 // ============================================================
 // ENHANCED IMAGERY HELPER — Generates all satellite + directional URLs
@@ -386,13 +388,22 @@ export async function generateReportForOrder(
     // The architectural diagram SVG is then rendered from these real coordinates —
     // NOT from an LLM making up shapes from text measurements.
     //
+    // GEOMETRY PRIORITY:
+    //   1. Gemini Vision (best: traces actual roof edges from satellite image)
+    //   2. Solar API panels → convex hull (good: real panel positions from Google's model)
+    //   3. Fallback proportional diagram (basic: generic shape from footprint + segment data)
+    //
+    // reportData.ai_geometry may already contain Solar API geometry from callGoogleSolarAPI.
+    // If Gemini succeeds, it overrides. If Gemini fails, Solar geometry persists.
+    //
     // CRITICAL: On Cloudflare Workers, waitUntil() has a ~30s hard limit.
     // We use gemini-2.0-flash (10-15s) with a 20s timeout so the entire
     // generation completes within the 30s window. If Gemini fails or times out,
-    // the fallback diagram is used and /enhance can be called separately later.
+    // the Solar API geometry or fallback diagram is used; /enhance can be called later.
+    const hasSolarGeometry = reportData.ai_geometry && reportData.ai_geometry.facets?.length > 0
     const satImageUrl = reportData.imagery?.satellite_overhead_url || reportData.imagery?.satellite_url
     if (satImageUrl && (env.GCP_SERVICE_ACCOUNT_KEY || env.GOOGLE_VERTEX_API_KEY)) {
-      console.log(`[GenerateDirect] Calling Gemini (flash) to analyze satellite image for roof geometry...`)
+      console.log(`[GenerateDirect] Calling Gemini (flash) to upgrade geometry${hasSolarGeometry ? ` (have Solar geometry with ${reportData.ai_geometry!.facets.length} facets as fallback)` : ''}...`)
       try {
         const geminiEnv = {
           apiKey: env.GOOGLE_VERTEX_API_KEY,
@@ -412,15 +423,15 @@ export async function generateReportForOrder(
         const geminiDuration = Date.now() - startGemini
         if (aiGeometry && aiGeometry.facets && aiGeometry.facets.length > 0) {
           reportData.ai_geometry = aiGeometry
-          console.log(`[GenerateDirect] ✅ Gemini geometry: ${aiGeometry.facets.length} facets, ${aiGeometry.perimeter?.length || 0} perimeter pts, ${aiGeometry.lines?.length || 0} lines in ${geminiDuration}ms`)
+          console.log(`[GenerateDirect] ✅ Gemini geometry (overrides Solar): ${aiGeometry.facets.length} facets, ${aiGeometry.perimeter?.length || 0} perimeter pts, ${aiGeometry.lines?.length || 0} lines in ${geminiDuration}ms`)
         } else {
-          console.warn(`[GenerateDirect] Gemini returned no usable geometry in ${geminiDuration}ms — diagram will use fallback`)
+          console.warn(`[GenerateDirect] Gemini returned no usable geometry in ${geminiDuration}ms — ${hasSolarGeometry ? 'keeping Solar API geometry' : 'diagram will use fallback'}`)
         }
       } catch (geminiErr: any) {
-        console.warn(`[GenerateDirect] Gemini geometry analysis failed (non-critical): ${geminiErr.message}`)
+        console.warn(`[GenerateDirect] Gemini geometry failed (non-critical): ${geminiErr.message} — ${hasSolarGeometry ? 'keeping Solar API geometry' : 'diagram will use fallback'}`)
       }
     } else {
-      console.log(`[GenerateDirect] Skipping Gemini geometry: ${!satImageUrl ? 'no satellite image' : 'no GCP credentials'}`)
+      console.log(`[GenerateDirect] Skipping Gemini geometry: ${!satImageUrl ? 'no satellite image' : 'no GCP credentials'}${hasSolarGeometry ? ' (Solar geometry available)' : ''}`)
     }
 
     // ── SAVE REPORT ──
@@ -2026,6 +2037,28 @@ async function callGoogleSolarAPI(
     throw new Error('No solar potential data returned for this location')
   }
 
+  // ── BUILD AI GEOMETRY FROM SOLAR API DATA ──
+  // Extract panel polygons + segment bounding boxes to create
+  // AIMeasurementAnalysis BEFORE Gemini (which may fail on CF Workers).
+  // This provides real pixel-coordinate roof polygons derived from
+  // Google's building model (solarPanels grouped by segmentIndex,
+  // convex-hulled, then converted to 640×640 pixel space).
+  // Speed: <10ms (deterministic), vs 15s (Gemini Flash), vs 45-110s (Gemini Pro).
+  const footprintM2ForZoom = solarPotential.wholeRoofStats?.areaMeters2 ||
+    (solarPotential.roofSegmentStats || []).reduce((s: number, seg: any) => s + (seg.stats?.areaMeters2 || 0), 0)
+  const footprintSqftForZoom = footprintM2ForZoom * 10.7639
+  let solarGeometry: AIMeasurementAnalysis | null = null
+  try {
+    solarGeometry = buildSolarGeometry(data as SolarBuildingInsights, {
+      footprintSqft: Math.round(footprintSqftForZoom),
+    })
+    if (solarGeometry) {
+      console.log(`[SolarAPI] ✅ Solar geometry: ${solarGeometry.facets.length} facets, ${solarGeometry.perimeter?.length || 0} perimeter pts, ${solarGeometry.lines?.length || 0} lines`)
+    }
+  } catch (geoErr: any) {
+    console.warn(`[SolarAPI] Solar geometry extraction failed (non-critical): ${geoErr.message}`)
+  }
+
   // Parse roof segments from Google's roofSegmentStats
   const rawSegments = solarPotential.roofSegmentStats || []
   const segments: RoofSegment[] = rawSegments.map((seg: any, i: number) => {
@@ -2168,11 +2201,16 @@ async function callGoogleSolarAPI(
       dsm_url: null,
       mask_url: null,
     },
+    // Solar-derived AI geometry (panel convex hulls + segment boundingBoxes → pixel polygons)
+    // Provides real roof geometry from Google's building model WITHOUT needing Gemini Vision.
+    // Gemini can override this later with higher-quality vision-based geometry.
+    ai_geometry: solarGeometry || undefined,
+
     quality: {
       imagery_quality: imageryQuality as any,
       imagery_date: imageryDate,
       field_verification_recommended: imageryQuality !== 'HIGH',
-      confidence_score: imageryQuality === 'HIGH' ? 90 : imageryQuality === 'MEDIUM' ? 75 : 60,
+      confidence_score: imageryQuality === 'HIGH' ? (solarGeometry ? 95 : 90) : imageryQuality === 'MEDIUM' ? 75 : 60,
       notes: qualityNotes
     },
     metadata: {
@@ -2608,20 +2646,6 @@ function computeEdgeSummary(edges: EdgeMeasurement[]) {
 //   Page 1: Dark theme Roof Measurement Dashboard
 // ============================================================
 // GPT ROOF DIAGRAM GENERATOR — AI-Powered Image Generation
-//
-// Uses OpenAI GPT-5 vision to analyze satellite imagery and
-// generate a professional architectural roof measurement diagram.
-//
-// Flow:
-//   1. Send satellite overhead image to GPT-5 with vision
-//   2. GPT traces the roof outline and identifies facets/edges
-//   3. GPT generates a clean SVG roof diagram with:
-//      - Traced roof outline (accurate to the actual shape)
-//      - Crosshatch fills on each facet
-//      - Dimension lines with real measurements
-//      - Color-coded edges (eave/hip/ridge/valley/rake)
-//      - Legend, compass, footer bar
-//   4. The SVG is embedded in the report HTML
 // ============================================================
 // GPT ROOF AREA ESTIMATION (text-based, no vision required)
 // When Google Solar API returns 404 (rural/acreage properties),
@@ -2731,140 +2755,8 @@ Respond with ONLY valid JSON:
 }
 
 
-
-//
-// This replaces the static geometry-based diagrams with
-// AI-generated visuals that match the actual roof shape.
 // ============================================================
-async function generateGPTRoofDiagram(
-  satelliteImageUrl: string,
-  report: {
-    total_footprint_sqft: number;
-    total_true_area_sqft: number;
-    roof_pitch_degrees: number;
-    roof_pitch_ratio: string;
-    segments: RoofSegment[];
-    edge_summary: { total_ridge_ft: number; total_hip_ft: number; total_valley_ft: number; total_eave_ft: number; total_rake_ft: number };
-    materials: { gross_squares: number };
-  },
-  env: { OPENAI_API_KEY?: string; OPENAI_BASE_URL?: string }
-): Promise<string | null> {
-  const apiKey = env.OPENAI_API_KEY
-  const baseUrl = env.OPENAI_BASE_URL || 'https://www.genspark.ai/api/llm_proxy/v1'
-
-  if (!apiKey) {
-    console.log('[GPT Diagram] No OPENAI_API_KEY — skipping')
-    return null
-  }
-
-  const es = report.edge_summary
-  const facetCount = report.segments.length
-  const grossSq = report.materials.gross_squares
-  const pitch = report.roof_pitch_ratio || `${Math.round(report.roof_pitch_degrees)}°`
-  const totalLinFt = Math.round(es.total_ridge_ft + es.total_hip_ft + es.total_valley_ft + es.total_eave_ft + es.total_rake_ft)
-  const footprint = Math.round(report.total_footprint_sqft)
-  const trueArea = Math.round(report.total_true_area_sqft)
-
-  const segDetail = report.segments.map((s, i) =>
-    `Facet ${i + 1}: ${s.footprint_area_sqft}sqft ${s.pitch_ratio} ${s.azimuth_direction}`
-  ).join(', ')
-
-  // Compute approximate dimensions for the roof rectangle
-  const roofSide = Math.sqrt(footprint)
-  const w = Math.round(roofSide * 1.2) // slightly wider than deep
-  const d = Math.round(roofSide / 1.2)
-
-  const prompt = `Generate an SVG roof measurement diagram. viewBox="0 0 700 660". White background.
-
-Roof: ${facetCount} facets, ${footprint}sqft footprint, ~${w}ft × ${d}ft, ${pitch} pitch, hip roof.
-Edges: eave=${es.total_eave_ft}ft ridge=${es.total_ridge_ft}ft hip=${es.total_hip_ft}ft valley=${es.total_valley_ft}ft
-Facets: ${segDetail}
-Footer: ${facetCount} FACETS | ${pitch} PITCH | ${grossSq} SQUARES | ${totalLinFt} LINEAR FT
-
-Requirements:
-- Draw a hip roof polygon centered in the SVG (padding 60px sides, 80px bottom for footer)
-- Diamond crosshatch pattern fill (id="xh", stroke="#c0c0c0", 6px spacing, 45° + 135° lines)
-- Perimeter edges: Eave=#0d9668(green) Hip=#d97706(amber) Ridge=#dc2626(red) stroke-width 2.5
-- Dimension lines outside perimeter with "XX.X ft" labels, font-size 9
-- Number each facet (centered, font-size 16, fill #333)
-- Ridge line at top center, hip lines from corners to ridge endpoints
-- Legend box top-left: colored dots + labels for Eave/Hip/Ridge
-- Compass "N" arrow top-right
-- Footer bar: rect y=620 height=40 fill=#002244, white text with stats
-
-Output ONLY the SVG. No markdown. No explanation.`
-
-  try {
-    console.log(`[GPT Diagram] Requesting SVG diagram from claude-haiku-4-5...`)
-    const startMs = Date.now()
-
-    const response = await fetch(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5',
-        messages: [{ role: 'user', content: prompt }],
-        max_tokens: 8000,
-        temperature: 0.2,
-      }),
-    })
-
-    if (!response.ok) {
-      const errText = await response.text()
-      console.error(`[GPT Diagram] API error ${response.status}: ${errText.substring(0, 200)}`)
-      return null
-    }
-
-    const responseText = await response.text()
-    const elapsed = Date.now() - startMs
-    console.log(`[GPT Diagram] Received ${responseText.length} chars in ${elapsed}ms`)
-
-    let result: any
-    try {
-      result = JSON.parse(responseText)
-    } catch (parseErr) {
-      console.error(`[GPT Diagram] Failed to parse API response (first 300): ${responseText.substring(0, 300)}`)
-      return null
-    }
-
-    const content = result.choices?.[0]?.message?.content || ''
-    console.log(`[GPT Diagram] Content: ${content.length} chars, starts='${content.substring(0, 40)}'`)
-
-    // Extract SVG from response (handle markdown code blocks or raw SVG)
-    let svg = content.trim()
-    // Strip markdown code fences if present
-    if (svg.startsWith('```')) {
-      svg = svg.replace(/^```(?:svg|xml)?\n?/, '').replace(/\n?```$/, '').trim()
-    }
-
-    // Validate it's actually SVG
-    if (!svg.startsWith('<svg') || !svg.includes('</svg>')) {
-      console.error(`[GPT Diagram] Response is not valid SVG (starts with: ${svg.substring(0, 50)})`)
-      return null
-    }
-
-    // Ensure viewBox is correct
-    if (!svg.includes('viewBox')) {
-      svg = svg.replace('<svg', '<svg viewBox="0 0 700 660"')
-    }
-
-    // Ensure responsive sizing
-    if (!svg.includes('style=')) {
-      svg = svg.replace('<svg', '<svg style="width:100%;height:auto;display:block;background:#fff"')
-    }
-
-    console.log(`[GPT Diagram] ✅ Valid SVG diagram generated (${svg.length} chars) in ${elapsed}ms`)
-    return svg
-
-  } catch (err: any) {
-    console.error(`[GPT Diagram] Error: ${err.message}`)
-    return null
-  }
-}
-
+// PROFESSIONAL REPORT HTML GENERATOR
 //   Page 2: Light theme Material Order Calculation
 //   Page 3: Light theme Detailed Measurements + Roof Diagram
 // High-DPI ready, PDF-convertible, email-embeddable
