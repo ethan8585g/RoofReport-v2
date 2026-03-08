@@ -2,9 +2,9 @@
 
 ## Project Overview
 - **Name**: Reuse Canada Roof Measurement Reports
-- **Version**: 6.1 (Solar DataLayers + GeoTIFF DSM + Full CRM Suite)
+- **Version**: 6.2 (Property Overlap Detection + Segment Toggle + Precise Coordinates)
 - **Goal**: Professional roof measurement reports for roofing contractors installing new roofs
-- **Features**: Marketing landing page, login/register system, admin dashboard with order management, Google Solar API, **Solar DataLayers GeoTIFF processing**, Material BOM, Edge Analysis, Gmail OAuth2 Email Delivery, PDF download, **Full CRM Suite** (Customers, Invoices, Proposals, Jobs, Sales Pipeline, D2D Manager)
+- **Features**: Marketing landing page, login/register system, admin dashboard with order management, Google Solar API, **Solar DataLayers GeoTIFF processing**, Material BOM, Edge Analysis, Gmail OAuth2 Email Delivery, PDF download, **Full CRM Suite** (Customers, Invoices, Proposals, Jobs, Sales Pipeline, D2D Manager), **Property Overlap Detection**, **Segment Toggle UI**
 
 ## URLs
 - **Live Sandbox**: https://3000-ing8ae0z5fkhj91kq4pyi-dfc00ec5.sandbox.novita.ai
@@ -87,6 +87,8 @@ All CRM data is per-user (owner_id scoped) — each customer manages their own c
 | POST | `/api/reports/:id/generate` | Generate roof report (auto-selects best API: DataLayers > buildingInsights > mock) |
 | POST | `/api/reports/:id/generate-enhanced` | Force DataLayers pipeline (GeoTIFF DSM + buildingInsights hybrid) |
 | POST | `/api/reports/datalayers/analyze` | Standalone DataLayers analysis (no order required). Body: `{address}` or `{lat, lng}` |
+| GET | `/api/reports/:id/segments` | **NEW** Get all roof segments with exclusion state + overlap flag |
+| POST | `/api/reports/:id/toggle-segments` | **NEW** Exclude/include segments and recalculate report. Body: `{excluded_segments: [0,5,7]}` |
 | GET | `/api/reports/:id/html` | Get professional HTML report |
 | GET | `/api/reports/:id/pdf` | Get PDF-ready HTML with print controls (browser Print → Save as PDF) |
 | POST | `/api/reports/:id/email` | Email report (supports `to_email`, `from_email`, `subject_override`) |
@@ -95,7 +97,52 @@ All CRM data is per-user (owner_id scoped) — each customer manages their own c
 
 ## Gmail OAuth2 Email Delivery (NEW in v4.2)
 
+## Property Overlap Detection & Segment Toggle (NEW in v6.2)
+
+### Why This Exists
+Google Solar API's `buildingInsights:findClosest` sometimes returns a merged 3D model that includes a neighboring building, especially for:
+- Townhouses / row houses
+- Duplexes / semi-detached homes
+- Properties with detached garages that share a wall
+
 ### How It Works
+
+**1. Precise Coordinate Targeting**
+- All API calls now use 7-decimal-place lat/lng (±11mm accuracy)
+- `requiredQuality=HIGH` enforced — prefer 404 error over low-quality data
+- Forces Google to target the exact building centroid, breaking the link to neighboring houses
+
+**2. Automatic Overlap Detection**
+- After receiving the Solar API response, the building's `boundingBox` dimensions are checked
+- If width OR depth exceeds 60 ft (≈18.288m), the report is flagged as `Potential Property Overlap`
+- Confidence score is automatically reduced (95% → 85%)
+- The professional HTML report shows a ⚠️ POTENTIAL OVERLAP badge
+
+**3. Segment Toggle ("Kill Switch")**
+- When overlap is detected, the admin can open the **Segment Toggle** modal (layer icon in order actions)
+- All `roofSegmentStats` are displayed with toggle switches
+- Toggling off a segment immediately recalculates: footprint, true area, pitch, edges, materials, and squares
+- The report HTML is regenerated with the excluded segments removed
+- API: `POST /api/reports/:id/toggle-segments` with body `{ excluded_segments: [indexA, indexB, ...] }`
+
+**4. Example JSON Response for a Merged Building**
+```json
+{
+  "property_overlap_flag": true,
+  "property_overlap_details": [
+    "Depth 74 ft (22m) exceeds 60 ft threshold",
+    "Width 123 ft (37m) exceeds 60 ft threshold"
+  ],
+  "segments": [
+    { "index": 0, "name": "Segment 1", "footprint_area_sqft": 968, "excluded": false },
+    { "index": 1, "name": "Segment 2", "footprint_area_sqft": 732, "excluded": false },
+    { "index": 20, "name": "Segment 21", "footprint_area_sqft": 65, "excluded": true },
+    { "index": 21, "name": "Segment 22", "footprint_area_sqft": 65, "excluded": true }
+  ]
+}
+```
+
+### Setup Steps (Gmail OAuth2 — from v4.2)
 The app uses OAuth2 with a refresh token to send emails as your personal Gmail account. This is the proper method for personal Gmail (domain-wide delegation only works with Google Workspace).
 
 ### Setup Steps
