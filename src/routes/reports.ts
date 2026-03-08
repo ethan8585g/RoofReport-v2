@@ -21,6 +21,8 @@ import {
   type DataLayersAnalysis
 } from '../services/solar-datalayers'
 import { analyzeRoofGeometry } from '../services/gemini'
+import { visionScan, computeHeatScore, filterFindings } from '../services/vision-analyzer'
+import type { VisionFindings } from '../types'
 import { buildSolarGeometry, extractSolarGeometryData, getZoomForFootprint } from '../services/solar-geometry'
 import type { SolarBuildingInsights } from '../services/solar-geometry'
 
@@ -488,8 +490,54 @@ export async function generateReportForOrder(
       console.log(`[GenerateDirect] Skipping Gemini geometry: ${!satImageUrl ? 'no satellite image' : 'no GCP credentials'}${hasSolarGeometry ? ' (Solar geometry available)' : ''}`)
     }
 
+    // ── VISION-BASED INSPECTION ("Eyes" Layer) ──
+    // Feed the satellite image into Gemini to detect vulnerabilities, obstructions,
+    // environmental threats, and condition indicators that the Solar API cannot see.
+    // This produces a Heat Score for CRM lead prioritization and findings for the report.
+    // Non-blocking: if it fails, the report still completes without vision data.
+    if (satImageUrl && (env.GCP_SERVICE_ACCOUNT_KEY || env.GOOGLE_VERTEX_API_KEY)) {
+      try {
+        console.log(`[GenerateDirect] Starting vision inspection (Eyes Layer)...`)
+        const visionStartMs = Date.now()
+        const visionFindings = await visionScan(satImageUrl, {
+          apiKey: env.GOOGLE_VERTEX_API_KEY,
+          project: env.GOOGLE_CLOUD_PROJECT,
+          location: env.GOOGLE_CLOUD_LOCATION || 'us-central1',
+          serviceAccountKey: env.GCP_SERVICE_ACCOUNT_KEY
+        }, {
+          model: 'gemini-2.0-flash',
+          timeoutMs: 20000,      // Must fit within CF Workers 30s combined budget
+          sourceType: 'satellite_overhead'
+        })
+        const visionDuration = Date.now() - visionStartMs
+
+        // Attach to report data
+        reportData.vision_findings = visionFindings
+
+        // Adjust quality notes based on heat score
+        if (reportData.quality) {
+          if (visionFindings.heat_score.total >= 60) {
+            reportData.quality.confidence_score = Math.min(reportData.quality.confidence_score, 70)
+            reportData.quality.field_verification_recommended = true
+            reportData.quality.notes = reportData.quality.notes || []
+            reportData.quality.notes.push(`Vision AI detected ${visionFindings.finding_count} findings (Heat Score: ${visionFindings.heat_score.total}/100) — field verification strongly recommended`)
+          } else if (visionFindings.heat_score.total >= 30) {
+            reportData.quality.notes = reportData.quality.notes || []
+            reportData.quality.notes.push(`Vision AI: ${visionFindings.finding_count} findings detected (Heat Score: ${visionFindings.heat_score.total}/100, ${visionFindings.heat_score.classification})`)
+          }
+        }
+
+        console.log(`[GenerateDirect] ✅ Vision scan: ${visionFindings.finding_count} findings, Heat Score ${visionFindings.heat_score.total}/100 (${visionFindings.heat_score.classification}) in ${visionDuration}ms`)
+      } catch (visionErr: any) {
+        console.warn(`[GenerateDirect] Vision inspection failed (non-critical): ${visionErr.message}`)
+        // Report continues without vision data — can be triggered later via /vision-inspect
+      }
+    } else {
+      console.log(`[GenerateDirect] Skipping vision inspection: ${!satImageUrl ? 'no satellite image' : 'no GCP credentials'} — trigger manually via POST /api/reports/:id/vision-inspect`)
+    }
+
     // ── SAVE REPORT ──
-    // Generate the report HTML (with Gemini geometry if available, fallback otherwise).
+    // Generate the report HTML (with Gemini geometry + vision findings if available).
     const professionalHtml = generateProfessionalReportHTML(reportData)
     const edgeSummary = reportData.edge_summary
     const materials = reportData.materials
@@ -516,6 +564,7 @@ export async function generateReportForOrder(
         report_version = ?,
         api_response_raw = ?,
         satellite_image_url = ?,
+        vision_findings_json = ?,
         status = 'completed', generation_completed_at = datetime('now'), updated_at = datetime('now')
       WHERE order_id = ?
     `).bind(
@@ -538,6 +587,7 @@ export async function generateReportForOrder(
       usedDataLayers ? '3.0' : '2.0',
       JSON.stringify(reportData),
       satImageUrl || null,
+      reportData.vision_findings ? JSON.stringify(reportData.vision_findings) : null,
       orderId
     ).run()
 
@@ -939,6 +989,185 @@ reportsRoutes.post('/:orderId/toggle-segments', async (c) => {
   } catch (err: any) {
     console.error(`[SegmentToggle] Error:`, err)
     return c.json({ error: 'Failed to toggle segments', details: err.message }, 500)
+  }
+})
+
+// ============================================================
+// VISION INSPECT — Multimodal AI Roof Condition Analysis
+// "The Eyes Layer" — Gemma 3 / Gemini Vision inspects aerial imagery
+// to detect vulnerabilities, obstructions, and environmental threats
+// that raw Solar API data cannot capture.
+//
+// Produces:
+//   1. VisionFindings — detailed per-finding detection list
+//   2. HeatScore — CRM lead prioritization (0-100)
+//   3. Overall condition assessment
+//
+// Stored in: reports.vision_findings_json (TEXT column)
+// ============================================================
+reportsRoutes.post('/:orderId/vision-inspect', async (c) => {
+  const startMs = Date.now()
+  try {
+    const orderId = c.req.param('orderId')
+    const env = c.env
+
+    // Get report data
+    const report = await env.DB.prepare(
+      'SELECT id, order_id, api_response_raw, satellite_image_url, vision_findings_json, status FROM reports WHERE order_id = ?'
+    ).bind(orderId).first<any>()
+
+    if (!report) return c.json({ error: 'Report not found' }, 404)
+    if (report.status !== 'completed') return c.json({ error: `Report status is "${report.status}" — must be completed first` }, 400)
+
+    // Get order for address/coords
+    const order = await env.DB.prepare('SELECT * FROM orders WHERE id = ?').bind(orderId).first<any>()
+    if (!order) return c.json({ error: 'Order not found' }, 404)
+
+    // Parse existing report data to find the satellite image
+    let reportData: any = null
+    try {
+      reportData = report.api_response_raw ? JSON.parse(report.api_response_raw) : null
+    } catch (e) {}
+
+    // Determine best image URL for inspection
+    let imageUrl = reportData?.imagery?.satellite_overhead_url
+      || reportData?.imagery?.satellite_url
+      || report.satellite_image_url
+
+    if (!imageUrl) {
+      // Build satellite URL from order coords
+      const lat = order.latitude || reportData?.property?.latitude
+      const lng = order.longitude || reportData?.property?.longitude
+      const mapsKey = env.GOOGLE_MAPS_API_KEY || env.GOOGLE_SOLAR_API_KEY
+      if (lat && lng && mapsKey) {
+        imageUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=20&size=640x640&scale=2&maptype=satellite&key=${mapsKey}`
+      }
+    }
+
+    if (!imageUrl) {
+      return c.json({ error: 'No satellite image available for vision inspection' }, 400)
+    }
+
+    console.log(`[VisionInspect] Order ${orderId}: Starting vision scan...`)
+
+    // Check for credentials
+    if (!env.GCP_SERVICE_ACCOUNT_KEY && !env.GOOGLE_VERTEX_API_KEY) {
+      return c.json({ error: 'No Gemini credentials configured — need GCP_SERVICE_ACCOUNT_KEY or GOOGLE_VERTEX_API_KEY' }, 400)
+    }
+
+    // Run vision scan
+    const visionFindings = await visionScan(imageUrl, {
+      apiKey: env.GOOGLE_VERTEX_API_KEY,
+      project: env.GOOGLE_CLOUD_PROJECT,
+      location: env.GOOGLE_CLOUD_LOCATION || 'us-central1',
+      serviceAccountKey: env.GCP_SERVICE_ACCOUNT_KEY
+    }, {
+      model: 'gemini-2.0-flash',
+      timeoutMs: 45000,
+      sourceType: 'satellite_overhead'
+    })
+
+    // Store in DB
+    const visionJson = JSON.stringify(visionFindings)
+    await env.DB.prepare(
+      'UPDATE reports SET vision_findings_json = ?, updated_at = datetime(\'now\') WHERE order_id = ?'
+    ).bind(visionJson, orderId).run()
+
+    // If we have report data, inject vision findings and regenerate HTML
+    if (reportData) {
+      reportData.vision_findings = visionFindings
+
+      // Update confidence score based on vision findings
+      if (reportData.quality) {
+        // Critical findings lower confidence, clean results boost it
+        if (visionFindings.heat_score.total >= 60) {
+          reportData.quality.confidence_score = Math.min(reportData.quality.confidence_score, 70)
+          reportData.quality.field_verification_recommended = true
+          reportData.quality.notes = reportData.quality.notes || []
+          reportData.quality.notes.push(`Vision AI detected ${visionFindings.finding_count} findings (Heat Score: ${visionFindings.heat_score.total}/100) — field verification strongly recommended`)
+        } else if (visionFindings.heat_score.total >= 30) {
+          reportData.quality.notes = reportData.quality.notes || []
+          reportData.quality.notes.push(`Vision AI: ${visionFindings.finding_count} findings detected (Heat Score: ${visionFindings.heat_score.total}/100, ${visionFindings.heat_score.classification})`)
+        }
+      }
+
+      // Regenerate HTML with vision findings embedded
+      const updatedHtml = generateProfessionalReportHTML(reportData)
+      await env.DB.prepare(
+        'UPDATE reports SET professional_report_html = ?, api_response_raw = ?, updated_at = datetime(\'now\') WHERE order_id = ?'
+      ).bind(updatedHtml, JSON.stringify(reportData), orderId).run()
+    }
+
+    const durationMs = Date.now() - startMs
+    console.log(`[VisionInspect] Order ${orderId}: ✅ Complete in ${durationMs}ms — ${visionFindings.finding_count} findings, Heat Score ${visionFindings.heat_score.total}/100`)
+
+    return c.json({
+      success: true,
+      order_id: orderId,
+      duration_ms: durationMs,
+      vision_findings: visionFindings
+    })
+
+  } catch (err: any) {
+    const durationMs = Date.now() - startMs
+    console.error(`[VisionInspect] Error after ${durationMs}ms:`, err.message)
+    return c.json({ error: 'Vision inspection failed', details: err.message, duration_ms: durationMs }, 500)
+  }
+})
+
+// ============================================================
+// GET VISION FINDINGS — Retrieve stored vision inspection results
+// ============================================================
+reportsRoutes.get('/:orderId/vision', async (c) => {
+  try {
+    const orderId = c.req.param('orderId')
+    const report = await c.env.DB.prepare(
+      'SELECT vision_findings_json FROM reports WHERE order_id = ?'
+    ).bind(orderId).first<any>()
+
+    if (!report) return c.json({ error: 'Report not found' }, 404)
+
+    if (!report.vision_findings_json) {
+      return c.json({
+        order_id: orderId,
+        has_vision: false,
+        message: 'No vision inspection has been run yet. POST to /api/reports/:id/vision-inspect to trigger one.'
+      })
+    }
+
+    const findings: VisionFindings = JSON.parse(report.vision_findings_json)
+
+    // Accept optional filter params
+    const minConf = parseInt(c.req.query('min_confidence') || '0')
+    const catFilter = c.req.query('category')
+    const sevFilter = c.req.query('severity')
+
+    let filteredFindings = findings.findings
+    if (minConf > 0 || catFilter || sevFilter) {
+      filteredFindings = filterFindings(findings.findings, {
+        minConfidence: minConf || undefined,
+        categories: catFilter ? catFilter.split(',') as any[] : undefined,
+        severities: sevFilter ? sevFilter.split(',') as any[] : undefined
+      })
+    }
+
+    return c.json({
+      order_id: orderId,
+      has_vision: true,
+      inspected_at: findings.inspected_at,
+      model: findings.model,
+      finding_count: filteredFindings.length,
+      total_finding_count: findings.finding_count,
+      findings: filteredFindings,
+      heat_score: findings.heat_score,
+      overall_condition: findings.overall_condition,
+      summary: findings.summary,
+      duration_ms: findings.duration_ms,
+      source_image: findings.source_image
+    })
+
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500)
   }
 })
 
@@ -1386,6 +1615,45 @@ reportsRoutes.post('/:orderId/generate-enhanced', async (c) => {
     // DataLayers path already has Gemini geometry in reportData.ai_geometry (from the block above).
     // No need for separate GPT diagram — generateProfessionalReportHTML renders from real geometry.
 
+    // ── VISION-BASED INSPECTION (Enhanced Pipeline) ──
+    // The enhanced pipeline has more time budget — run vision scan if feasible.
+    const enhancedVisionRemainingMs = 28_000 - (Date.now() - enhancedPipelineStart)
+    const enhancedOverheadUrl = reportData.imagery?.satellite_overhead_url || reportData.imagery?.satellite_url || dlAnalysis.satelliteUrl
+    if (enhancedVisionRemainingMs >= 10_000 && enhancedOverheadUrl && (c.env.GCP_SERVICE_ACCOUNT_KEY || c.env.GOOGLE_VERTEX_API_KEY)) {
+      try {
+        console.log(`[Generate DL] Starting vision inspection (${Math.round(enhancedVisionRemainingMs/1000)}s budget remaining)...`)
+        const visionStartMs = Date.now()
+        const visionFindings = await visionScan(enhancedOverheadUrl, {
+          apiKey: c.env.GOOGLE_VERTEX_API_KEY,
+          project: c.env.GOOGLE_CLOUD_PROJECT,
+          location: c.env.GOOGLE_CLOUD_LOCATION || 'us-central1',
+          serviceAccountKey: c.env.GCP_SERVICE_ACCOUNT_KEY
+        }, {
+          model: 'gemini-2.0-flash',
+          timeoutMs: Math.min(Math.floor(enhancedVisionRemainingMs * 0.8), 25000),
+          sourceType: 'satellite_overhead'
+        })
+        reportData.vision_findings = visionFindings
+
+        if (reportData.quality) {
+          if (visionFindings.heat_score.total >= 60) {
+            reportData.quality.confidence_score = Math.min(reportData.quality.confidence_score, 70)
+            reportData.quality.field_verification_recommended = true
+            reportData.quality.notes = reportData.quality.notes || []
+            reportData.quality.notes.push(`Vision AI detected ${visionFindings.finding_count} findings (Heat Score: ${visionFindings.heat_score.total}/100) — field verification strongly recommended`)
+          } else if (visionFindings.heat_score.total >= 30) {
+            reportData.quality.notes = reportData.quality.notes || []
+            reportData.quality.notes.push(`Vision AI: ${visionFindings.finding_count} findings detected (Heat Score: ${visionFindings.heat_score.total}/100, ${visionFindings.heat_score.classification})`)
+          }
+        }
+        console.log(`[Generate DL] ✅ Vision scan: ${visionFindings.finding_count} findings, Heat ${visionFindings.heat_score.total}/100 in ${Date.now() - visionStartMs}ms`)
+      } catch (visionErr: any) {
+        console.warn(`[Generate DL] Vision inspection failed (non-critical): ${visionErr.message}`)
+      }
+    } else {
+      console.warn(`[Generate DL] ⏱ Skipping vision inspection — ${enhancedVisionRemainingMs < 10_000 ? `only ${Math.round(enhancedVisionRemainingMs/1000)}s remaining` : 'no image/credentials'}`)
+    }
+
     // Generate professional HTML report
     const professionalHtml = generateProfessionalReportHTML(reportData)
 
@@ -1416,6 +1684,7 @@ reportsRoutes.post('/:orderId/generate-enhanced', async (c) => {
           report_version = '3.0',
           api_response_raw = ?,
           satellite_image_url = ?,
+          vision_findings_json = ?,
           status = 'completed', updated_at = datetime('now')
         WHERE order_id = ?
       `).bind(
@@ -1437,6 +1706,7 @@ reportsRoutes.post('/:orderId/generate-enhanced', async (c) => {
         professionalHtml,
         JSON.stringify(reportData),
         dlAnalysis.satelliteUrl,
+        reportData.vision_findings ? JSON.stringify(reportData.vision_findings) : null,
         orderId
       ).run()
     } else {
@@ -1454,8 +1724,8 @@ reportsRoutes.post('/:orderId/generate-enhanced', async (c) => {
           imagery_quality, imagery_date,
           confidence_score, field_verification_recommended,
           professional_report_html, report_version,
-          api_response_raw, satellite_image_url, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '3.0', ?, ?, 'completed')
+          api_response_raw, satellite_image_url, vision_findings_json, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '3.0', ?, ?, ?, 'completed')
       `).bind(
         orderId,
         reportData.total_true_area_sqft, reportData.total_true_area_sqm,
@@ -1475,7 +1745,8 @@ reportsRoutes.post('/:orderId/generate-enhanced', async (c) => {
         reportData.quality.confidence_score, reportData.quality.field_verification_recommended ? 1 : 0,
         professionalHtml,
         JSON.stringify(reportData),
-        dlAnalysis.satelliteUrl
+        dlAnalysis.satelliteUrl,
+        reportData.vision_findings ? JSON.stringify(reportData.vision_findings) : null
       ).run()
     }
 
@@ -3329,6 +3600,7 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
       ${report.ai_geometry?.facets?.length ? `<span style="padding:3px 10px;border-radius:3px;font-size:8px;font-weight:700;background:#ecfdf5;color:#059669;border:1px solid #6ee7b7">AI OVERLAY: ${report.ai_geometry.facets.length} FACETS</span>` : ''}
       ${report.property_overlap_flag ? `<span style="padding:3px 10px;border-radius:3px;font-size:8px;font-weight:700;background:#fffbeb;color:#b45309;border:1px solid #fbbf24">&#9888; POTENTIAL OVERLAP</span>` : ''}
       ${(report.excluded_segments?.length || 0) > 0 ? `<span style="padding:3px 10px;border-radius:3px;font-size:8px;font-weight:700;background:#f0f9ff;color:#0369a1;border:1px solid #7dd3fc">${report.excluded_segments!.length} SEGMENTS EXCLUDED</span>` : ''}
+      ${report.vision_findings ? `<span style="padding:3px 10px;border-radius:3px;font-size:8px;font-weight:700;background:${report.vision_findings.heat_score.total >= 50 ? '#fef2f2' : '#ecfdf5'};color:${report.vision_findings.heat_score.total >= 50 ? '#dc2626' : '#059669'};border:1px solid ${report.vision_findings.heat_score.total >= 50 ? '#fca5a5' : '#6ee7b7'}">&#128065; HEAT: ${report.vision_findings.heat_score.total}/100</span>` : ''}
     </div>
   </div>
 
@@ -3581,6 +3853,8 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
 
 <!-- Pages 7-10 and Legal Disclaimer removed — report truncated to 6 pages -->
 
+${report.vision_findings ? buildVisionFindingsHTML(report.vision_findings) : ''}
+
 <script>
 // Street View grey-detection: if image is mostly grey, it's a Google placeholder
 document.querySelectorAll('img[alt="Street View"]').forEach(function(img){
@@ -3606,6 +3880,118 @@ document.querySelectorAll('img[alt="Street View"]').forEach(function(img){
 </script>
 </body>
 </html>`
+}
+
+// ============================================================
+// HELPER: Build Vision Findings HTML section for professional report
+// Renders the multimodal AI inspection results as a styled page
+// ============================================================
+function buildVisionFindingsHTML(vf: VisionFindings): string {
+  if (!vf || !vf.findings || vf.findings.length === 0) return ''
+
+  const hs = vf.heat_score
+  const heatColor = hs.total >= 75 ? '#dc2626' : hs.total >= 50 ? '#ea580c' : hs.total >= 25 ? '#d97706' : '#059669'
+  const heatBg = hs.total >= 75 ? '#fef2f2' : hs.total >= 50 ? '#fff7ed' : hs.total >= 25 ? '#fffbeb' : '#ecfdf5'
+  const condColor: Record<string, string> = { excellent: '#059669', good: '#16a34a', fair: '#d97706', poor: '#ea580c', critical: '#dc2626' }
+
+  const severityBadge = (sev: string) => {
+    const c: Record<string, [string, string]> = { low: ['#ecfdf5', '#059669'], moderate: ['#fffbeb', '#d97706'], high: ['#fff7ed', '#ea580c'], critical: ['#fef2f2', '#dc2626'] }
+    const [bg, fg] = c[sev] || ['#f1f5f9', '#475569']
+    return `<span style="padding:2px 6px;border-radius:2px;font-size:7px;font-weight:700;background:${bg};color:${fg};text-transform:uppercase">${sev}</span>`
+  }
+
+  const catIcon: Record<string, string> = { vulnerability: '&#9888;', obstruction: '&#9899;', environmental: '&#127795;', condition: '&#128269;' }
+
+  const findingsRows = vf.findings.slice(0, 12).map(f =>
+    `<tr>
+      <td style="padding:4px 6px;font-size:8px">${catIcon[f.category] || '&#8226;'} ${f.label}</td>
+      <td style="padding:4px 6px;font-size:8px;text-align:center">${severityBadge(f.severity)}</td>
+      <td style="padding:4px 6px;font-size:8px;text-align:center">${f.confidence}%</td>
+      <td style="padding:4px 6px;font-size:7.5px;color:#475569">${f.description.substring(0, 80)}${f.description.length > 80 ? '...' : ''}</td>
+    </tr>`
+  ).join('')
+
+  // Heat Score gauge bar
+  const gaugeWidth = Math.max(5, hs.total)
+
+  return `
+<!-- ==================== VISION INSPECTION PAGE ==================== -->
+<div class="page" style="page-break-before:always">
+  <div style="background:#002244;padding:10px 32px;display:flex;justify-content:space-between;align-items:center">
+    <div style="color:#fff;font-size:13px;font-weight:700;letter-spacing:1px">&#128065; AI VISION INSPECTION</div>
+    <div style="color:#7eafd4;font-size:9px;text-align:right">Multimodal Roof Condition Analysis &bull; ${vf.model}</div>
+  </div>
+  <div style="padding:16px 32px 50px">
+
+    <!-- Heat Score + Condition Summary -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+      <div style="background:${heatBg};border:1px solid ${heatColor}33;border-radius:6px;padding:14px">
+        <div style="font-size:9px;font-weight:700;color:${heatColor};text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">&#128293; CRM Heat Score</div>
+        <div style="display:flex;align-items:baseline;gap:8px">
+          <span style="font-size:32px;font-weight:900;color:${heatColor}">${hs.total}</span>
+          <span style="font-size:14px;color:${heatColor};font-weight:600">/100</span>
+          <span style="padding:3px 10px;border-radius:3px;font-size:9px;font-weight:700;background:${heatColor};color:#fff;text-transform:uppercase;margin-left:8px">${hs.classification.replace('_', ' ')}</span>
+        </div>
+        <div style="background:#e2e8f0;border-radius:4px;height:8px;margin:8px 0;overflow:hidden">
+          <div style="width:${gaugeWidth}%;height:100%;background:${heatColor};border-radius:4px;transition:width 0.3s"></div>
+        </div>
+        <div style="font-size:7.5px;color:#64748b">${hs.summary}</div>
+      </div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:14px">
+        <div style="font-size:9px;font-weight:700;color:#334155;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Score Components</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:8px">
+          <div style="display:flex;justify-content:space-between"><span style="color:#64748b">Age & Wear</span><span style="font-weight:700">${hs.components.age_wear}/30</span></div>
+          <div style="display:flex;justify-content:space-between"><span style="color:#64748b">Structural</span><span style="font-weight:700">${hs.components.structural}/25</span></div>
+          <div style="display:flex;justify-content:space-between"><span style="color:#64748b">Environmental</span><span style="font-weight:700">${hs.components.environmental}/20</span></div>
+          <div style="display:flex;justify-content:space-between"><span style="color:#64748b">Obstructions</span><span style="font-weight:700">${hs.components.obstruction_complexity}/15</span></div>
+          <div style="display:flex;justify-content:space-between"><span style="color:#64748b">Urgency</span><span style="font-weight:700">${hs.components.urgency_bonus}/10</span></div>
+          <div style="display:flex;justify-content:space-between"><span style="color:#64748b">Condition</span><span style="font-weight:700;color:${condColor[vf.overall_condition] || '#475569'};text-transform:uppercase">${vf.overall_condition}</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Findings count summary -->
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <div style="flex:1;text-align:center;padding:6px;background:#fef2f2;border-radius:4px;border:1px solid #fecaca">
+        <div style="font-size:18px;font-weight:900;color:#dc2626">${vf.findings.filter(f => f.category === 'vulnerability').length}</div>
+        <div style="font-size:7px;color:#991b1b;font-weight:600">Vulnerabilities</div>
+      </div>
+      <div style="flex:1;text-align:center;padding:6px;background:#f0f9ff;border-radius:4px;border:1px solid #bae6fd">
+        <div style="font-size:18px;font-weight:900;color:#0369a1">${vf.findings.filter(f => f.category === 'obstruction').length}</div>
+        <div style="font-size:7px;color:#0c4a6e;font-weight:600">Obstructions</div>
+      </div>
+      <div style="flex:1;text-align:center;padding:6px;background:#ecfdf5;border-radius:4px;border:1px solid #a7f3d0">
+        <div style="font-size:18px;font-weight:900;color:#059669">${vf.findings.filter(f => f.category === 'environmental').length}</div>
+        <div style="font-size:7px;color:#065f46;font-weight:600">Environmental</div>
+      </div>
+      <div style="flex:1;text-align:center;padding:6px;background:#f5f3ff;border-radius:4px;border:1px solid #c4b5fd">
+        <div style="font-size:18px;font-weight:900;color:#7c3aed">${vf.findings.filter(f => f.category === 'condition').length}</div>
+        <div style="font-size:7px;color:#5b21b6;font-weight:600">Condition</div>
+      </div>
+    </div>
+
+    <!-- Findings table -->
+    <table style="width:100%;border-collapse:collapse;font-size:8.5px;margin-top:4px">
+      <thead>
+        <tr style="background:#003366;color:#fff">
+          <th style="padding:5px 6px;text-align:left;font-size:7.5px;font-weight:700">Finding</th>
+          <th style="padding:5px 6px;text-align:center;font-size:7.5px;font-weight:700;width:70px">Severity</th>
+          <th style="padding:5px 6px;text-align:center;font-size:7.5px;font-weight:700;width:45px">Conf.</th>
+          <th style="padding:5px 6px;text-align:left;font-size:7.5px;font-weight:700">Description</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${findingsRows}
+      </tbody>
+    </table>
+    ${vf.findings.length > 12 ? `<div style="font-size:7px;color:#94a3b8;text-align:center;margin-top:4px">... and ${vf.findings.length - 12} more findings</div>` : ''}
+
+    <div style="margin-top:12px;padding:8px 12px;background:#eff6ff;border-radius:4px;border-left:3px solid #3b82f6;font-size:7.5px;color:#1e40af">
+      <strong>AI Vision Note:</strong> ${vf.summary} &mdash; Inspected ${new Date(vf.inspected_at).toLocaleDateString('en-CA')} using ${vf.model}. Analysis duration: ${vf.duration_ms}ms.
+      ${vf.heat_score.total >= 50 ? '<br><strong>&#9888; Field verification strongly recommended before quoting.</strong>' : ''}
+    </div>
+  </div>
+</div>`
 }
 
 // ============================================================

@@ -521,6 +521,11 @@ export interface RoofReport {
   /** Human-readable details about why the overlap flag was raised */
   property_overlap_details?: string[]
 
+  // ---- VISION-BASED INSPECTION (Gemma 3 / Gemini Multimodal "Eyes" Layer) ----
+  /** Visual findings from multimodal AI inspection of aerial imagery.
+   *  Detects vulnerabilities and obstructions that raw API data misses. */
+  vision_findings?: VisionFindings | null
+
   // ---- METADATA ----
   metadata: {
     /** 'google_solar_api' or 'mock' */
@@ -536,6 +541,94 @@ export interface RoofReport {
     /** Cost per query: ~$0.075 (vs $50-200 EagleView) */
     cost_per_query?: string
   }
+}
+
+// ============================================================
+// VISION-BASED INSPECTION — Multimodal AI "Eyes" Layer
+// ============================================================
+// Gemma 3 / Gemini Vision analyzes aerial imagery to detect
+// roof vulnerabilities, obstructions, and condition indicators
+// that numeric API data alone cannot capture.
+//
+// The findings feed into:
+//   1. Heat Score — CRM lead prioritization (higher = more urgent)
+//   2. Report quality notes — flagged for field verification
+//   3. Material estimate adjustments — extra flashing, sealant, etc.
+// ============================================================
+
+/** Severity of a visual finding */
+export type VisionSeverity = 'low' | 'moderate' | 'high' | 'critical'
+
+/** Category of visual finding */
+export type VisionCategory = 'vulnerability' | 'obstruction' | 'condition' | 'environmental'
+
+/** A single visual finding detected from aerial imagery */
+export interface VisionFinding {
+  /** Unique finding ID, e.g. "VF-001" */
+  id: string
+  /** Category: vulnerability, obstruction, condition, environmental */
+  category: VisionCategory
+  /** Specific type, e.g. "rusted_flashing", "chimney", "heavy_moss", "tree_overhang" */
+  type: string
+  /** Human-readable label */
+  label: string
+  /** Detailed description of the finding */
+  description: string
+  /** Severity: low, moderate, high, critical */
+  severity: VisionSeverity
+  /** Confidence 0-100 of this detection */
+  confidence: number
+  /** Approximate bounding box on satellite image [minX, minY, maxX, maxY] pixel coords (0-640) */
+  bounding_box?: number[]
+  /** Impact on roofing job: cost, labor, timeline, safety */
+  impact: string
+  /** Recommended action for the roofer */
+  recommendation: string
+}
+
+/** Heat Score breakdown — used for CRM lead prioritization */
+export interface HeatScore {
+  /** Overall heat score 0-100 (higher = more urgent roof job) */
+  total: number
+  /** Score components that contribute to the total */
+  components: {
+    /** Age/wear indicators detected visually (0-30) */
+    age_wear: number
+    /** Structural vulnerabilities: flashing, shingle damage (0-25) */
+    structural: number
+    /** Environmental threats: moss, tree overhang, debris (0-20) */
+    environmental: number
+    /** Obstruction complexity: chimneys, skylights, HVAC (0-15) */
+    obstruction_complexity: number
+    /** Urgency multiplier from critical findings (0-10) */
+    urgency_bonus: number
+  }
+  /** Qualitative classification */
+  classification: 'cold' | 'warm' | 'hot' | 'on_fire'
+  /** Human-readable summary for CRM display */
+  summary: string
+}
+
+/** Complete vision inspection result */
+export interface VisionFindings {
+  /** ISO 8601 timestamp of the inspection */
+  inspected_at: string
+  /** Model used for inspection */
+  model: string
+  /** Total number of findings */
+  finding_count: number
+  /** Array of individual findings */
+  findings: VisionFinding[]
+  /** CRM Heat Score derived from findings */
+  heat_score: HeatScore
+  /** Overall roof condition assessment */
+  overall_condition: 'excellent' | 'good' | 'fair' | 'poor' | 'critical'
+  /** One-line summary for quick CRM view */
+  summary: string
+  /** Processing duration in ms */
+  duration_ms: number
+  /** Source image analyzed */
+  source_image: 'satellite_overhead' | 'rgb_geotiff' | 'street_view'
 }
 
 // ============================================================
