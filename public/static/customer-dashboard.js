@@ -73,6 +73,7 @@ function renderDashboard() {
   var paidCredits = c.paid_credits_remaining || 0;
   var completedReports = custState.orders.filter(function(o) { return o.status === 'completed'; }).length;
   var processingReports = custState.orders.filter(function(o) { return o.status === 'processing'; }).length;
+  var enhancingReports = custState.orders.filter(function(o) { return o.enhancement_status === 'sent'; }).length;
 
   // Determine branding setup completion status
   var brandingComplete = !!(c.brand_logo_url && c.brand_business_name);
@@ -121,6 +122,7 @@ function renderDashboard() {
             (paidCredits > 0 ? '<div class="px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-full text-xs font-bold text-blue-700"><i class="fas fa-coins mr-1"></i>' + paidCredits + ' Credits</div>' : '') +
             '<div class="px-3 py-1.5 bg-indigo-50 border border-indigo-200 rounded-full text-xs font-bold text-indigo-700"><i class="fas fa-file-alt mr-1"></i>' + completedReports + ' Reports</div>' +
             (processingReports > 0 ? '<div class="px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-full text-xs font-bold text-amber-700 animate-pulse"><i class="fas fa-spinner fa-spin mr-1"></i>' + processingReports + ' Generating</div>' : '') +
+            (enhancingReports > 0 ? '<div class="px-3 py-1.5 bg-purple-50 border border-purple-200 rounded-full text-xs font-bold text-purple-700 animate-pulse"><i class="fas fa-magic mr-1"></i>' + enhancingReports + ' AI Enhancing</div>' : '') +
           '</div>' +
         '</div>' +
       '</div>' +
@@ -219,6 +221,8 @@ function renderRecentOrders() {
   for (var i = 0; i < orders.length; i++) {
     var o = orders[i];
     var statusClass = o.status === 'completed' ? 'bg-green-100 text-green-700' : (o.status === 'processing' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600');
+    var enhanceClass = o.enhancement_status === 'enhanced' ? 'bg-purple-100 text-purple-700' : (o.enhancement_status === 'sent' ? 'bg-amber-100 text-amber-700' : '');
+    var enhanceBadge = o.enhancement_status === 'enhanced' ? '<span class="px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full text-[10px] font-bold"><i class="fas fa-magic mr-1"></i>AI Enhanced</span>' : (o.enhancement_status === 'sent' ? '<span class="px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full text-[10px] font-bold animate-pulse"><i class="fas fa-magic fa-spin mr-1"></i>AI Enhancing</span>' : '');
     html += '<div class="flex items-center justify-between p-3 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors">' +
       '<div class="flex-1 min-w-0">' +
         '<p class="text-sm font-medium text-gray-800 truncate"><i class="fas fa-map-marker-alt text-red-400 mr-1.5 text-xs"></i>' + (o.property_address || 'Unknown') + '</p>' +
@@ -226,6 +230,7 @@ function renderRecentOrders() {
       '</div>' +
       '<div class="flex items-center gap-2 ml-3">' +
         '<span class="px-2 py-0.5 ' + statusClass + ' rounded-full text-[10px] font-bold capitalize">' + (o.status === 'processing' ? '<i class="fas fa-spinner fa-spin mr-1"></i>' : '') + o.status + '</span>' +
+        enhanceBadge +
         (o.report_status === 'completed' ? '<a href="/api/reports/' + o.id + '/html" target="_blank" class="px-2.5 py-1 bg-brand-600 text-white rounded-lg text-xs font-medium hover:bg-brand-700"><i class="fas fa-eye mr-1"></i>View</a>' : '') +
       '</div>' +
     '</div>';

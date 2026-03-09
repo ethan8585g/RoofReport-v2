@@ -106,6 +106,8 @@ app.get('/api/health', (c) => {
       OPENAI_BASE_URL: !!(c.env as any).OPENAI_BASE_URL,
       CLOUD_RUN_AI_URL: (c.env as any).CLOUD_RUN_AI_URL || 'https://collab-581996238660.europe-west1.run.app',
       CLOUD_RUN_AI_TOKEN: !!(c.env as any).CLOUD_RUN_AI_TOKEN,
+      REPORT_WEBHOOK_SECRET: !!(c.env as any).REPORT_WEBHOOK_SECRET,
+      AI_STUDIO_ENHANCE_URL: (c.env as any).AI_STUDIO_ENHANCE_URL || false,
       DB: !!c.env.DB
     },
     vertex_ai: {

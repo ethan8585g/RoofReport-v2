@@ -254,3 +254,91 @@ export async function getSettingValue(db: D1Database, key: string, companyId: nu
   ).bind(key, companyId).first<{ setting_value: string }>()
   return row?.setting_value || null
 }
+
+// ============================================================
+// REPORT ENHANCEMENT WEBHOOK PIPELINE
+// ============================================================
+
+/** Mark report as sent to Cloud Run for enhancement */
+export async function markEnhancementSent(db: D1Database, orderId: number | string) {
+  await db.prepare(`
+    UPDATE reports SET
+      enhancement_status = 'sent',
+      enhancement_sent_at = datetime('now'),
+      enhancement_error = NULL,
+      updated_at = datetime('now')
+    WHERE order_id = ?
+  `).bind(orderId).run()
+}
+
+/** Mark enhancement as actively processing (Cloud Run acknowledged) */
+export async function markEnhancementProcessing(db: D1Database, orderId: number | string) {
+  await db.prepare(`
+    UPDATE reports SET enhancement_status = 'enhancing', updated_at = datetime('now')
+    WHERE order_id = ?
+  `).bind(orderId).run()
+}
+
+/** Save the enhanced report from Cloud Run webhook callback */
+export async function saveEnhancedReport(
+  db: D1Database, orderId: number | string,
+  enhancedHtml: string, enhancedRawJson: string,
+  version: string, processingTimeMs: number
+) {
+  // Save enhanced report and ALSO overwrite the primary report HTML
+  // so the user sees the enhanced version immediately
+  await db.prepare(`
+    UPDATE reports SET
+      enhanced_report_html = ?,
+      enhanced_api_response_raw = ?,
+      enhancement_version = ?,
+      enhancement_processing_time_ms = ?,
+      enhancement_status = 'enhanced',
+      enhancement_completed_at = datetime('now'),
+      professional_report_html = ?,
+      api_response_raw = ?,
+      report_version = ?,
+      updated_at = datetime('now')
+    WHERE order_id = ?
+  `).bind(
+    enhancedHtml, enhancedRawJson, version, processingTimeMs,
+    enhancedHtml, enhancedRawJson, 'enhanced-' + version,
+    orderId
+  ).run()
+}
+
+/** Mark enhancement as failed (original report remains valid) */
+export async function markEnhancementFailed(db: D1Database, orderId: number | string, error: string) {
+  await db.prepare(`
+    UPDATE reports SET
+      enhancement_status = 'enhancement_failed',
+      enhancement_error = ?,
+      enhancement_completed_at = datetime('now'),
+      updated_at = datetime('now')
+    WHERE order_id = ?
+  `).bind(error.substring(0, 1000), orderId).run()
+}
+
+/** Get report data needed for the enhancement payload */
+export async function getReportForEnhancement(db: D1Database, orderId: number | string) {
+  return db.prepare(`
+    SELECT r.order_id, r.api_response_raw, r.professional_report_html,
+           r.satellite_image_url, r.enhancement_status, r.status,
+           o.latitude, o.longitude, o.property_address,
+           o.property_city, o.property_province, o.property_postal_code,
+           o.roof_trace_json, o.price_per_bundle,
+           o.homeowner_name, o.requester_name, o.requester_company
+    FROM reports r
+    JOIN orders o ON r.order_id = o.id
+    WHERE r.order_id = ?
+  `).bind(orderId).first()
+}
+
+/** Get enhancement status for a report */
+export async function getEnhancementStatus(db: D1Database, orderId: number | string) {
+  return db.prepare(`
+    SELECT enhancement_status, enhancement_sent_at, enhancement_completed_at,
+           enhancement_error, enhancement_processing_time_ms, enhancement_version
+    FROM reports WHERE order_id = ?
+  `).bind(orderId).first()
+}

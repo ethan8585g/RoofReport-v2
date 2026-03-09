@@ -87,6 +87,12 @@ export type Bindings = {
   // Used via GenSpark proxy for AI-powered chat responses
   OPENAI_API_KEY: string        // GenSpark LLM proxy key
   OPENAI_BASE_URL: string       // e.g. "https://www.genspark.ai/api/llm_proxy/v1"
+
+  // Report Enhancement Webhook — Async AI Pipeline
+  // Shared secret for webhook authentication between Cloud Run → Cloudflare
+  REPORT_WEBHOOK_SECRET: string    // e.g. "whk_ffd6b6fff1f7a681f7bd518c8885789e00a8747d67379454d33e227e86e0fa5e"
+  // Google AI Studio / Cloud Run enhancement engine URL
+  AI_STUDIO_ENHANCE_URL: string    // e.g. "https://your-cloud-run-service.run.app/enhance"
 }
 
 // ============================================================

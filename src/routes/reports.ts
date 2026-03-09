@@ -60,7 +60,7 @@ async function validateAdminOrCustomer(db: D1Database, authHeader: string | unde
 
 reportsRoutes.use('/*', async (c, next) => {
   const path = c.req.path
-  if (path.endsWith('/html') || path.endsWith('/pdf')) return next()
+  if (path.endsWith('/html') || path.endsWith('/pdf') || path.endsWith('/webhook-update') || path.endsWith('/enhancement-status')) return next()
   const user = await validateAdminOrCustomer(c.env.DB, c.req.header('Authorization'))
   if (!user) return c.json({ error: 'Authentication required' }, 401)
   c.set('user' as any, user)
@@ -639,6 +639,123 @@ reportsRoutes.post('/:orderId/email', async (c) => {
 })
 
 // ============================================================
+// POST /:orderId/webhook-update — Receive enhanced report from Cloud Run
+// ============================================================
+// This endpoint is called by your Google AI Studio Cloud Run app
+// after it finishes enhancing the report. Auth via REPORT_WEBHOOK_SECRET.
+reportsRoutes.post('/:orderId/webhook-update', async (c) => {
+  const orderId = c.req.param('orderId')
+  
+  // Validate webhook secret
+  const authHeader = c.req.header('Authorization')
+  const token = authHeader?.replace('Bearer ', '')
+  const webhookSecret = c.env.REPORT_WEBHOOK_SECRET
+  if (!webhookSecret || !token || token !== webhookSecret) {
+    console.warn(`[Webhook] Order ${orderId}: Invalid or missing webhook token`)
+    return c.json({ error: 'Unauthorized — invalid webhook token' }, 401)
+  }
+
+  const body = await c.req.json().catch(() => null)
+  if (!body) return c.json({ error: 'Invalid JSON body' }, 400)
+
+  console.log(`[Webhook] Order ${orderId}: Received enhanced report callback`)
+  console.log(`[Webhook] Order ${orderId}: Keys: ${Object.keys(body).join(', ')}`)
+
+  // The Cloud Run engine sends back the enhanced report data
+  const {
+    enhanced_html,
+    enhanced_report_data,       // Full RoofReport JSON (enhanced)
+    enhancement_version = '1.0',
+    processing_time_ms = 0,
+    status = 'success',
+    error_message
+  } = body
+
+  if (status === 'failed' || status === 'error') {
+    console.error(`[Webhook] Order ${orderId}: Enhancement FAILED: ${error_message}`)
+    await repo.markEnhancementFailed(c.env.DB, orderId, error_message || 'Unknown error from Cloud Run')
+    return c.json({ success: false, message: 'Enhancement failure recorded', orderId })
+  }
+
+  // We need at least the enhanced report data JSON
+  if (!enhanced_report_data && !enhanced_html) {
+    return c.json({ error: 'Missing enhanced_report_data or enhanced_html' }, 400)
+  }
+
+  let finalHtml = enhanced_html || ''
+  let finalRawJson = ''
+
+  if (enhanced_report_data) {
+    // If full report data is provided, re-generate HTML from it
+    // This ensures our template is always used
+    try {
+      const reportData = typeof enhanced_report_data === 'string'
+        ? JSON.parse(enhanced_report_data)
+        : enhanced_report_data
+      finalRawJson = JSON.stringify(reportData)
+      // Re-generate HTML using our template for consistency
+      try {
+        finalHtml = generateProfessionalReportHTML(reportData)
+        console.log(`[Webhook] Order ${orderId}: Re-generated HTML from enhanced data (${finalHtml.length} chars)`)
+      } catch (htmlErr: any) {
+        // If HTML generation fails, use the provided HTML if available
+        console.warn(`[Webhook] Order ${orderId}: HTML re-gen failed, using provided HTML: ${htmlErr.message}`)
+        if (!finalHtml) {
+          finalHtml = `<html><body><h1>Enhanced Report</h1><p>HTML rendering failed</p></body></html>`
+        }
+      }
+    } catch (parseErr: any) {
+      console.error(`[Webhook] Order ${orderId}: Failed to parse enhanced_report_data: ${parseErr.message}`)
+      return c.json({ error: 'Invalid enhanced_report_data JSON' }, 400)
+    }
+  }
+
+  // Save the enhanced report — this overwrites the primary report HTML
+  await repo.saveEnhancedReport(
+    c.env.DB, orderId,
+    finalHtml, finalRawJson,
+    enhancement_version, processing_time_ms
+  )
+
+  // Log the enhancement
+  await repo.logApiRequest(c.env.DB, orderId, 'webhook_enhancement',
+    'cloud_run_callback', 200, processing_time_ms,
+    JSON.stringify({ version: enhancement_version, html_length: finalHtml.length })
+  )
+
+  console.log(`[Webhook] Order ${orderId}: ✅ Enhanced report saved (v${enhancement_version}, ${processing_time_ms}ms, ${finalHtml.length} chars)`)
+
+  return c.json({
+    success: true,
+    orderId,
+    enhancement_version,
+    html_length: finalHtml.length,
+    message: 'Enhanced report saved and deployed to customer dashboard'
+  })
+})
+
+// ============================================================
+// GET /:orderId/enhancement-status — Check enhancement progress
+// ============================================================
+reportsRoutes.get('/:orderId/enhancement-status', async (c) => {
+  const orderId = c.req.param('orderId')
+  
+  // Validate webhook secret for external polling (Cloud Run can check status)
+  const authHeader = c.req.header('Authorization')
+  const token = authHeader?.replace('Bearer ', '')
+  const webhookSecret = c.env.REPORT_WEBHOOK_SECRET
+  // Allow both webhook token and normal admin/customer auth
+  const user = await validateAdminOrCustomer(c.env.DB, c.req.header('Authorization'))
+  if (!user && (!webhookSecret || !token || token !== webhookSecret)) {
+    return c.json({ error: 'Authentication required' }, 401)
+  }
+
+  const status = await repo.getEnhancementStatus(c.env.DB, orderId)
+  if (!status) return c.json({ error: 'Report not found' }, 404)
+  return c.json({ success: true, orderId, ...status })
+})
+
+// ============================================================
 // EXPORTED: Direct report generation (called by square.ts etc.)
 // ============================================================
 export async function generateReportForOrder(
@@ -771,6 +888,60 @@ export async function generateReportForOrder(
     await repo.saveCompletedReport(env.DB, orderId, reportData, html, usedDL ? '3.0' : '2.0')
     await repo.markOrderStatus(env.DB, orderId, 'completed')
     console.log(`[Generate] Order ${orderId}: ✅ COMPLETED (${reportData.segments?.length} segments, ${reportData.total_true_area_sqft} sqft)`)
+
+    // ── FIRE-AND-FORGET: Send to Google AI Studio Cloud Run for enhancement ──
+    // This is non-blocking — the initial report is already saved and accessible
+    // The Cloud Run engine will call back /api/reports/:orderId/webhook-update when done
+    if (env.AI_STUDIO_ENHANCE_URL && env.REPORT_WEBHOOK_SECRET) {
+      try {
+        await repo.markEnhancementSent(env.DB, orderId)
+        const enhancePayload = {
+          order_id: orderId,
+          report_data: reportData,
+          report_html: html,
+          property: {
+            address: order.property_address,
+            city: order.property_city || '',
+            province: order.property_province || '',
+            postal_code: order.property_postal_code || '',
+            latitude: order.latitude,
+            longitude: order.longitude,
+          },
+          roof_trace: reportData.roof_trace || null,
+          customer_pricing: {
+            price_per_bundle: order.price_per_bundle || null,
+            gross_squares: reportData.customer_gross_squares || null,
+            total_cost_estimate: reportData.customer_total_cost_estimate || null,
+          },
+          satellite_image_url: reportData.imagery?.satellite_overhead_url || reportData.imagery?.satellite_url || null,
+          callback_url: `https://roofing-measurement-tool.pages.dev/api/reports/${orderId}/webhook-update`,
+          webhook_token: env.REPORT_WEBHOOK_SECRET,
+          requested_focus: 'roofSegmentStats',  // Main focus: roof insights / segment stats
+          requested_at: new Date().toISOString(),
+        }
+        // Fire-and-forget — do NOT await the Cloud Run response
+        fetch(env.AI_STUDIO_ENHANCE_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${env.REPORT_WEBHOOK_SECRET}`,
+          },
+          body: JSON.stringify(enhancePayload),
+        }).then(res => {
+          console.log(`[Enhance] Order ${orderId}: Sent to AI Studio (status ${res.status})`)
+        }).catch(err => {
+          console.warn(`[Enhance] Order ${orderId}: Failed to send to AI Studio: ${err.message}`)
+          // Mark enhancement failed but don't affect the original report
+          repo.markEnhancementFailed(env.DB, orderId, `Send failed: ${err.message}`).catch(() => {})
+        })
+        console.log(`[Enhance] Order ${orderId}: 🚀 Fire-and-forget sent to ${env.AI_STUDIO_ENHANCE_URL}`)
+      } catch (enhErr: any) {
+        console.warn(`[Enhance] Order ${orderId}: Enhancement setup failed (non-critical): ${enhErr.message}`)
+      }
+    } else {
+      console.log(`[Enhance] Order ${orderId}: Skipping AI enhancement (AI_STUDIO_ENHANCE_URL not configured)`)
+    }
+
     return { success: true, report: reportData, version: usedDL ? '3.0' : '2.0', provider: reportData.metadata?.provider || 'unknown' }
   } catch (err: any) {
     try { await repo.markReportFailed(env.DB, orderId, err.message); await repo.markOrderStatus(env.DB, orderId, 'failed') } catch {}
