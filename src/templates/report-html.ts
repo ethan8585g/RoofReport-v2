@@ -78,11 +78,19 @@ export function generateProfessionalReportHTML(report: RoofReport): string {
   const blueprintLengthSVG = generateBlueprintSVG(report.ai_geometry, report.segments, report.edges, es, report.total_footprint_sqft, report.roof_pitch_degrees, 'LENGTH')
 
   // ── Architectural Measurement Diagram (Image 1 / EagleView style) for Page 3 ──
-  const architecturalDiagramSVG = generateArchitecturalDiagramSVG(
-    report.ai_geometry, report.segments, report.edges, es,
-    report.total_footprint_sqft, report.roof_pitch_degrees || predominantPitchDeg || 20,
-    predominantPitch, grossSquares
-  )
+  // PRIORITY: Use trace-based diagram if user traced the roof (actual GPS shape)
+  // FALLBACK: Use AI pixel-geometry diagram from Solar API / Gemini
+  let architecturalDiagramSVG: string
+  const hasTraceDiagram = !!(report as any).trace_diagram_svg
+  if (hasTraceDiagram) {
+    architecturalDiagramSVG = (report as any).trace_diagram_svg
+  } else {
+    architecturalDiagramSVG = generateArchitecturalDiagramSVG(
+      report.ai_geometry, report.segments, report.edges, es,
+      report.total_footprint_sqft, report.roof_pitch_degrees || predominantPitchDeg || 20,
+      predominantPitch, grossSquares
+    )
+  }
 
   // ── Precise AI Overlay SVG for Page 3 satellite thumbnail ──
   // Pass pitch info + edge summary + GSD for accurate measurement labels

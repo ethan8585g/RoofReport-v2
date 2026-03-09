@@ -19,6 +19,8 @@ import {
 import { buildDataLayersReport, generateSegmentsFromDLAnalysis, generateSegmentsFromAIGeometry } from '../services/report-engine'
 import { executeRoofOrder, type DataLayersAnalysis } from '../services/solar-datalayers'
 import { generateProfessionalReportHTML, buildVisionFindingsHTML } from '../templates/report-html'
+import { generateTraceBasedDiagramSVG } from '../templates/svg-diagrams'
+import { RoofMeasurementEngine, traceUiToEnginePayload, type TraceReport } from '../services/roof-measurement-engine'
 import { enhanceReportViaGemini } from '../services/gemini-enhance'
 import { generateReportImagery, buildAIImageryHTML } from '../services/ai-image-generation'
 import { buildEmailWrapper, sendGmailEmail, sendViaResend, sendGmailOAuth2 } from '../services/email'
@@ -442,8 +444,182 @@ reportsRoutes.post('/:orderId/trace-insights', async (c) => {
 })
 
 // ============================================================
-// POST /:orderId/generate-enhanced — DataLayers + GeoTIFF pipeline
+// POST /:orderId/trace-remeasure — Re-measure roof using ONLY
+// user-traced coordinates. Never trust Solar API blindly.
+//
+// Runs the RoofMeasurementEngine on the trace data, cross-checks
+// against Solar API numbers, regenerates the SVG diagram from
+// the actual eaves polygon, and updates the report.
 // ============================================================
+reportsRoutes.post('/:orderId/trace-remeasure', async (c) => {
+  const orderId = c.req.param('orderId')
+  const order = await repo.getOrderById(c.env.DB, orderId)
+  if (!order) return c.json({ error: 'Order not found' }, 404)
+
+  if (!order.roof_trace_json) {
+    return c.json({ error: 'No roof trace data. User must trace the roof outline first.' }, 400)
+  }
+
+  const trace = typeof order.roof_trace_json === 'string' ? JSON.parse(order.roof_trace_json) : order.roof_trace_json
+
+  if (!trace.eaves || trace.eaves.length < 3) {
+    return c.json({ error: 'Need at least 3 eave points. Trace every corner of the house.' }, 400)
+  }
+
+  // Get existing report for cross-check data
+  const existingReport = await repo.getReportRawData(c.env.DB, orderId)
+  let reportData: RoofReport | null = null
+  if (existingReport?.api_response_raw) {
+    try {
+      reportData = typeof existingReport.api_response_raw === 'string'
+        ? JSON.parse(existingReport.api_response_raw)
+        : existingReport.api_response_raw
+    } catch (e) { /* ignore */ }
+  }
+
+  // Build Solar API cross-check payload from existing report
+  const solarApiData: any = {}
+  if (reportData) {
+    solarApiData.footprint_sqft = reportData.total_footprint_sqft || 0
+    solarApiData.true_area_sqft = reportData.total_true_area_sqft || 0
+    solarApiData.pitch_degrees = reportData.roof_pitch_degrees || 0
+    if (reportData.edge_summary) {
+      solarApiData.edge_summary = {
+        total_ridge_ft: reportData.edge_summary.total_ridge_ft || 0,
+        total_hip_ft: reportData.edge_summary.total_hip_ft || 0,
+        total_valley_ft: reportData.edge_summary.total_valley_ft || 0,
+        total_eave_ft: reportData.edge_summary.total_eave_ft || 0,
+        total_rake_ft: reportData.edge_summary.total_rake_ft || 0,
+      }
+    }
+  }
+
+  // Determine default pitch from existing report or DSM data
+  const defaultPitchDeg = reportData?.roof_pitch_degrees || 20
+  const defaultPitchRise = Math.round(12 * Math.tan(defaultPitchDeg * Math.PI / 180) * 10) / 10
+
+  // Convert trace UI format to engine payload and run measurement
+  const enginePayload = traceUiToEnginePayload(
+    trace,
+    {
+      property_address: order.property_address || '',
+      homeowner_name: order.homeowner_name || '',
+      order_number: order.order_number || '',
+      latitude: order.latitude,
+      longitude: order.longitude,
+      price_per_bundle: order.price_per_bundle,
+    },
+    defaultPitchRise
+  )
+
+  const engine = new RoofMeasurementEngine(enginePayload)
+  const traceReport = engine.run()
+
+  console.log(`[TraceRemeasure] Order ${orderId}: Engine completed — ` +
+    `footprint=${traceReport.key_measurements.total_projected_footprint_ft2}sqft, ` +
+    `sloped=${traceReport.key_measurements.total_roof_area_sloped_ft2}sqft, ` +
+    `eave_pts=${traceReport.key_measurements.num_eave_points}, ` +
+    `pitch=${traceReport.key_measurements.dominant_pitch_label}`)
+
+  // Cross-check against Solar API data
+  const crossChecks: any[] = []
+  if (solarApiData.footprint_sqft) {
+    const diff = Math.abs(traceReport.key_measurements.total_projected_footprint_ft2 - solarApiData.footprint_sqft) / solarApiData.footprint_sqft * 100
+    crossChecks.push({
+      parameter: 'footprint_sqft',
+      engine: traceReport.key_measurements.total_projected_footprint_ft2,
+      solar_api: solarApiData.footprint_sqft,
+      difference_pct: Math.round(diff * 10) / 10,
+      verdict: diff <= 5 ? 'MATCH' : diff <= 15 ? 'MINOR_DIFF' : diff <= 30 ? 'SIGNIFICANT_DIFF' : 'CRITICAL'
+    })
+  }
+
+  // Generate trace-based SVG diagram
+  const traceSVG = generateTraceBasedDiagramSVG(
+    trace,
+    {
+      total_ridge_ft: traceReport.linear_measurements.ridges_total_ft,
+      total_hip_ft: traceReport.linear_measurements.hips_total_ft,
+      total_valley_ft: traceReport.linear_measurements.valleys_total_ft,
+      total_eave_ft: traceReport.linear_measurements.eaves_total_ft,
+      total_rake_ft: traceReport.linear_measurements.rakes_total_ft,
+    },
+    traceReport.key_measurements.total_projected_footprint_ft2,
+    traceReport.key_measurements.dominant_pitch_angle_deg,
+    traceReport.key_measurements.dominant_pitch_label,
+    traceReport.key_measurements.total_squares_gross_w_waste,
+    traceReport.key_measurements.total_roof_area_sloped_ft2
+  )
+
+  // If we have a report, update it with trace-based measurements
+  if (reportData) {
+    // Inject trace measurements into report
+    reportData.roof_trace = trace
+    ;(reportData as any).trace_measurement = traceReport
+    ;(reportData as any).trace_diagram_svg = traceSVG
+
+    // Add cross-check notes to quality
+    reportData.quality = reportData.quality || { notes: [] }
+    reportData.quality.notes = reportData.quality.notes || []
+    reportData.quality.notes.push(
+      `Trace-based remeasurement: ${traceReport.key_measurements.num_eave_points} eave points, ${traceReport.key_measurements.num_ridges} ridges, ${traceReport.key_measurements.num_valleys} valleys.`,
+      `Engine footprint: ${traceReport.key_measurements.total_projected_footprint_ft2} sqft (vs Solar API ${solarApiData.footprint_sqft || 'N/A'} sqft).`,
+      `Engine sloped area: ${traceReport.key_measurements.total_roof_area_sloped_ft2} sqft (vs Solar API ${solarApiData.true_area_sqft || 'N/A'} sqft).`
+    )
+
+    // Regenerate HTML with the trace diagram injected
+    const html = generateProfessionalReportHTML(reportData)
+
+    // Save updated report
+    await c.env.DB.prepare(`UPDATE reports SET 
+      api_response_raw = ?,
+      professional_report_html = ?,
+      roof_area_sqft = ?,
+      roof_footprint_sqft = ?,
+      total_ridge_ft = ?,
+      total_hip_ft = ?,
+      total_valley_ft = ?,
+      total_eave_ft = ?,
+      total_rake_ft = ?,
+      updated_at = datetime('now')
+      WHERE order_id = ?`
+    ).bind(
+      JSON.stringify(reportData),
+      html,
+      traceReport.key_measurements.total_roof_area_sloped_ft2,
+      traceReport.key_measurements.total_projected_footprint_ft2,
+      traceReport.linear_measurements.ridges_total_ft,
+      traceReport.linear_measurements.hips_total_ft,
+      traceReport.linear_measurements.valleys_total_ft,
+      traceReport.linear_measurements.eaves_total_ft,
+      traceReport.linear_measurements.rakes_total_ft,
+      orderId
+    ).run()
+
+    console.log(`[TraceRemeasure] Order ${orderId}: Report updated with trace measurements and new SVG diagram`)
+  }
+
+  return c.json({
+    success: true,
+    trace_report: traceReport,
+    cross_checks: crossChecks,
+    trace_svg_generated: true,
+    advisory_notes: traceReport.advisory_notes,
+    summary: {
+      eave_points: traceReport.key_measurements.num_eave_points,
+      footprint_sqft: traceReport.key_measurements.total_projected_footprint_ft2,
+      sloped_area_sqft: traceReport.key_measurements.total_roof_area_sloped_ft2,
+      net_squares: traceReport.key_measurements.total_squares_net,
+      gross_squares: traceReport.key_measurements.total_squares_gross_w_waste,
+      dominant_pitch: traceReport.key_measurements.dominant_pitch_label,
+      eaves_ft: traceReport.linear_measurements.eaves_total_ft,
+      ridges_ft: traceReport.linear_measurements.ridges_total_ft,
+      valleys_ft: traceReport.linear_measurements.valleys_total_ft,
+      solar_api_footprint: solarApiData.footprint_sqft || null,
+      solar_api_area: solarApiData.true_area_sqft || null,
+    }
+  })
+})
 reportsRoutes.post('/:orderId/generate-enhanced', async (c) => {
   const orderId = c.req.param('orderId')
   const pipelineStart = Date.now()
@@ -1298,11 +1474,49 @@ export async function generateReportForOrder(
 
     // ── CUSTOMER PRICING & ROOF TRACE INJECTION ──
     // Parse roof_trace_json from order (if user traced the roof outline)
+    // ALSO: Run the RoofMeasurementEngine on trace data for independent verification
     if (order.roof_trace_json) {
       try {
         const traceData = typeof order.roof_trace_json === 'string' ? JSON.parse(order.roof_trace_json) : order.roof_trace_json
         reportData.roof_trace = traceData
         console.log(`[Generate] Order ${orderId}: roof trace included (${traceData.eaves?.length || 0} eave pts, ${traceData.ridges?.length || 0} ridges, ${traceData.hips?.length || 0} hips)`)
+
+        // Run measurement engine on trace data for cross-verification
+        if (traceData.eaves && traceData.eaves.length >= 3) {
+          try {
+            const pitchDeg = reportData.roof_pitch_degrees || 20
+            const pitchRise = Math.round(12 * Math.tan(pitchDeg * Math.PI / 180) * 10) / 10
+            const enginePayload = traceUiToEnginePayload(
+              traceData,
+              { property_address: order.property_address, homeowner_name: order.homeowner_name, order_number: order.order_number },
+              pitchRise
+            )
+            const engine = new RoofMeasurementEngine(enginePayload)
+            const traceResult = engine.run()
+            ;(reportData as any).trace_measurement = traceResult
+
+            // Generate trace-based SVG diagram (actual house shape)
+            const traceSVG = generateTraceBasedDiagramSVG(
+              traceData,
+              {
+                total_ridge_ft: traceResult.linear_measurements.ridges_total_ft,
+                total_hip_ft: traceResult.linear_measurements.hips_total_ft,
+                total_valley_ft: traceResult.linear_measurements.valleys_total_ft,
+                total_eave_ft: traceResult.linear_measurements.eaves_total_ft,
+                total_rake_ft: traceResult.linear_measurements.rakes_total_ft,
+              },
+              traceResult.key_measurements.total_projected_footprint_ft2,
+              traceResult.key_measurements.dominant_pitch_angle_deg,
+              traceResult.key_measurements.dominant_pitch_label,
+              traceResult.key_measurements.total_squares_gross_w_waste,
+              traceResult.key_measurements.total_roof_area_sloped_ft2
+            )
+            ;(reportData as any).trace_diagram_svg = traceSVG
+            console.log(`[Generate] Order ${orderId}: Trace measurement engine — footprint=${traceResult.key_measurements.total_projected_footprint_ft2}sqft, sloped=${traceResult.key_measurements.total_roof_area_sloped_ft2}sqft`)
+          } catch (tmErr: any) {
+            console.warn(`[Generate] Order ${orderId}: Trace measurement engine failed: ${tmErr.message}`)
+          }
+        }
       } catch (e: any) {
         console.warn(`[Generate] Order ${orderId}: Failed to parse roof_trace_json:`, e.message)
       }
