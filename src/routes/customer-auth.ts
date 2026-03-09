@@ -845,7 +845,8 @@ customerAuthRoutes.get('/orders', async (c) => {
   const orders = await c.env.DB.prepare(`
     SELECT o.*, r.status as report_status, r.roof_area_sqft, r.total_material_cost_cad,
            r.complexity_class, r.confidence_score,
-           r.enhancement_status, r.enhancement_version, r.enhancement_sent_at
+           r.enhancement_status, r.enhancement_version, r.enhancement_sent_at,
+           r.ai_imagery_status
     FROM orders o
     LEFT JOIN reports r ON r.order_id = o.id
     WHERE o.customer_id = ?

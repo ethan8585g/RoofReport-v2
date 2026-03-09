@@ -20,6 +20,7 @@ import { buildDataLayersReport, generateSegmentsFromDLAnalysis, generateSegments
 import { executeRoofOrder, type DataLayersAnalysis } from '../services/solar-datalayers'
 import { generateProfessionalReportHTML, buildVisionFindingsHTML } from '../templates/report-html'
 import { enhanceReportViaGemini } from '../services/gemini-enhance'
+import { generateReportImagery, buildAIImageryHTML } from '../services/ai-image-generation'
 import { buildEmailWrapper, sendGmailEmail, sendViaResend, sendGmailOAuth2 } from '../services/email'
 
 // Cloud Run Custom AI (Colab-trained model)
@@ -168,6 +169,16 @@ reportsRoutes.post('/:orderId/generate', async (c) => {
     }
   }
 
+  // Phase 3: AI Imagery Generation — create professional AI visuals
+  if (result.report) {
+    try {
+      const imagerySuccess = await generateAIImageryForReport(orderId, result.report, c.env)
+      console.log(`[Generate] Order ${orderId}: AI Imagery ${imagerySuccess ? '✅ generated' : '⚠️ skipped'}`)
+    } catch (e: any) {
+      console.error(`[Generate] Order ${orderId}: AI Imagery error (report stands):`, e.message)
+    }
+  }
+
   return c.json({
     success: true,
     message: 'Report generated',
@@ -202,6 +213,15 @@ reportsRoutes.post('/:orderId/retry', async (c) => {
       if (enhanced) finalVersion = enhanced
     } catch (e: any) {
       console.error(`[Retry] Order ${orderId}: Enhancement error:`, e.message)
+    }
+  }
+
+  // Phase 3: AI Imagery Generation
+  if (result?.success && result.report) {
+    try {
+      await generateAIImageryForReport(orderId, result.report, c.env)
+    } catch (e: any) {
+      console.error(`[Retry] Order ${orderId}: AI Imagery error:`, e.message)
     }
   }
 
@@ -869,6 +889,32 @@ reportsRoutes.get('/:orderId/enhancement-status', async (c) => {
 })
 
 // ============================================================
+// GET /:orderId/ai-imagery-status — Check AI imagery generation status
+// ============================================================
+reportsRoutes.get('/:orderId/ai-imagery-status', async (c) => {
+  const orderId = c.req.param('orderId')
+  const user = await validateAdminOrCustomer(c.env.DB, c.req.header('Authorization'))
+  if (!user) return c.json({ error: 'Authentication required' }, 401)
+
+  const imageryStatus = await repo.getAIImageryStatus(c.env.DB, orderId)
+  if (!imageryStatus) return c.json({ error: 'Report not found' }, 404)
+
+  const imageCount = imageryStatus.ai_generated_imagery_json
+    ? (JSON.parse(imageryStatus.ai_generated_imagery_json)?.images?.length || 0)
+    : 0
+
+  return c.json({
+    success: true,
+    orderId,
+    ai_imagery_status: imageryStatus.ai_imagery_status || 'not_started',
+    ai_imagery_error: imageryStatus.ai_imagery_error,
+    image_count: imageCount,
+    is_generating: imageryStatus.ai_imagery_status === 'generating',
+    is_complete: imageryStatus.ai_imagery_status === 'completed'
+  })
+})
+
+// ============================================================
 // POST /recovery/stuck — Auto-recover reports stuck in 'enhancing' or 'generating'
 // Admin endpoint that finds and fixes reports stuck > 90s
 // ============================================================
@@ -956,6 +1002,71 @@ export async function enhanceReportInline(
 
 // Legacy alias for backward compatibility
 export const enhanceReportInBackground = enhanceReportInline
+
+// ============================================================
+// PHASE 3: Generate AI imagery for the "perfect" report
+// Runs AFTER enhancement as a bonus background step.
+// Uses Gemini image generation to create professional visuals.
+// The report is already 'completed' — this just adds imagery.
+// ============================================================
+export async function generateAIImageryForReport(
+  orderId: number | string,
+  reportData: RoofReport,
+  env: Bindings
+): Promise<boolean> {
+  // Use the Gemini enhance key for image generation too
+  const apiKey = env.GEMINI_ENHANCE_API_KEY
+  if (!apiKey) {
+    console.log(`[AIImagery] Order ${orderId}: No API key — skipping imagery generation`)
+    return false
+  }
+
+  try {
+    await repo.markAIImageryGenerating(env.DB, orderId)
+    console.log(`[AIImagery] Order ${orderId}: 🎨 Starting AI imagery generation...`)
+
+    const imagery = await generateReportImagery(reportData, apiKey, {
+      maxImages: 4,
+      timeoutPerImage: 25000,
+      includeSatellite: true
+    })
+
+    if (imagery && imagery.images.length > 0) {
+      // Inject AI imagery into report data
+      reportData.ai_generated_imagery = imagery
+
+      // Build the AI imagery HTML section
+      const imageryHtml = buildAIImageryHTML(imagery)
+
+      // Get current report HTML and append the AI imagery page
+      const currentReport = await repo.getReportHtml(env.DB, orderId)
+      let currentHtml = currentReport?.professional_report_html || ''
+
+      if (currentHtml && imageryHtml) {
+        // Insert AI imagery page before the closing </body></html>
+        const insertPoint = currentHtml.lastIndexOf('</body>')
+        if (insertPoint > 0) {
+          currentHtml = currentHtml.slice(0, insertPoint) + imageryHtml + currentHtml.slice(insertPoint)
+        } else {
+          currentHtml += imageryHtml
+        }
+      }
+
+      // Save imagery JSON and updated HTML
+      await repo.saveAIImagery(env.DB, orderId, JSON.stringify(imagery), currentHtml)
+      console.log(`[AIImagery] Order ${orderId}: ✅ ${imagery.images.length} images generated in ${imagery.generation_time_ms}ms`)
+      return true
+    } else {
+      console.warn(`[AIImagery] Order ${orderId}: No images generated — all attempts failed`)
+      await repo.markAIImageryFailed(env.DB, orderId, 'No images generated')
+      return false
+    }
+  } catch (err: any) {
+    console.error(`[AIImagery] Order ${orderId}: Failed — ${err.message}`)
+    await repo.markAIImageryFailed(env.DB, orderId, err.message).catch(() => {})
+    return false
+  }
+}
 
 // ============================================================
 // PHASE 1: Generate base report (WELD + PAINT + POLISH + quick AI)

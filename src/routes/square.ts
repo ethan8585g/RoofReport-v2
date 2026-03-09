@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import type { Bindings } from '../types'
-import { generateReportForOrder, enhanceReportInline } from './reports'
+import { generateReportForOrder, enhanceReportInline, generateAIImageryForReport } from './reports'
 import { isDevAccount } from './customer-auth'
 import { trackPaymentCompleted, trackCreditPurchase } from '../services/ga4-events'
 
@@ -40,13 +40,23 @@ async function triggerReportGeneration(orderId: number, env: Bindings): Promise<
     const result = await generateReportForOrder(orderId, env)
     console.log(`[Auto-Generate] Order ${orderId}: ${result.success ? 'SUCCESS' : result.error || 'FAILED'} — provider: ${result.provider || 'n/a'}`)
 
-    // Enhancement: run inline after base report is already saved as 'completed'
+    // Phase 2: Enhancement — run inline after base report is already saved as 'completed'
     if (result.success && result.report && result.hasEnhanceKey) {
       try {
         const enhVer = await enhanceReportInline(orderId, result.report, env)
         console.log(`[Auto-Generate] Order ${orderId}: Enhancement ${enhVer ? '✅ v' + enhVer : '⚠️ skipped'}`)
       } catch (e: any) {
         console.error(`[Auto-Generate] Order ${orderId}: Enhancement error (base report stands):`, e.message)
+      }
+    }
+
+    // Phase 3: AI Imagery Generation — create professional AI visuals for the "perfect" report
+    if (result.success && result.report) {
+      try {
+        const imagerySuccess = await generateAIImageryForReport(orderId, result.report, env)
+        console.log(`[Auto-Generate] Order ${orderId}: AI Imagery ${imagerySuccess ? '✅ generated' : '⚠️ skipped'}`)
+      } catch (e: any) {
+        console.error(`[Auto-Generate] Order ${orderId}: AI Imagery error (report stands):`, e.message)
       }
     }
 

@@ -560,6 +560,23 @@ export interface RoofReport {
   /** Human-readable details about why the overlap flag was raised */
   property_overlap_details?: string[]
 
+  // ---- AI-GENERATED IMAGERY (Gemini Image Generation Layer) ----
+  /** AI-generated professional report images created from satellite data and measurements.
+   *  Generated as a background phase after base report + enhancement complete.
+   *  Images are stored as base64 data URLs. */
+  ai_generated_imagery?: {
+    images: {
+      type: string         // e.g., 'annotated_overhead', '3d_perspective', 'condition_visual', 'cover'
+      label: string        // Human-readable label
+      description: string  // What this image shows
+      data_url: string     // base64 data URL (data:image/png;base64,...)
+      generated_at: string // ISO timestamp
+    }[]
+    generation_time_ms: number
+    model: string
+    generated_at: string
+  } | null
+
   // ---- VISION-BASED INSPECTION (Gemma 3 / Gemini Multimodal "Eyes" Layer) ----
   /** Visual findings from multimodal AI inspection of aerial imagery.
    *  Detects vulnerabilities and obstructions that raw API data misses. */

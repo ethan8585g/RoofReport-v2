@@ -342,3 +342,49 @@ export async function getEnhancementStatus(db: D1Database, orderId: number | str
     FROM reports WHERE order_id = ?
   `).bind(orderId).first()
 }
+
+// ============================================================
+// AI-GENERATED IMAGERY PIPELINE
+// ============================================================
+
+/** Mark AI imagery generation as started */
+export async function markAIImageryGenerating(db: D1Database, orderId: number | string) {
+  await db.prepare(`
+    UPDATE reports SET ai_imagery_status = 'generating', ai_imagery_error = NULL, updated_at = datetime('now')
+    WHERE order_id = ?
+  `).bind(orderId).run()
+}
+
+/** Save AI-generated imagery JSON and update report HTML */
+export async function saveAIImagery(
+  db: D1Database, orderId: number | string,
+  imageryJson: string, updatedHtml: string
+) {
+  await db.prepare(`
+    UPDATE reports SET
+      ai_generated_imagery_json = ?,
+      ai_imagery_status = 'completed',
+      professional_report_html = ?,
+      updated_at = datetime('now')
+    WHERE order_id = ?
+  `).bind(imageryJson, updatedHtml, orderId).run()
+}
+
+/** Mark AI imagery generation as failed */
+export async function markAIImageryFailed(db: D1Database, orderId: number | string, error: string) {
+  await db.prepare(`
+    UPDATE reports SET
+      ai_imagery_status = 'failed',
+      ai_imagery_error = ?,
+      updated_at = datetime('now')
+    WHERE order_id = ?
+  `).bind(error.substring(0, 1000), orderId).run()
+}
+
+/** Get AI imagery status for a report */
+export async function getAIImageryStatus(db: D1Database, orderId: number | string) {
+  return db.prepare(`
+    SELECT ai_imagery_status, ai_imagery_error, ai_generated_imagery_json
+    FROM reports WHERE order_id = ?
+  `).bind(orderId).first<{ ai_imagery_status: string | null; ai_imagery_error: string | null; ai_generated_imagery_json: string | null }>()
+}
