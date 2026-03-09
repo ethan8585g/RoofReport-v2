@@ -93,6 +93,10 @@ export type Bindings = {
   REPORT_WEBHOOK_SECRET: string    // e.g. "whk_ffd6b6fff1f7a681f7bd518c8885789e00a8747d67379454d33e227e86e0fa5e"
   // Google AI Studio / Cloud Run enhancement engine URL
   AI_STUDIO_ENHANCE_URL: string    // e.g. "https://your-cloud-run-service.run.app/enhance"
+
+  // Gemini Enhancement Engine — Dedicated API key from airoofreports GCP project
+  // Used to call Gemini 2.5 Pro for post-generation report quality upgrade
+  GEMINI_ENHANCE_API_KEY: string   // e.g. "AIzaSy..." — separate from GOOGLE_SOLAR_API_KEY
 }
 
 // ============================================================

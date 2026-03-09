@@ -108,6 +108,7 @@ app.get('/api/health', (c) => {
       CLOUD_RUN_AI_TOKEN: !!(c.env as any).CLOUD_RUN_AI_TOKEN,
       REPORT_WEBHOOK_SECRET: !!(c.env as any).REPORT_WEBHOOK_SECRET,
       AI_STUDIO_ENHANCE_URL: (c.env as any).AI_STUDIO_ENHANCE_URL || false,
+      GEMINI_ENHANCE_API_KEY: !!(c.env as any).GEMINI_ENHANCE_API_KEY,
       DB: !!c.env.DB
     },
     vertex_ai: {
