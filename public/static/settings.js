@@ -85,6 +85,7 @@ function renderSettings() {
     { id: 'company', label: 'Company Profile', icon: 'fa-building' },
     { id: 'apikeys', label: 'API Keys', icon: 'fa-key' },
     { id: 'pricing', label: 'Pricing & Billing', icon: 'fa-dollar-sign' },
+    { id: 'sip', label: 'SIP Bridge / Telephony', icon: 'fa-phone-alt' },
   ];
 
   root.innerHTML = `
@@ -108,9 +109,15 @@ function renderSettings() {
         ${settingsState.activeSection === 'company' ? renderCompanySection() : ''}
         ${settingsState.activeSection === 'apikeys' ? renderApiKeysSection() : ''}
         ${settingsState.activeSection === 'pricing' ? renderPricingSection() : ''}
+        ${settingsState.activeSection === 'sip' ? renderSipSection() : ''}
       </div>
     </div>
   `;
+
+  // Load SIP data when SIP tab is selected
+  if (settingsState.activeSection === 'sip') {
+    loadSipTrunks();
+  }
 
   // ALWAYS reload pricing data when pricing tab is selected (never use stale cache)
   if (settingsState.activeSection === 'pricing') {
@@ -782,4 +789,200 @@ async function activateSettingsPkg(id) {
   } catch (err) {
     alert('Error activating package: ' + err.message);
   }
+}
+
+// ============================================================
+// SIP BRIDGE / TELEPHONY SECTION
+// ============================================================
+let sipTrunksData = null;
+let sipLoading = false;
+
+async function loadSipTrunks() {
+  sipLoading = true;
+  try {
+    const res = await fetch('/api/secretary/sip/trunks', { headers: settingsHeaders() });
+    if (res.ok) sipTrunksData = await res.json();
+    else sipTrunksData = { error: 'Failed to load' };
+  } catch (e) {
+    sipTrunksData = { error: e.message };
+  }
+  sipLoading = false;
+  const el = document.getElementById('sipContent');
+  if (el) el.innerHTML = renderSipContent();
+}
+
+function renderSipSection() {
+  return `
+    <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div class="bg-gradient-to-r from-violet-600 to-purple-600 text-white px-6 py-4">
+        <h3 class="text-lg font-bold"><i class="fas fa-phone-alt mr-2"></i>SIP Bridge / Telephony</h3>
+        <p class="text-purple-200 text-sm mt-1">Connect AI Secretary to real phone numbers via LiveKit SIP</p>
+      </div>
+      <div class="p-6" id="sipContent">${sipLoading ? '<div class="text-center py-6"><i class="fas fa-spinner fa-spin text-2xl text-gray-300"></i></div>' : renderSipContent()}</div>
+    </div>
+  `;
+}
+
+function renderSipContent() {
+  if (!sipTrunksData) return '<div class="text-center py-6 text-gray-400"><i class="fas fa-spinner fa-spin mr-2"></i>Loading SIP configuration...</div>';
+  if (sipTrunksData.error) return '<div class="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 text-sm"><i class="fas fa-exclamation-triangle mr-1"></i>' + sipTrunksData.error + '</div>';
+
+  const inbound = sipTrunksData.inbound_trunks || [];
+  const outbound = sipTrunksData.outbound_trunks || [];
+  const rules = sipTrunksData.dispatch_rules || [];
+
+  return `
+    <!-- Quick Actions -->
+    <div class="grid md:grid-cols-2 gap-4 mb-6">
+      <div class="bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl border border-green-200 p-5">
+        <h4 class="font-bold text-green-800 mb-2"><i class="fas fa-phone-volume mr-2"></i>Outbound Trunk</h4>
+        <p class="text-xs text-green-600 mb-3">Create a trunk so your AI can dial out to real phone numbers</p>
+        <div class="space-y-2">
+          <input type="text" id="sipOutPhone" placeholder="+17805551234" class="w-full px-3 py-2 border border-green-300 rounded-lg text-sm" />
+          <input type="text" id="sipOutName" placeholder="Trunk name (optional)" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" />
+          <details class="text-xs text-gray-500">
+            <summary class="cursor-pointer font-medium text-green-700">Advanced: Custom SIP Provider</summary>
+            <div class="mt-2 space-y-2 pl-2 border-l-2 border-green-200">
+              <input type="text" id="sipOutAddress" placeholder="SIP address (e.g. proxy1.dynsipt.broadconnect.ca)" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" />
+              <input type="text" id="sipOutUser" placeholder="Auth username (e.g. Telus pilot number)" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" />
+              <input type="password" id="sipOutPass" placeholder="Auth password" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" />
+              <p class="text-xs text-gray-400">Leave blank to use LiveKit Cloud's built-in PSTN (simplest)</p>
+            </div>
+          </details>
+          <button onclick="createOutboundTrunk()" class="w-full py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-bold transition-colors">
+            <i class="fas fa-plus mr-1"></i>Create Outbound Trunk
+          </button>
+        </div>
+      </div>
+
+      <div class="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl border border-blue-200 p-5">
+        <h4 class="font-bold text-blue-800 mb-2"><i class="fas fa-phone mr-2"></i>Quick Dial</h4>
+        <p class="text-xs text-blue-600 mb-3">Test: Dial a phone number from your AI agent</p>
+        <div class="space-y-2">
+          <input type="text" id="sipDialNumber" placeholder="+17805551234" class="w-full px-3 py-2 border border-blue-300 rounded-lg text-sm" />
+          <input type="text" id="sipDialRoom" placeholder="Room name (auto-generated if blank)" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" />
+          <button onclick="dialOut()" class="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-colors" ${outbound.length === 0 ? 'disabled title="Create an outbound trunk first"' : ''}>
+            <i class="fas fa-phone mr-1"></i>Dial Out
+          </button>
+          ${outbound.length === 0 ? '<p class="text-xs text-amber-600"><i class="fas fa-exclamation-circle mr-1"></i>Create an outbound trunk first</p>' : ''}
+        </div>
+      </div>
+    </div>
+
+    <!-- Existing Trunks -->
+    <div class="space-y-4">
+      <h4 class="text-sm font-bold text-gray-500 uppercase tracking-wide">Active SIP Trunks</h4>
+
+      ${outbound.length === 0 && inbound.length === 0 ? '<div class="bg-gray-50 rounded-lg p-6 text-center text-gray-400"><i class="fas fa-plug text-3xl mb-2"></i><p class="text-sm">No SIP trunks configured yet</p><p class="text-xs mt-1">Create an outbound trunk to start making calls</p></div>' : ''}
+
+      ${outbound.map(t => '<div class="flex items-center justify-between p-3 bg-green-50 border border-green-200 rounded-lg">' +
+        '<div class="flex items-center gap-3">' +
+          '<div class="w-8 h-8 bg-green-200 rounded-lg flex items-center justify-center"><i class="fas fa-arrow-up text-green-700 text-xs"></i></div>' +
+          '<div>' +
+            '<p class="text-sm font-medium text-gray-800">' + (t.name || 'Outbound') + '</p>' +
+            '<p class="text-xs text-gray-500">' + (t.numbers || []).join(', ') + ' &middot; ' + (t.address || 'LiveKit PSTN') + '</p>' +
+          '</div>' +
+        '</div>' +
+        '<div class="flex items-center gap-2">' +
+          '<span class="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-[10px] font-bold">OUTBOUND</span>' +
+          '<button onclick="deleteTrunk(\'' + t.sip_trunk_id + '\')" class="p-1 text-gray-400 hover:text-red-600"><i class="fas fa-trash text-xs"></i></button>' +
+        '</div></div>').join('')}
+
+      ${inbound.map(t => '<div class="flex items-center justify-between p-3 bg-blue-50 border border-blue-200 rounded-lg">' +
+        '<div class="flex items-center gap-3">' +
+          '<div class="w-8 h-8 bg-blue-200 rounded-lg flex items-center justify-center"><i class="fas fa-arrow-down text-blue-700 text-xs"></i></div>' +
+          '<div>' +
+            '<p class="text-sm font-medium text-gray-800">' + (t.name || 'Inbound') + '</p>' +
+            '<p class="text-xs text-gray-500">' + (t.numbers || []).join(', ') + '</p>' +
+          '</div>' +
+        '</div>' +
+        '<div class="flex items-center gap-2">' +
+          '<span class="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-[10px] font-bold">INBOUND</span>' +
+          '<button onclick="deleteTrunk(\'' + t.sip_trunk_id + '\')" class="p-1 text-gray-400 hover:text-red-600"><i class="fas fa-trash text-xs"></i></button>' +
+        '</div></div>').join('')}
+
+      ${rules.length > 0 ? '<h4 class="text-sm font-bold text-gray-500 uppercase tracking-wide mt-4">Dispatch Rules</h4>' +
+        rules.map(r => '<div class="flex items-center justify-between p-2 bg-gray-50 rounded-lg text-sm">' +
+          '<span class="text-gray-600"><i class="fas fa-route text-xs mr-2 text-purple-400"></i>' + (r.name || r.sip_dispatch_rule_id) + '</span>' +
+          '<span class="text-xs text-gray-400">' + (r.trunk_ids || []).join(', ') + '</span>' +
+        '</div>').join('') : ''}
+    </div>
+
+    <div id="sipMsg" class="hidden mt-4 p-3 rounded-lg text-sm"></div>
+  `;
+}
+
+async function createOutboundTrunk() {
+  const phone = document.getElementById('sipOutPhone')?.value?.trim();
+  if (!phone) { alert('Enter a phone number'); return; }
+  const name = document.getElementById('sipOutName')?.value?.trim() || 'RoofReporterAI Outbound';
+  const address = document.getElementById('sipOutAddress')?.value?.trim() || '';
+  const auth_username = document.getElementById('sipOutUser')?.value?.trim() || '';
+  const auth_password = document.getElementById('sipOutPass')?.value?.trim() || '';
+
+  try {
+    const res = await fetch('/api/secretary/sip/outbound-trunk', {
+      method: 'POST', headers: settingsHeaders(),
+      body: JSON.stringify({ name, phone_number: phone, address, auth_username, auth_password })
+    });
+    const data = await res.json();
+    if (data.success) {
+      showSipMsg('success', '<i class="fas fa-check-circle mr-1"></i>' + data.message);
+      loadSipTrunks();
+    } else {
+      showSipMsg('error', data.error || 'Failed');
+    }
+  } catch (e) {
+    showSipMsg('error', 'Network error: ' + e.message);
+  }
+}
+
+async function dialOut() {
+  const phone = document.getElementById('sipDialNumber')?.value?.trim();
+  if (!phone) { alert('Enter a phone number to dial'); return; }
+  const room = document.getElementById('sipDialRoom')?.value?.trim() || '';
+
+  try {
+    const res = await fetch('/api/secretary/sip/dial', {
+      method: 'POST', headers: settingsHeaders(),
+      body: JSON.stringify({ phone_number: phone, room_name: room })
+    });
+    const data = await res.json();
+    if (data.success) {
+      showSipMsg('success', '<i class="fas fa-phone mr-1"></i>Dialing ' + phone + '... Room: ' + data.room_name);
+    } else {
+      showSipMsg('error', data.error || 'Dial failed');
+    }
+  } catch (e) {
+    showSipMsg('error', 'Network error: ' + e.message);
+  }
+}
+
+async function deleteTrunk(trunkId) {
+  if (!confirm('Delete this SIP trunk?')) return;
+  try {
+    const res = await fetch('/api/secretary/sip/trunk/' + trunkId, {
+      method: 'DELETE', headers: settingsHeaders()
+    });
+    const data = await res.json();
+    if (data.success) {
+      showSipMsg('success', 'Trunk deleted');
+      loadSipTrunks();
+    } else {
+      showSipMsg('error', data.error || 'Delete failed');
+    }
+  } catch (e) {
+    showSipMsg('error', 'Network error: ' + e.message);
+  }
+}
+
+function showSipMsg(type, msg) {
+  const el = document.getElementById('sipMsg');
+  if (!el) return;
+  el.className = type === 'error'
+    ? 'mt-4 p-3 rounded-lg text-sm bg-red-50 text-red-700 border border-red-200'
+    : 'mt-4 p-3 rounded-lg text-sm bg-green-50 text-green-700 border border-green-200';
+  el.innerHTML = msg;
+  el.classList.remove('hidden');
+  setTimeout(() => el.classList.add('hidden'), 8000);
 }

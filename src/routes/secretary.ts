@@ -1260,3 +1260,301 @@ secretaryRoutes.get('/admin/phone-pool', async (c) => {
     stats: stats.results || [],
   })
 })
+
+// ============================================================
+// SIP BRIDGE MANAGEMENT — Admin endpoints for LiveKit SIP trunks
+// Simplest path: LiveKit Cloud PSTN gateway (no Twilio/Telus needed)
+// ============================================================
+
+// ── Admin auth helper ──
+async function requireAdmin(c: any) {
+  const auth = c.req.header('Authorization')
+  if (!auth?.startsWith('Bearer ')) return null
+  return c.env.DB.prepare(
+    `SELECT id FROM admin_sessions WHERE session_token = ? AND expires_at > datetime('now')`
+  ).bind(auth.slice(7)).first<any>()
+}
+
+// ============================================================
+// GET /sip/trunks — List all SIP trunks (inbound + outbound)
+// ============================================================
+secretaryRoutes.get('/sip/trunks', async (c) => {
+  const admin = await requireAdmin(c)
+  if (!admin) return c.json({ error: 'Admin access required' }, 403)
+
+  const apiKey = (c.env as any).LIVEKIT_API_KEY
+  const apiSecret = (c.env as any).LIVEKIT_API_SECRET
+  const livekitUrl = (c.env as any).LIVEKIT_URL
+  if (!apiKey || !apiSecret || !livekitUrl) return c.json({ error: 'LiveKit not configured' }, 500)
+
+  try {
+    const [inbound, outbound, rules] = await Promise.all([
+      livekitSipAPI(apiKey, apiSecret, livekitUrl, 'POST', '/twirp/livekit.SIP/ListSIPInboundTrunk', {}),
+      livekitSipAPI(apiKey, apiSecret, livekitUrl, 'POST', '/twirp/livekit.SIP/ListSIPOutboundTrunk', {}),
+      livekitSipAPI(apiKey, apiSecret, livekitUrl, 'POST', '/twirp/livekit.SIP/ListSIPDispatchRule', {}),
+    ])
+
+    return c.json({
+      success: true,
+      inbound_trunks: inbound?.items || [],
+      outbound_trunks: outbound?.items || [],
+      dispatch_rules: rules?.items || [],
+    })
+  } catch (err: any) {
+    console.error('[SIP] List trunks error:', err.message)
+    return c.json({ error: 'Failed to list SIP trunks', details: err.message }, 500)
+  }
+})
+
+// ============================================================
+// POST /sip/outbound-trunk — Create outbound SIP trunk
+// For LiveKit Cloud PSTN: address = LiveKit's PSTN gateway
+// For Twilio: address = {your-trunk}.pstn.twilio.com
+// For Telus: address = proxy1.dynsipt.broadconnect.ca
+// ============================================================
+secretaryRoutes.post('/sip/outbound-trunk', async (c) => {
+  const admin = await requireAdmin(c)
+  if (!admin) return c.json({ error: 'Admin access required' }, 403)
+
+  const apiKey = (c.env as any).LIVEKIT_API_KEY
+  const apiSecret = (c.env as any).LIVEKIT_API_SECRET
+  const livekitUrl = (c.env as any).LIVEKIT_URL
+  if (!apiKey || !apiSecret || !livekitUrl) return c.json({ error: 'LiveKit not configured' }, 500)
+
+  const body = await c.req.json()
+  const {
+    name = 'RoofReporterAI Outbound',
+    phone_number,           // e.g. "+17805551234"
+    address = '',           // SIP trunk host (empty = LiveKit Cloud PSTN)
+    auth_username = '',     // SIP auth user (Telus pilot number, etc.)
+    auth_password = '',     // SIP auth password
+    transport = 0,          // 0=auto, 1=UDP, 2=TCP, 3=TLS
+    country_code = 'CA',    // ISO 3166 two-letter
+  } = body
+
+  if (!phone_number) return c.json({ error: 'phone_number required (e.g. +17805551234)' }, 400)
+
+  try {
+    const trunkPayload: any = {
+      trunk: {
+        name,
+        numbers: [phone_number],
+        destination_country: country_code,
+        transport: transport,
+        media_encryption: 0, // Disabled (RTP) — safest for Telus/most carriers
+      }
+    }
+
+    // If address provided (Twilio/Telus/custom SIP), add it
+    if (address) {
+      trunkPayload.trunk.address = address
+    }
+    // If auth credentials provided (Telus etc.), add them
+    if (auth_username) trunkPayload.trunk.auth_username = auth_username
+    if (auth_password) trunkPayload.trunk.auth_password = auth_password
+
+    const result = await livekitSipAPI(apiKey, apiSecret, livekitUrl, 'POST',
+      '/twirp/livekit.SIP/CreateSIPOutboundTrunk', trunkPayload)
+
+    const trunkId = result?.sip_trunk_id || result?.trunk?.sip_trunk_id || ''
+    console.log(`[SIP] Created outbound trunk: ${trunkId} for ${phone_number}`)
+
+    // Save to DB for tracking
+    await c.env.DB.prepare(
+      `INSERT OR REPLACE INTO sip_trunks (trunk_id, trunk_type, name, phone_number, address, country_code, status, created_at)
+       VALUES (?, 'outbound', ?, ?, ?, ?, 'active', datetime('now'))`
+    ).bind(trunkId, name, phone_number, address, country_code).run().catch(() => {})
+
+    return c.json({
+      success: true,
+      trunk_id: trunkId,
+      phone_number,
+      address: address || '(LiveKit Cloud PSTN)',
+      message: `Outbound SIP trunk created. You can now dial out from ${phone_number}.`
+    })
+  } catch (err: any) {
+    console.error('[SIP] Create outbound trunk error:', err)
+    return c.json({ error: 'Failed to create outbound trunk', details: err.message }, 500)
+  }
+})
+
+// ============================================================
+// POST /sip/inbound-trunk — Create inbound SIP trunk
+// ============================================================
+secretaryRoutes.post('/sip/inbound-trunk', async (c) => {
+  const admin = await requireAdmin(c)
+  if (!admin) return c.json({ error: 'Admin access required' }, 403)
+
+  const apiKey = (c.env as any).LIVEKIT_API_KEY
+  const apiSecret = (c.env as any).LIVEKIT_API_SECRET
+  const livekitUrl = (c.env as any).LIVEKIT_URL
+  if (!apiKey || !apiSecret || !livekitUrl) return c.json({ error: 'LiveKit not configured' }, 500)
+
+  const body = await c.req.json()
+  const {
+    name = 'RoofReporterAI Inbound',
+    phone_number,
+    auth_username = '',
+    auth_password = '',
+    krisp_enabled = true,
+  } = body
+
+  if (!phone_number) return c.json({ error: 'phone_number required' }, 400)
+
+  try {
+    const trunkPayload: any = {
+      trunk: {
+        name,
+        numbers: [phone_number],
+        krisp_enabled,
+        media_encryption: 0,
+      }
+    }
+    if (auth_username) trunkPayload.trunk.auth_username = auth_username
+    if (auth_password) trunkPayload.trunk.auth_password = auth_password
+
+    const trunkResult = await livekitSipAPI(apiKey, apiSecret, livekitUrl, 'POST',
+      '/twirp/livekit.SIP/CreateSIPInboundTrunk', trunkPayload)
+
+    const trunkId = trunkResult?.sip_trunk_id || trunkResult?.trunk?.sip_trunk_id || ''
+
+    // Create dispatch rule to route calls to AI secretary room
+    const dispatchResult = await livekitSipAPI(apiKey, apiSecret, livekitUrl, 'POST',
+      '/twirp/livekit.SIP/CreateSIPDispatchRule', {
+        trunk_ids: trunkId ? [trunkId] : [],
+        rule: {
+          dispatchRuleIndividual: {
+            roomPrefix: 'secretary-call-',
+            pin: '',
+          }
+        },
+        name: `dispatch-${phone_number}`,
+        metadata: JSON.stringify({ phone: phone_number, service: 'roofer_secretary' }),
+      })
+
+    const dispatchId = dispatchResult?.sip_dispatch_rule_id || ''
+    console.log(`[SIP] Created inbound trunk: ${trunkId}, dispatch: ${dispatchId}`)
+
+    await c.env.DB.prepare(
+      `INSERT OR REPLACE INTO sip_trunks (trunk_id, trunk_type, name, phone_number, address, country_code, dispatch_rule_id, status, created_at)
+       VALUES (?, 'inbound', ?, ?, '', 'CA', ?, 'active', datetime('now'))`
+    ).bind(trunkId, name, phone_number, dispatchId).run().catch(() => {})
+
+    return c.json({
+      success: true,
+      trunk_id: trunkId,
+      dispatch_rule_id: dispatchId,
+      phone_number,
+      message: `Inbound trunk created. Calls to ${phone_number} will route to AI secretary.`
+    })
+  } catch (err: any) {
+    console.error('[SIP] Create inbound trunk error:', err)
+    return c.json({ error: 'Failed to create inbound trunk', details: err.message }, 500)
+  }
+})
+
+// ============================================================
+// POST /sip/dial — Dial out to a phone number (AI → Phone)
+// Creates a SIP participant in a LiveKit room connected to PSTN
+// ============================================================
+secretaryRoutes.post('/sip/dial', async (c) => {
+  const admin = await requireAdmin(c)
+  if (!admin) return c.json({ error: 'Admin access required' }, 403)
+
+  const apiKey = (c.env as any).LIVEKIT_API_KEY
+  const apiSecret = (c.env as any).LIVEKIT_API_SECRET
+  const livekitUrl = (c.env as any).LIVEKIT_URL
+  if (!apiKey || !apiSecret || !livekitUrl) return c.json({ error: 'LiveKit not configured' }, 500)
+
+  const body = await c.req.json()
+  const {
+    trunk_id,               // outbound trunk to use
+    phone_number,           // number to dial (e.g. "+17805551234")
+    room_name,              // LiveKit room name (auto-generated if blank)
+    participant_name = 'Phone Call',
+    play_dialtone = true,
+    krisp_enabled = true,
+  } = body
+
+  if (!phone_number) return c.json({ error: 'phone_number required (e.g. +17805551234)' }, 400)
+
+  // If no trunk_id provided, try to find one from our DB
+  let resolvedTrunkId = trunk_id
+  if (!resolvedTrunkId) {
+    const trunk = await c.env.DB.prepare(
+      `SELECT trunk_id FROM sip_trunks WHERE trunk_type = 'outbound' AND status = 'active' ORDER BY created_at DESC LIMIT 1`
+    ).first<any>()
+    resolvedTrunkId = trunk?.trunk_id
+  }
+  if (!resolvedTrunkId) {
+    return c.json({
+      error: 'No outbound SIP trunk configured. Create one first via POST /api/secretary/sip/outbound-trunk',
+      hint: 'You need an outbound trunk before you can dial out.'
+    }, 400)
+  }
+
+  const finalRoom = room_name || `dial-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+
+  try {
+    const result = await livekitSipAPI(apiKey, apiSecret, livekitUrl, 'POST',
+      '/twirp/livekit.SIP/CreateSIPParticipant', {
+        sip_trunk_id: resolvedTrunkId,
+        sip_call_to: phone_number,
+        room_name: finalRoom,
+        participant_identity: `phone-${phone_number.replace(/\D/g, '')}`,
+        participant_name,
+        participant_metadata: JSON.stringify({
+          type: 'outbound_call',
+          dialed_at: new Date().toISOString(),
+          initiated_by: 'admin',
+        }),
+        play_dialtone,
+        krisp_enabled,
+        media_encryption: 0,
+      })
+
+    const participantId = result?.participant_id || result?.sip_call_id || ''
+    console.log(`[SIP] Dial out: ${phone_number} → room ${finalRoom} (participant: ${participantId})`)
+
+    return c.json({
+      success: true,
+      participant_id: participantId,
+      sip_call_id: result?.sip_call_id || '',
+      room_name: finalRoom,
+      phone_number,
+      trunk_id: resolvedTrunkId,
+      message: `Dialing ${phone_number}... Call connected to room ${finalRoom}`
+    })
+  } catch (err: any) {
+    console.error('[SIP] Dial error:', err)
+    return c.json({ error: 'Failed to dial', details: err.message }, 500)
+  }
+})
+
+// ============================================================
+// DELETE /sip/trunk/:trunkId — Delete a SIP trunk
+// ============================================================
+secretaryRoutes.delete('/sip/trunk/:trunkId', async (c) => {
+  const admin = await requireAdmin(c)
+  if (!admin) return c.json({ error: 'Admin access required' }, 403)
+
+  const apiKey = (c.env as any).LIVEKIT_API_KEY
+  const apiSecret = (c.env as any).LIVEKIT_API_SECRET
+  const livekitUrl = (c.env as any).LIVEKIT_URL
+  if (!apiKey || !apiSecret || !livekitUrl) return c.json({ error: 'LiveKit not configured' }, 500)
+
+  const trunkId = c.req.param('trunkId')
+
+  try {
+    await livekitSipAPI(apiKey, apiSecret, livekitUrl, 'POST',
+      '/twirp/livekit.SIP/DeleteSIPTrunk', { sip_trunk_id: trunkId })
+
+    await c.env.DB.prepare(`DELETE FROM sip_trunks WHERE trunk_id = ?`).bind(trunkId).run().catch(() => {})
+    console.log(`[SIP] Deleted trunk: ${trunkId}`)
+
+    return c.json({ success: true, deleted: trunkId })
+  } catch (err: any) {
+    console.error('[SIP] Delete trunk error:', err)
+    return c.json({ error: 'Failed to delete trunk', details: err.message }, 500)
+  }
+})

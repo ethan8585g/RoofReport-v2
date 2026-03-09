@@ -69,7 +69,8 @@ function render() {
     { id:'rover', label:'Rover Chat', icon:'fa-robot' },
     { id:'neworder', label:'New Order', icon:'fa-plus-circle' },
     { id:'blog', label:'Blog', icon:'fa-blog' },
-    { id:'activity', label:'Activity Log', icon:'fa-history' }
+    { id:'activity', label:'Activity Log', icon:'fa-history' },
+    { id:'sip', label:'SIP Bridge', icon:'fa-phone-volume' }
   ];
 
   root.innerHTML = `
@@ -94,6 +95,7 @@ function render() {
       ${A.tab === 'neworder' ? renderNewOrder() : ''}
       ${A.tab === 'blog' ? renderBlog() : ''}
       ${A.tab === 'activity' ? renderActivity() : ''}
+      ${A.tab === 'sip' ? renderSipBridge() : ''}
     </div>
   `;
 }
@@ -1708,4 +1710,455 @@ async function deleteRoverConvo(id) {
       alert('Failed to delete');
     }
   } catch(e) { alert('Error: ' + e.message); }
+}
+
+// ============================================================
+// SIP BRIDGE TAB — LiveKit Telephony Management
+// Manage inbound/outbound SIP trunks, dispatch rules, dial out
+// ============================================================
+let sipData = null;
+let sipLoading = false;
+let sipDialing = false;
+let sipCreating = false;
+let sipCreateMode = null; // 'inbound' | 'outbound' | null
+
+async function loadSipData() {
+  sipLoading = true;
+  render();
+  try {
+    const res = await fetch('/api/secretary/sip/trunks', { headers: { ...adminHeaders(), 'Content-Type': 'application/json' } });
+    if (res.ok) {
+      sipData = await res.json();
+    } else {
+      sipData = { error: 'Failed to load SIP trunks (HTTP ' + res.status + ')' };
+    }
+  } catch(e) {
+    sipData = { error: e.message };
+  }
+  sipLoading = false;
+  render();
+}
+
+function renderSipBridge() {
+  // Auto-load on first visit
+  if (!sipData && !sipLoading) { loadSipData(); }
+
+  if (sipLoading) {
+    return `<div class="flex items-center justify-center py-20"><div class="w-8 h-8 border-4 border-purple-200 border-t-purple-600 rounded-full animate-spin"></div><span class="ml-3 text-gray-500">Loading SIP trunks from LiveKit...</span></div>`;
+  }
+
+  if (sipData?.error) {
+    return section('SIP Bridge Error', 'fa-exclamation-triangle', `
+      <div class="p-4 bg-red-50 border border-red-200 rounded-xl text-red-700">
+        <p class="font-semibold">Failed to connect to LiveKit SIP API</p>
+        <p class="text-sm mt-1">${sipData.error}</p>
+        <button onclick="sipData=null;loadSipData()" class="mt-3 px-4 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700"><i class="fas fa-redo mr-1"></i>Retry</button>
+      </div>
+    `);
+  }
+
+  const inbound = sipData?.inbound_trunks || [];
+  const outbound = sipData?.outbound_trunks || [];
+  const rules = sipData?.dispatch_rules || [];
+
+  return `
+    <!-- Header + Stats -->
+    <div class="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-6">
+      ${mc('Inbound Trunks', inbound.length, 'fa-phone-alt', 'green')}
+      ${mc('Outbound Trunks', outbound.length, 'fa-phone-volume', 'blue')}
+      ${mc('Dispatch Rules', rules.length, 'fa-route', 'purple')}
+      ${mc('Total Trunks', inbound.length + outbound.length, 'fa-network-wired', 'indigo')}
+    </div>
+
+    <!-- Quick Actions -->
+    ${section('Quick Actions', 'fa-bolt', `
+      <div class="flex flex-wrap gap-3">
+        <button onclick="sipCreateMode='outbound';render()" class="px-4 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 transition-all shadow-lg hover:shadow-xl">
+          <i class="fas fa-plus mr-2"></i>New Outbound Trunk
+        </button>
+        <button onclick="sipCreateMode='inbound';render()" class="px-4 py-2.5 bg-green-600 text-white rounded-xl text-sm font-semibold hover:bg-green-700 transition-all shadow-lg hover:shadow-xl">
+          <i class="fas fa-plus mr-2"></i>New Inbound Trunk
+        </button>
+        <button onclick="showDialModal()" class="px-4 py-2.5 bg-purple-600 text-white rounded-xl text-sm font-semibold hover:bg-purple-700 transition-all shadow-lg hover:shadow-xl">
+          <i class="fas fa-phone mr-2"></i>Dial a Number
+        </button>
+        <button onclick="sipData=null;loadSipData()" class="px-4 py-2.5 bg-gray-100 text-gray-700 rounded-xl text-sm font-semibold hover:bg-gray-200 transition-all border border-gray-200">
+          <i class="fas fa-sync mr-2"></i>Refresh
+        </button>
+      </div>
+    `)}
+
+    <!-- Create Trunk Form -->
+    ${sipCreateMode ? renderCreateTrunkForm() : ''}
+
+    <!-- Dial Modal -->
+    <div id="sip-dial-modal" class="hidden mb-6"></div>
+
+    <!-- Outbound Trunks -->
+    ${section('Outbound Trunks <span class=\"text-sm font-normal text-gray-400\">(AI → Phone)</span>', 'fa-phone-volume', `
+      ${outbound.length === 0 ? `
+        <div class="text-center py-8 text-gray-400">
+          <i class="fas fa-phone-slash text-4xl mb-3"></i>
+          <p>No outbound trunks configured</p>
+          <p class="text-sm mt-1">Create one to enable AI-to-phone dialing</p>
+        </div>
+      ` : `
+        <div class="space-y-3">
+          ${outbound.map(t => renderTrunkCard(t, 'outbound')).join('')}
+        </div>
+      `}
+    `)}
+
+    <!-- Inbound Trunks -->
+    ${section('Inbound Trunks <span class=\"text-sm font-normal text-gray-400\">(Phone → AI)</span>', 'fa-phone-alt', `
+      ${inbound.length === 0 ? `
+        <div class="text-center py-8 text-gray-400">
+          <i class="fas fa-phone-slash text-4xl mb-3"></i>
+          <p>No inbound trunks configured</p>
+          <p class="text-sm mt-1">Create one to route incoming calls to AI</p>
+        </div>
+      ` : `
+        <div class="space-y-3">
+          ${inbound.map(t => renderTrunkCard(t, 'inbound')).join('')}
+        </div>
+      `}
+    `)}
+
+    <!-- Dispatch Rules -->
+    ${section('Dispatch Rules', 'fa-route', `
+      ${rules.length === 0 ? `
+        <p class="text-center py-4 text-gray-400">No dispatch rules configured</p>
+      ` : `
+        <div class="space-y-2">
+          ${rules.map(r => `
+            <div class="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
+              <div class="flex items-center gap-3">
+                <div class="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center"><i class="fas fa-route text-purple-600 text-xs"></i></div>
+                <div>
+                  <p class="text-sm font-semibold text-gray-800">${r.name || r.sip_dispatch_rule_id || 'Unnamed Rule'}</p>
+                  <p class="text-xs text-gray-400">ID: ${r.sip_dispatch_rule_id || 'N/A'}</p>
+                  ${r.trunk_ids?.length ? `<p class="text-xs text-gray-500">Trunks: ${r.trunk_ids.join(', ')}</p>` : ''}
+                </div>
+              </div>
+              <div class="flex items-center gap-2">
+                ${r.rule?.dispatchRuleIndividual?.roomPrefix ? `<span class="px-2 py-1 bg-purple-100 text-purple-700 rounded-lg text-xs">Room: ${r.rule.dispatchRuleIndividual.roomPrefix}*</span>` : ''}
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      `}
+    `)}
+
+    <!-- Handshake Reference -->
+    ${section('SIP Handshake Reference', 'fa-info-circle', `
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="p-4 bg-blue-50 border border-blue-200 rounded-xl">
+          <h4 class="font-bold text-blue-800 mb-2"><i class="fas fa-arrow-right mr-1"></i>Outbound (AI → Phone)</h4>
+          <ol class="text-sm text-blue-700 space-y-1 list-decimal ml-4">
+            <li>Create outbound trunk with carrier details</li>
+            <li>LiveKit sends SIP INVITE to carrier proxy</li>
+            <li>Carrier returns 401 challenge</li>
+            <li>LiveKit resends with auth credentials</li>
+            <li>Call connected — AI joins LiveKit room</li>
+          </ol>
+        </div>
+        <div class="p-4 bg-green-50 border border-green-200 rounded-xl">
+          <h4 class="font-bold text-green-800 mb-2"><i class="fas fa-arrow-left mr-1"></i>Inbound (Phone → AI)</h4>
+          <ol class="text-sm text-green-700 space-y-1 list-decimal ml-4">
+            <li>Create inbound trunk + dispatch rule</li>
+            <li>Carrier forwards call to LiveKit SIP gateway</li>
+            <li>LiveKit validates trunk & routes to room</li>
+            <li>AI agent auto-joins room and answers</li>
+            <li>Call logged in secretary_call_logs</li>
+          </ol>
+        </div>
+      </div>
+      <div class="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+        <h4 class="font-bold text-amber-800 mb-2"><i class="fas fa-exclamation-triangle mr-1"></i>Telus SIP Requirements</h4>
+        <ul class="text-sm text-amber-700 space-y-1">
+          <li>• <strong>Proxy:</strong> proxy1.dynsipt.broadconnect.ca (or proxy2)</li>
+          <li>• <strong>Transport:</strong> UDP (no encryption)</li>
+          <li>• <strong>Auth Username:</strong> Your 10-digit Telus Pilot number</li>
+          <li>• <strong>From Header:</strong> Must match primary billing number</li>
+          <li>• <strong>Media Encryption:</strong> Disabled (RTP/UDP only)</li>
+        </ul>
+      </div>
+    `)}
+  `;
+}
+
+function renderTrunkCard(t, type) {
+  const id = t.sip_trunk_id || t.trunk?.sip_trunk_id || 'N/A';
+  const name = t.name || t.trunk?.name || 'Unnamed';
+  const numbers = t.numbers || t.trunk?.numbers || [];
+  const address = t.address || t.trunk?.address || '';
+  const authUser = t.auth_username || t.trunk?.auth_username || '';
+  const transport = t.transport || t.trunk?.transport || 0;
+  const transportLabel = ['Auto','UDP','TCP','TLS'][transport] || 'Auto';
+  const encryption = t.media_encryption || t.trunk?.media_encryption || 0;
+  const encLabel = encryption === 0 ? 'Disabled' : 'Enabled';
+  const krisp = t.krisp_enabled || t.trunk?.krisp_enabled;
+
+  return `
+    <div class="p-4 bg-white border border-gray-200 rounded-xl hover:border-${type==='outbound'?'blue':'green'}-300 transition-colors">
+      <div class="flex items-start justify-between">
+        <div class="flex items-start gap-3">
+          <div class="w-10 h-10 bg-${type==='outbound'?'blue':'green'}-100 rounded-full flex items-center justify-center flex-shrink-0">
+            <i class="fas fa-${type==='outbound'?'phone-volume':'phone-alt'} text-${type==='outbound'?'blue':'green'}-600"></i>
+          </div>
+          <div>
+            <p class="font-semibold text-gray-800">${name}</p>
+            <p class="text-xs text-gray-400 font-mono">${id}</p>
+            ${numbers.length ? `<p class="text-sm text-gray-600 mt-1"><i class="fas fa-hashtag mr-1 text-gray-400"></i>${numbers.join(', ')}</p>` : ''}
+            ${address ? `<p class="text-sm text-gray-600"><i class="fas fa-server mr-1 text-gray-400"></i>${address}</p>` : `<p class="text-sm text-gray-500"><i class="fas fa-cloud mr-1"></i>LiveKit Cloud PSTN</p>`}
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          ${type === 'outbound' ? `<button onclick="quickDial('${id}')" class="p-2 bg-purple-100 hover:bg-purple-200 rounded-lg transition-colors" title="Dial out using this trunk"><i class="fas fa-phone text-purple-600 text-sm"></i></button>` : ''}
+          <button onclick="deleteSipTrunk('${id}','${name}')" class="p-2 bg-red-100 hover:bg-red-200 rounded-lg transition-colors" title="Delete trunk"><i class="fas fa-trash text-red-600 text-sm"></i></button>
+        </div>
+      </div>
+      <div class="flex flex-wrap gap-2 mt-3">
+        <span class="px-2 py-1 rounded-lg text-xs font-medium bg-gray-100 text-gray-600"><i class="fas fa-exchange-alt mr-1"></i>${transportLabel}</span>
+        <span class="px-2 py-1 rounded-lg text-xs font-medium ${encryption===0?'bg-amber-100 text-amber-700':'bg-green-100 text-green-700'}"><i class="fas fa-lock${encryption===0?'-open':''} mr-1"></i>Encryption: ${encLabel}</span>
+        ${krisp ? '<span class="px-2 py-1 rounded-lg text-xs font-medium bg-indigo-100 text-indigo-700"><i class="fas fa-microphone mr-1"></i>Krisp Noise Filter</span>' : ''}
+        ${authUser ? `<span class="px-2 py-1 rounded-lg text-xs font-medium bg-blue-100 text-blue-700"><i class="fas fa-user mr-1"></i>Auth: ${authUser}</span>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+function renderCreateTrunkForm() {
+  const isOutbound = sipCreateMode === 'outbound';
+  const color = isOutbound ? 'blue' : 'green';
+  const icon = isOutbound ? 'fa-phone-volume' : 'fa-phone-alt';
+
+  return `
+    <div class="bg-white rounded-xl border border-${color}-200 shadow-lg p-6 mb-6">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-lg font-bold text-gray-800"><i class="fas ${icon} mr-2 text-${color}-600"></i>Create ${isOutbound ? 'Outbound' : 'Inbound'} SIP Trunk</h3>
+        <button onclick="sipCreateMode=null;render()" class="p-2 bg-gray-100 hover:bg-gray-200 rounded-lg"><i class="fas fa-times text-gray-500"></i></button>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-xs font-semibold text-gray-500 mb-1 uppercase">Trunk Name</label>
+          <input id="sip-name" type="text" value="${isOutbound ? 'Reuse Canada Outbound' : 'Reuse Canada Inbound'}" class="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-${color}-500">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-gray-500 mb-1 uppercase">Phone Number (E.164) *</label>
+          <input id="sip-phone" type="text" placeholder="+17805551234" class="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-${color}-500">
+        </div>
+        ${isOutbound ? `
+          <div>
+            <label class="block text-xs font-semibold text-gray-500 mb-1 uppercase">SIP Proxy Address</label>
+            <input id="sip-address" type="text" placeholder="proxy1.dynsipt.broadconnect.ca (leave blank for LiveKit Cloud)" class="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm">
+            <p class="text-xs text-gray-400 mt-1">Leave blank to use LiveKit Cloud PSTN gateway</p>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-gray-500 mb-1 uppercase">Transport</label>
+            <select id="sip-transport" class="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm">
+              <option value="0">Auto</option>
+              <option value="1" selected>UDP (recommended for Telus)</option>
+              <option value="2">TCP</option>
+              <option value="3">TLS</option>
+            </select>
+          </div>
+        ` : ''}
+        <div>
+          <label class="block text-xs font-semibold text-gray-500 mb-1 uppercase">Auth Username</label>
+          <input id="sip-auth-user" type="text" placeholder="10-digit Telus Pilot number (optional)" class="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-gray-500 mb-1 uppercase">Auth Password</label>
+          <input id="sip-auth-pass" type="password" placeholder="SIP password (optional)" class="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm">
+        </div>
+        ${isOutbound ? `
+          <div>
+            <label class="block text-xs font-semibold text-gray-500 mb-1 uppercase">Country Code</label>
+            <select id="sip-country" class="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm">
+              <option value="CA" selected>Canada (CA)</option>
+              <option value="US">United States (US)</option>
+            </select>
+          </div>
+        ` : `
+          <div>
+            <label class="block text-xs font-semibold text-gray-500 mb-1 uppercase">Krisp Noise Filter</label>
+            <select id="sip-krisp" class="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm">
+              <option value="true" selected>Enabled</option>
+              <option value="false">Disabled</option>
+            </select>
+          </div>
+        `}
+      </div>
+
+      <div id="sip-create-error" class="hidden mt-4 p-3 bg-red-50 text-red-700 rounded-lg text-sm"></div>
+      <div id="sip-create-success" class="hidden mt-4 p-3 bg-green-50 text-green-700 rounded-lg text-sm"></div>
+
+      <div class="flex gap-3 mt-6">
+        <button onclick="createSipTrunk('${sipCreateMode}')" id="sip-create-btn" class="px-6 py-3 bg-${color}-600 text-white font-bold rounded-xl hover:bg-${color}-700 transition-all shadow-lg">
+          <i class="fas fa-plus mr-2"></i>Create ${isOutbound ? 'Outbound' : 'Inbound'} Trunk
+        </button>
+        <button onclick="sipCreateMode=null;render()" class="px-6 py-3 bg-gray-100 text-gray-700 font-semibold rounded-xl hover:bg-gray-200 border border-gray-200">Cancel</button>
+      </div>
+    </div>
+  `;
+}
+
+async function createSipTrunk(type) {
+  const errEl = document.getElementById('sip-create-error');
+  const okEl = document.getElementById('sip-create-success');
+  const btn = document.getElementById('sip-create-btn');
+  if (errEl) errEl.classList.add('hidden');
+  if (okEl) okEl.classList.add('hidden');
+
+  const phone = document.getElementById('sip-phone')?.value?.trim();
+  if (!phone) { if (errEl) { errEl.textContent = 'Phone number is required (E.164 format, e.g. +17805551234)'; errEl.classList.remove('hidden'); } return; }
+
+  const payload = {
+    name: document.getElementById('sip-name')?.value?.trim() || '',
+    phone_number: phone,
+    auth_username: document.getElementById('sip-auth-user')?.value?.trim() || '',
+    auth_password: document.getElementById('sip-auth-pass')?.value?.trim() || '',
+  };
+
+  if (type === 'outbound') {
+    payload.address = document.getElementById('sip-address')?.value?.trim() || '';
+    payload.transport = parseInt(document.getElementById('sip-transport')?.value || '0');
+    payload.country_code = document.getElementById('sip-country')?.value || 'CA';
+  } else {
+    payload.krisp_enabled = document.getElementById('sip-krisp')?.value === 'true';
+  }
+
+  if (btn) btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Creating...';
+
+  try {
+    const endpoint = type === 'outbound' ? '/api/secretary/sip/outbound-trunk' : '/api/secretary/sip/inbound-trunk';
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...adminHeaders() },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (data.success) {
+      if (okEl) {
+        okEl.innerHTML = '<i class="fas fa-check-circle mr-1"></i>' + (data.message || 'Trunk created!') + '<br><span class="font-mono text-xs">Trunk ID: ' + (data.trunk_id || 'N/A') + '</span>';
+        okEl.classList.remove('hidden');
+      }
+      // Reload trunks after 1.5s
+      setTimeout(() => { sipData = null; sipCreateMode = null; loadSipData(); }, 1500);
+    } else {
+      if (errEl) { errEl.textContent = data.error || 'Failed to create trunk'; errEl.classList.remove('hidden'); }
+    }
+  } catch(e) {
+    if (errEl) { errEl.textContent = 'Network error: ' + e.message; errEl.classList.remove('hidden'); }
+  }
+  if (btn) btn.innerHTML = '<i class="fas fa-plus mr-2"></i>Create ' + (type === 'outbound' ? 'Outbound' : 'Inbound') + ' Trunk';
+}
+
+function showDialModal() {
+  const modal = document.getElementById('sip-dial-modal');
+  if (!modal) return;
+  const outbound = sipData?.outbound_trunks || [];
+  modal.classList.remove('hidden');
+  modal.innerHTML = `
+    <div class="bg-white rounded-xl border border-purple-200 shadow-lg p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-lg font-bold text-gray-800"><i class="fas fa-phone mr-2 text-purple-600"></i>Dial a Phone Number</h3>
+        <button onclick="document.getElementById('sip-dial-modal').classList.add('hidden')" class="p-2 bg-gray-100 hover:bg-gray-200 rounded-lg"><i class="fas fa-times text-gray-500"></i></button>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-xs font-semibold text-gray-500 mb-1 uppercase">Phone Number to Dial *</label>
+          <input id="dial-phone" type="text" placeholder="+17805551234" class="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-purple-500">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-gray-500 mb-1 uppercase">Outbound Trunk</label>
+          <select id="dial-trunk" class="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm">
+            <option value="">Auto-select (newest)</option>
+            ${outbound.map(t => `<option value="${t.sip_trunk_id || ''}">${t.name || t.sip_trunk_id} — ${(t.numbers||[]).join(', ')}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-gray-500 mb-1 uppercase">Room Name (optional)</label>
+          <input id="dial-room" type="text" placeholder="auto-generated if blank" class="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-gray-500 mb-1 uppercase">Caller Display Name</label>
+          <input id="dial-name" type="text" value="RoofReporterAI" class="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm">
+        </div>
+      </div>
+      <div id="dial-error" class="hidden mt-4 p-3 bg-red-50 text-red-700 rounded-lg text-sm"></div>
+      <div id="dial-success" class="hidden mt-4 p-3 bg-green-50 text-green-700 rounded-lg text-sm"></div>
+      <div class="flex gap-3 mt-6">
+        <button onclick="dialNumber()" id="dial-btn" class="px-6 py-3 bg-purple-600 text-white font-bold rounded-xl hover:bg-purple-700 transition-all shadow-lg"><i class="fas fa-phone mr-2"></i>Dial Now</button>
+        <button onclick="document.getElementById('sip-dial-modal').classList.add('hidden')" class="px-6 py-3 bg-gray-100 text-gray-700 font-semibold rounded-xl hover:bg-gray-200 border border-gray-200">Cancel</button>
+      </div>
+    </div>
+  `;
+}
+
+function quickDial(trunkId) {
+  showDialModal();
+  setTimeout(() => {
+    const sel = document.getElementById('dial-trunk');
+    if (sel) sel.value = trunkId;
+  }, 100);
+}
+
+async function dialNumber() {
+  const errEl = document.getElementById('dial-error');
+  const okEl = document.getElementById('dial-success');
+  const btn = document.getElementById('dial-btn');
+  if (errEl) errEl.classList.add('hidden');
+  if (okEl) okEl.classList.add('hidden');
+
+  const phone = document.getElementById('dial-phone')?.value?.trim();
+  if (!phone) { if (errEl) { errEl.textContent = 'Enter a phone number to dial'; errEl.classList.remove('hidden'); } return; }
+
+  if (btn) btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Dialing...';
+
+  try {
+    const res = await fetch('/api/secretary/sip/dial', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...adminHeaders() },
+      body: JSON.stringify({
+        phone_number: phone,
+        trunk_id: document.getElementById('dial-trunk')?.value || '',
+        room_name: document.getElementById('dial-room')?.value?.trim() || '',
+        participant_name: document.getElementById('dial-name')?.value?.trim() || 'RoofReporterAI',
+      }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      if (okEl) {
+        okEl.innerHTML = '<i class="fas fa-check-circle mr-1"></i>' + (data.message || 'Call initiated!') + '<br><span class="font-mono text-xs">Room: ' + (data.room_name || '') + ' | Participant: ' + (data.participant_id || '') + '</span>';
+        okEl.classList.remove('hidden');
+      }
+    } else {
+      if (errEl) { errEl.textContent = data.error || 'Failed to dial'; errEl.classList.remove('hidden'); }
+    }
+  } catch(e) {
+    if (errEl) { errEl.textContent = 'Network error: ' + e.message; errEl.classList.remove('hidden'); }
+  }
+  if (btn) btn.innerHTML = '<i class="fas fa-phone mr-2"></i>Dial Now';
+}
+
+async function deleteSipTrunk(trunkId, name) {
+  if (!confirm('Delete SIP trunk "' + name + '"?\\n\\nThis will disconnect any phone numbers using this trunk.')) return;
+  try {
+    const res = await fetch('/api/secretary/sip/trunk/' + trunkId, {
+      method: 'DELETE',
+      headers: adminHeaders(),
+    });
+    const data = await res.json();
+    if (data.success) {
+      sipData = null;
+      loadSipData();
+    } else {
+      alert('Failed to delete: ' + (data.error || 'Unknown error'));
+    }
+  } catch(e) {
+    alert('Error: ' + e.message);
+  }
 }
