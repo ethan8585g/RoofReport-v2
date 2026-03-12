@@ -98,6 +98,10 @@ export type Bindings = {
   // Used to call Gemini 2.5 Pro for post-generation report quality upgrade
   GEMINI_ENHANCE_API_KEY: string   // e.g. "AIzaSy..." — separate from GOOGLE_SOLAR_API_KEY
 
+  // Replicate — AI Image Generation (Virtual Try-On roof visualization)
+  // Get from: replicate.com → Account Settings → API Tokens
+  REPLICATE_API_KEY: string        // e.g. "r8_..." — used for inpainting model calls
+
   // Google Analytics 4 — Frontend tracking + Data API for admin analytics
   GA4_MEASUREMENT_ID: string       // e.g. "G-XXXXXXXXXX" — GA4 Measurement ID for gtag.js
   GA4_API_SECRET: string           // Measurement Protocol API secret for server-side events

@@ -77,22 +77,16 @@ function renderDashboard() {
   var processingReports = custState.orders.filter(function(o) { return o.status === 'processing'; }).length;
   var enhancingReports = custState.orders.filter(function(o) { return o.enhancement_status === 'sent' || o.enhancement_status === 'pending' || o.report_status === 'enhancing'; }).length;
 
-  // Determine branding setup completion status
-  var brandingComplete = !!(c.brand_logo_url && c.brand_business_name);
-  var brandingPartial = !!(c.brand_logo_url || c.brand_business_name);
-  var brandingBadge = brandingComplete ? 'Active' : (brandingPartial ? 'Incomplete' : 'Set Up');
-  var brandingBadgeColor = brandingComplete ? 'bg-green-500' : (brandingPartial ? 'bg-amber-500' : 'bg-pink-500');
-
   // Determine trial/credits exhausted state
   var trialsExhausted = freeTrialRemaining <= 0 && paidCredits <= 0;
 
-  // Build the nav modules — Custom Branding is placed right after Invoicing per user request
+  // Build the nav modules
   var modules = [
     { id: 'order', href: '/customer/order', icon: 'fa-plus-circle', label: 'Order New Report', desc: 'Get a roof measurement', color: 'from-blue-600 to-blue-700', badge: (freeTrialRemaining > 0 ? freeTrialRemaining + ' free' : (paidCredits > 0 ? paidCredits + ' credits' : 'Buy Credits')), badgeColor: freeTrialRemaining > 0 ? 'bg-green-500' : (paidCredits > 0 ? 'bg-blue-500' : 'bg-amber-500'), primary: true },
     { id: 'reports', href: '/customer/reports', icon: 'fa-file-alt', label: 'Roof Report History', desc: 'View past measurements', color: 'from-indigo-500 to-indigo-600', badge: completedReports > 0 ? completedReports.toString() : '', badgeColor: 'bg-indigo-500' },
+    { id: 'virtual-tryon', href: '/customer/virtual-tryon', icon: 'fa-magic', label: 'Virtual Roof Try-On', desc: 'AI roof visualization', color: 'from-violet-500 to-purple-600', badge: 'New', badgeColor: 'bg-violet-500' },
     { id: 'customers', href: '/customer/customers', icon: 'fa-users', label: 'Customers', desc: 'CRM & contacts', color: 'from-emerald-500 to-emerald-600', badge: s.customers > 0 ? s.customers.toString() : '', badgeColor: 'bg-emerald-500' },
     { id: 'invoices', href: '/customer/invoices', icon: 'fa-file-invoice-dollar', label: 'Invoices', desc: 'Billing & payments', color: 'from-amber-500 to-amber-600', badge: s.invoices_owing > 0 ? '$' + Number(s.invoices_owing).toFixed(0) + ' owing' : '', badgeColor: 'bg-amber-500' },
-    { id: 'branding', href: '/customer/branding', icon: 'fa-palette', label: 'Custom Branding Setup', desc: 'Logo, colors, ads & identity', color: 'from-pink-500 to-fuchsia-600', badge: brandingBadge, badgeColor: brandingBadgeColor },
     { id: 'proposals', href: '/customer/proposals', icon: 'fa-file-signature', label: 'Estimates / Proposals', desc: 'Sales documents', color: 'from-purple-500 to-purple-600', badge: s.proposals_open > 0 ? s.proposals_open + ' open' : '', badgeColor: 'bg-purple-500' },
     { id: 'jobs', href: '/customer/jobs', icon: 'fa-hard-hat', label: 'Job Management', desc: 'Calendar & scheduling', color: 'from-rose-500 to-rose-600', badge: s.jobs_total > 0 ? s.jobs_total + (s.jobs_in_progress > 0 ? ' (' + s.jobs_in_progress + ' active)' : '') : '', badgeColor: 'bg-rose-500' },
     { id: 'pipeline', href: '/customer/pipeline', icon: 'fa-funnel-dollar', label: 'Sales Pipeline', desc: 'Leads & to-do\'s', color: 'from-cyan-500 to-cyan-600', badge: 'Coming Soon', badgeColor: 'bg-gray-400' },

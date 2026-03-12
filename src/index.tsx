@@ -19,6 +19,7 @@ import { secretaryRoutes } from './routes/secretary'
 import { roverRoutes } from './routes/rover'
 import { emailOutreachRoutes } from './routes/email-outreach'
 import { analyticsRoutes } from './routes/analytics'
+import { virtualTryonRoutes } from './routes/virtual-tryon'
 import type { Bindings } from './types'
 
 const app = new Hono<{ Bindings: Bindings }>()
@@ -81,6 +82,7 @@ app.route('/api/secretary', secretaryRoutes)
 app.route('/api/rover', roverRoutes)
 app.route('/api/email-outreach', emailOutreachRoutes)
 app.route('/api/analytics', analyticsRoutes)
+app.route('/api/virtual-tryon', virtualTryonRoutes)
 
 // Health check
 app.get('/api/health', (c) => {
@@ -393,9 +395,6 @@ app.get('/customer/order', (c) => {
   return c.html(getCustomerOrderPageHTML(mapsKey))
 })
 
-// Customer Branding Setup
-app.get('/customer/branding', (c) => c.html(getBrandingSetupHTML()))
-
 // Property Imagery — Dev account only
 app.get('/customer/property-imagery', (c) => {
   const mapsKey = c.env.GOOGLE_MAPS_API_KEY || ''
@@ -409,6 +408,9 @@ app.get('/customer/invoices', (c) => c.html(getCrmSubPageHTML('invoices', 'Invoi
 app.get('/customer/proposals', (c) => c.html(getCrmSubPageHTML('proposals', 'Proposals & Estimates', 'fa-file-signature')))
 app.get('/customer/jobs', (c) => c.html(getCrmSubPageHTML('jobs', 'Job Management', 'fa-hard-hat')))
 app.get('/customer/pipeline', (c) => c.html(getCrmSubPageHTML('pipeline', 'Sales Pipeline', 'fa-funnel-dollar')))
+
+// Virtual Try-On — AI Roof Visualization
+app.get('/customer/virtual-tryon', (c) => c.html(getVirtualTryOnPageHTML()))
 
 // Public proposal view page — tracks views when customer opens shared link
 app.get('/proposal/view/:token', async (c) => {
@@ -2146,26 +2148,26 @@ function getCustomerOrderPageHTML(mapsApiKey: string) {
 }
 
 // ============================================================
-// CUSTOM BRANDING SETUP PAGE
+// VIRTUAL TRY-ON PAGE — AI Roof Visualization
 // ============================================================
-function getBrandingSetupHTML() {
+function getVirtualTryOnPageHTML() {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   ${getHeadTags()}
-  <title>Custom Branding Setup - RoofReporterAI</title>
+  <title>Virtual Try-On - RoofReporterAI</title>
 </head>
 <body class="bg-gray-50 min-h-screen">
   <header class="bg-gradient-to-r from-sky-500 to-blue-600 text-white shadow-lg">
     <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
       <div class="flex items-center space-x-3">
         <a href="/customer/dashboard" class="flex items-center space-x-3 hover:opacity-90">
-          <div class="w-10 h-10 bg-gradient-to-br from-pink-500 to-fuchsia-600 rounded-lg flex items-center justify-center">
-            <i class="fas fa-palette text-white text-lg"></i>
+          <div class="w-10 h-10 bg-gradient-to-br from-violet-500 to-purple-600 rounded-lg flex items-center justify-center">
+            <i class="fas fa-magic text-white text-lg"></i>
           </div>
           <div>
-            <h1 class="text-lg font-bold">Custom Branding Setup</h1>
-            <p class="text-brand-200 text-xs">RoofReporterAI</p>
+            <h1 class="text-lg font-bold">Virtual Roof Try-On</h1>
+            <p class="text-brand-200 text-xs">AI-Powered Roof Visualization</p>
           </div>
         </a>
       </div>
@@ -2176,8 +2178,8 @@ function getBrandingSetupHTML() {
       </nav>
     </div>
   </header>
-  <main class="max-w-5xl mx-auto px-4 py-6">
-    <div id="branding-root"></div>
+  <main class="max-w-6xl mx-auto px-4 py-6">
+    <div id="tryon-root"></div>
   </main>
   <script>
     (function() {
@@ -2198,7 +2200,7 @@ function getBrandingSetupHTML() {
       window.location.href = '/customer/login';
     }
   </script>
-  <script src="/static/branding.js"></script>
+  <script src="/static/virtual-tryon.js"></script>
 </body>
 </html>`
 }
