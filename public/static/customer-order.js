@@ -80,13 +80,32 @@ async function loadOrderData() {
 // ============================================================
 // MAP INITIALIZATION — STEP 1: PIN
 // ============================================================
+let _mapInitAttempts = 0;
+let _placesInitialized = false;
+
 function initMap() {
   if (typeof google === 'undefined' || !google.maps) {
-    setTimeout(initMap, 300);
+    _mapInitAttempts++;
+    if (_mapInitAttempts < 100) { // Up to ~30s of retries
+      setTimeout(initMap, 300);
+    } else {
+      console.error('[Maps] Google Maps API failed to load after 30s');
+      const mapEl = document.getElementById('orderMap');
+      if (mapEl) mapEl.innerHTML = '<div class="flex items-center justify-center h-full bg-red-50 rounded-xl"><p class="text-red-600 text-sm"><i class="fas fa-exclamation-triangle mr-2"></i>Map failed to load. Please refresh the page.</p></div>';
+    }
     return;
   }
   const mapEl = document.getElementById('orderMap');
   if (!mapEl) return;
+
+  // Prevent reinitializing if map already exists and element is the same
+  if (orderState.map && orderState.mapReady) {
+    // Just restore marker if needed
+    if (orderState.pinPlaced && orderState.lat && orderState.lng) {
+      placeMarker(parseFloat(orderState.lat), parseFloat(orderState.lng));
+    }
+    return;
+  }
 
   const defaultCenter = { lat: 53.5461, lng: -113.4938 };
   orderState.map = new google.maps.Map(mapEl, {
@@ -109,27 +128,8 @@ function initMap() {
     placeMarker(e.latLng.lat(), e.latLng.lng());
   });
 
-  const searchInput = document.getElementById('mapSearchInput');
-  if (searchInput && google.maps.places) {
-    const autocomplete = new google.maps.places.Autocomplete(searchInput, {
-      componentRestrictions: { country: 'ca' },
-      fields: ['geometry', 'formatted_address', 'address_components']
-    });
-    autocomplete.bindTo('bounds', orderState.map);
-    autocomplete.addListener('place_changed', () => {
-      const place = autocomplete.getPlace();
-      if (place.geometry && place.geometry.location) {
-        const lat = place.geometry.location.lat();
-        const lng = place.geometry.location.lng();
-        orderState.map.setCenter({ lat, lng });
-        orderState.map.setZoom(19);
-        placeMarker(lat, lng);
-        if (place.address_components) {
-          parseAddressComponents(place.address_components, place.formatted_address);
-        }
-      }
-    });
-  }
+  // Initialize Places autocomplete with retry
+  initPlacesAutocomplete();
 
   // Restore marker if returning
   if (orderState.pinPlaced && orderState.lat && orderState.lng) {
@@ -137,6 +137,53 @@ function initMap() {
   }
 
   orderState.mapReady = true;
+  _mapInitAttempts = 0;
+  console.log('[Maps] Map initialized successfully');
+}
+
+// Separate Places init with its own retry — Places library may load after google.maps
+let _placesRetries = 0;
+function initPlacesAutocomplete() {
+  const searchInput = document.getElementById('mapSearchInput');
+  if (!searchInput || _placesInitialized) return;
+
+  if (!google.maps.places) {
+    _placesRetries++;
+    if (_placesRetries < 30) { // Up to ~9s of retries for Places
+      setTimeout(initPlacesAutocomplete, 300);
+    } else {
+      console.error('[Maps] Places library failed to load');
+    }
+    return;
+  }
+
+  try {
+    const autocomplete = new google.maps.places.Autocomplete(searchInput, {
+      componentRestrictions: { country: 'ca' },
+      fields: ['geometry', 'formatted_address', 'address_components']
+    });
+    if (orderState.map) autocomplete.bindTo('bounds', orderState.map);
+    autocomplete.addListener('place_changed', () => {
+      const place = autocomplete.getPlace();
+      if (place.geometry && place.geometry.location) {
+        const lat = place.geometry.location.lat();
+        const lng = place.geometry.location.lng();
+        if (orderState.map) {
+          orderState.map.setCenter({ lat, lng });
+          orderState.map.setZoom(19);
+        }
+        placeMarker(lat, lng);
+        if (place.address_components) {
+          parseAddressComponents(place.address_components, place.formatted_address);
+        }
+      }
+    });
+    _placesInitialized = true;
+    _placesRetries = 0;
+    console.log('[Maps] Places autocomplete initialized');
+  } catch (e) {
+    console.error('[Maps] Places autocomplete error:', e);
+  }
 }
 
 function placeMarker(lat, lng) {
@@ -406,6 +453,17 @@ function renderPinStep(root, progressBar) {
     </div>
   `;
 
+  // Re-init map — if map already created, reuse; otherwise init fresh
+  if (orderState.map && orderState.mapReady) {
+    // Map was already created — need to re-attach to new DOM element
+    const mapEl = document.getElementById('orderMap');
+    if (mapEl && mapEl.children.length === 0) {
+      // DOM was re-rendered, need fresh map instance
+      orderState.map = null;
+      orderState.mapReady = false;
+      _placesInitialized = false;
+    }
+  }
   setTimeout(initMap, 100);
 }
 

@@ -2376,8 +2376,16 @@ function getLanderFunnelHTML() {
 // ============================================================
 function getCustomerOrderPageHTML(mapsApiKey: string) {
   const mapsScript = mapsApiKey
-    ? '<script src="https://maps.googleapis.com/maps/api/js?key=' + mapsApiKey + '&libraries=places" async defer></script>'
-    : ''
+    ? `<script>
+      var googleMapsReady = false;
+      function onCustomerMapsReady() {
+        googleMapsReady = true;
+        console.log('[Maps] Google Maps API loaded with Places library');
+        if (typeof initMap === 'function') initMap();
+      }
+    </script>
+    <script src="https://maps.googleapis.com/maps/api/js?key=${mapsApiKey}&libraries=places&callback=onCustomerMapsReady" async defer></script>`
+    : '<!-- Google Maps: No API key configured -->'
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -2653,7 +2661,15 @@ function getJoinTeamPageHTML() {
 // ============================================================
 function getD2DPageHTML(mapsApiKey: string) {
   const mapsScript = mapsApiKey
-    ? `<script src="https://maps.googleapis.com/maps/api/js?key=${mapsApiKey}&libraries=places,drawing,geometry" async defer></script>`
+    ? `<script>
+      var googleMapsReady = false;
+      function onD2DMapsReady() {
+        googleMapsReady = true;
+        console.log('[Maps] D2D Maps loaded');
+        if (typeof initD2DMap === 'function') initD2DMap();
+      }
+    </script>
+    <script src="https://maps.googleapis.com/maps/api/js?key=${mapsApiKey}&libraries=places,drawing,geometry&callback=onD2DMapsReady" async defer></script>`
     : '<!-- Google Maps: No API key configured. -->'
 
   return `<!DOCTYPE html>
@@ -2718,7 +2734,15 @@ function getD2DPageHTML(mapsApiKey: string) {
 // ============================================================
 function getPropertyImageryPageHTML(mapsApiKey: string) {
   const mapsScript = mapsApiKey
-    ? '<script src="https://maps.googleapis.com/maps/api/js?key=' + mapsApiKey + '&libraries=places" async defer></script>'
+    ? `<script>
+      var googleMapsReady = false;
+      function onImageryMapsReady() {
+        googleMapsReady = true;
+        console.log('[Maps] Property Imagery Maps loaded');
+        if (typeof initImageryMap === 'function') initImageryMap();
+      }
+    </script>
+    <script src="https://maps.googleapis.com/maps/api/js?key=${mapsApiKey}&libraries=places&callback=onImageryMapsReady" async defer></script>`
     : ''
 
   return `<!DOCTYPE html>

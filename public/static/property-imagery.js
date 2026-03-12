@@ -14,11 +14,17 @@ document.addEventListener('DOMContentLoaded', function() {
   waitForGoogleMaps();
 });
 
+var _piMapsRetries = 0;
 function waitForGoogleMaps() {
   if (typeof google !== 'undefined' && google.maps && google.maps.places) {
     initAutocomplete();
   } else {
-    setTimeout(waitForGoogleMaps, 300);
+    _piMapsRetries++;
+    if (_piMapsRetries < 60) {
+      setTimeout(waitForGoogleMaps, 300);
+    } else {
+      console.error('[PI] Google Maps failed to load after 18s');
+    }
   }
 }
 

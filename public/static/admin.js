@@ -1301,10 +1301,7 @@ async function saveBlogPost(status) {
   }
 }
 
-function adminHeaders() {
-  const token = localStorage.getItem('rc_token');
-  return token ? { 'Authorization': 'Bearer ' + token } : {};
-}
+// adminHeaders already defined at top of file
 
 async function deleteBlogPost(id) {
   if (!confirm('Delete this blog post permanently?')) return;

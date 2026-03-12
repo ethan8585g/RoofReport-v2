@@ -353,9 +353,15 @@
   // ============================================================
   // MAP INITIALIZATION — Single click handler architecture
   // ============================================================
+  var _d2dMapRetries = 0;
   function initMap() {
     if (typeof google === 'undefined' || !google.maps) {
-      setTimeout(initMap, 500);
+      _d2dMapRetries++;
+      if (_d2dMapRetries < 60) {
+        setTimeout(initMap, 500);
+      } else {
+        console.error('[D2D] Google Maps API failed to load');
+      }
       return;
     }
 
@@ -1274,11 +1280,17 @@
   // ============================================================
   renderLayout();
 
+  var _d2dWaitRetries = 0;
   function waitForMaps() {
     if (typeof google !== 'undefined' && google.maps) {
       initMap();
     } else {
-      setTimeout(waitForMaps, 300);
+      _d2dWaitRetries++;
+      if (_d2dWaitRetries < 60) {
+        setTimeout(waitForMaps, 300);
+      } else {
+        console.error('[D2D] Google Maps failed to load after 18s');
+      }
     }
   }
   waitForMaps();
