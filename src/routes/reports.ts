@@ -884,6 +884,18 @@ reportsRoutes.post('/:orderId/generate-enhanced', async (c) => {
   const mapsApiKey = c.env.GOOGLE_MAPS_API_KEY || solarApiKey
   if (!solarApiKey) return c.json({ error: 'GOOGLE_SOLAR_API_KEY required' }, 400)
 
+  // ── PREFERRED: If order has trace data, use generateReportForOrder instead ──
+  // This uses trace coordinates for ALL geometry (not Solar API footprint)
+  if (order.roof_trace_json) {
+    console.log(`[GenerateEnhanced] Order ${orderId}: Has trace data — delegating to generateReportForOrder (trace-first)`)
+    const traceResult = await generateReportForOrder(orderId, c.env)
+    if (traceResult.success) {
+      return c.json({ success: true, report_version: traceResult.version || '5.0', report: traceResult.report, provider: 'trace_engine' })
+    }
+    console.warn(`[GenerateEnhanced] Order ${orderId}: Trace-first path failed: ${traceResult.error} — falling back to Solar`)
+  }
+
+  // ── FALLBACK: Legacy Solar-based report (only for orders without trace data) ──
   const address = [order.property_address, order.property_city, order.property_province, order.property_postal_code].filter(Boolean).join(', ')
   let dlAnalysis: DataLayersAnalysis
   try {

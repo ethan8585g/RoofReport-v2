@@ -84,9 +84,10 @@ let _mapInitAttempts = 0;
 let _placesInitialized = false;
 
 function initMap() {
+  // 1) Wait for Google Maps API to be available
   if (typeof google === 'undefined' || !google.maps) {
     _mapInitAttempts++;
-    if (_mapInitAttempts < 100) { // Up to ~30s of retries
+    if (_mapInitAttempts < 100) {
       setTimeout(initMap, 300);
     } else {
       console.error('[Maps] Google Maps API failed to load after 30s');
@@ -95,22 +96,41 @@ function initMap() {
     }
     return;
   }
-  const mapEl = document.getElementById('orderMap');
-  if (!mapEl) return;
 
-  // Prevent reinitializing if map already exists and element is the same
-  if (orderState.map && orderState.mapReady) {
-    // Just restore marker if needed
+  // 2) Wait for the #orderMap DOM element to exist (may not be rendered yet)
+  const mapEl = document.getElementById('orderMap');
+  if (!mapEl) {
+    _mapInitAttempts++;
+    if (_mapInitAttempts < 100) {
+      setTimeout(initMap, 300);
+      console.log('[Maps] Waiting for #orderMap element... attempt', _mapInitAttempts);
+    } else {
+      console.error('[Maps] #orderMap element never appeared after 30s');
+    }
+    return;
+  }
+
+  // 3) If map already exists and is attached to THIS element, just restore marker
+  if (orderState.map && orderState.mapReady && mapEl.children.length > 0) {
     if (orderState.pinPlaced && orderState.lat && orderState.lng) {
       placeMarker(parseFloat(orderState.lat), parseFloat(orderState.lng));
     }
     return;
   }
 
-  const defaultCenter = { lat: 53.5461, lng: -113.4938 };
+  // 4) Create a fresh map instance
+  orderState.map = null;
+  orderState.mapReady = false;
+  _placesInitialized = false;
+
+  const center = (orderState.lat && orderState.lng)
+    ? { lat: parseFloat(orderState.lat), lng: parseFloat(orderState.lng) }
+    : { lat: 53.5461, lng: -113.4938 };
+  const zoom = (orderState.lat && orderState.lng) ? 18 : 13;
+
   orderState.map = new google.maps.Map(mapEl, {
-    center: defaultCenter,
-    zoom: 13,
+    center: center,
+    zoom: zoom,
     mapTypeId: 'hybrid',
     mapTypeControl: true,
     mapTypeControlOptions: {
@@ -131,14 +151,14 @@ function initMap() {
   // Initialize Places autocomplete with retry
   initPlacesAutocomplete();
 
-  // Restore marker if returning
+  // Restore marker if returning from a later step
   if (orderState.pinPlaced && orderState.lat && orderState.lng) {
     placeMarker(parseFloat(orderState.lat), parseFloat(orderState.lng));
   }
 
   orderState.mapReady = true;
   _mapInitAttempts = 0;
-  console.log('[Maps] Map initialized successfully');
+  console.log('[Maps] Map initialized successfully on #orderMap');
 }
 
 // Separate Places init with its own retry — Places library may load after google.maps
@@ -453,18 +473,13 @@ function renderPinStep(root, progressBar) {
     </div>
   `;
 
-  // Re-init map — if map already created, reuse; otherwise init fresh
-  if (orderState.map && orderState.mapReady) {
-    // Map was already created — need to re-attach to new DOM element
-    const mapEl = document.getElementById('orderMap');
-    if (mapEl && mapEl.children.length === 0) {
-      // DOM was re-rendered, need fresh map instance
-      orderState.map = null;
-      orderState.mapReady = false;
-      _placesInitialized = false;
-    }
-  }
-  setTimeout(initMap, 100);
+  // After innerHTML replacement, the old map instance is detached.
+  // Reset state and re-initialize on the fresh DOM element.
+  orderState.map = null;
+  orderState.mapReady = false;
+  _placesInitialized = false;
+  _mapInitAttempts = 0;
+  setTimeout(initMap, 50);
 }
 
 // ============================================================
