@@ -21,7 +21,7 @@ import { buildDataLayersReport, generateSegmentsFromDLAnalysis, generateSegments
 import { executeRoofOrder, type DataLayersAnalysis } from '../services/solar-datalayers'
 import { generateProfessionalReportHTML, buildVisionFindingsHTML } from '../templates/report-html'
 import { generateTraceBasedDiagramSVG } from '../templates/svg-diagrams'
-import { RoofMeasurementEngine, traceUiToEnginePayload, type TraceReport } from '../services/roof-measurement-engine'
+import { RoofMeasurementEngine, traceUiToEnginePayload, calculateRoofSpecs, ROOF_PITCH_MULTIPLIERS, HIP_VALLEY_MULTIPLIERS, type TraceReport } from '../services/roof-measurement-engine'
 import { enhanceReportViaGemini } from '../services/gemini-enhance'
 import { generateReportImagery, buildAIImageryHTML } from '../services/ai-image-generation'
 import { buildEmailWrapper, sendGmailEmail, sendViaResend, sendGmailOAuth2 } from '../services/email'
@@ -68,7 +68,7 @@ async function validateAdminOrCustomer(db: D1Database, authHeader: string | unde
 
 reportsRoutes.use('/*', async (c, next) => {
   const path = c.req.path
-  if (path.endsWith('/html') || path.endsWith('/pdf') || path.endsWith('/webhook-update') || path.endsWith('/enhancement-status') || path.endsWith('/calculate-from-trace')) return next()
+  if (path.endsWith('/html') || path.endsWith('/pdf') || path.endsWith('/webhook-update') || path.endsWith('/enhancement-status') || path.endsWith('/calculate-from-trace') || path.endsWith('/pitch-multipliers') || path.endsWith('/calculate-roof-specs')) return next()
   const user = await validateAdminOrCustomer(c.env.DB, c.req.header('Authorization'))
   if (!user) return c.json({ error: 'Authentication required' }, 401)
   c.set('user' as any, user)
@@ -99,6 +99,59 @@ function resolveHtml(stored: string | null, raw: string | null): string | null {
   }
   return null
 }
+
+// ============================================================
+// GET /pitch-multipliers — PUBLIC reference table
+// Returns the industry-standard pitch multiplier lookup table
+// used by the measurement engine (1/12 through 24/12).
+// ============================================================
+reportsRoutes.get('/pitch-multipliers', async (c) => {
+  const table = Object.entries(ROOF_PITCH_MULTIPLIERS).map(([rise, multiplier]) => ({
+    pitch_rise: Number(rise),
+    pitch_label: `${rise}:12`,
+    pitch_angle_deg: Math.round(Math.atan(Number(rise) / 12) * 180 / Math.PI * 100) / 100,
+    area_multiplier: multiplier,
+    hip_valley_multiplier: HIP_VALLEY_MULTIPLIERS[Number(rise)] ?? null,
+  }))
+  return c.json({
+    success: true,
+    engine_version: 'RoofMeasurementEngine v5.0',
+    source: 'Industry-standard Pythagorean: √(rise² + 12²) / 12',
+    reference: 'GAF / CertainTeed / IKO / EagleView standards',
+    coverage: '0/12 through 24/12 (residential + commercial)',
+    table,
+  })
+})
+
+// ============================================================
+// POST /calculate-roof-specs — PUBLIC quick calculator
+// Takes flat dimensions + pitch, returns true sloped area.
+// ============================================================
+reportsRoutes.post('/calculate-roof-specs', async (c) => {
+  try {
+    const body = await c.req.json()
+    const flatLength = Number(body.flat_length_ft || body.length || 0)
+    const flatWidth = Number(body.flat_width_ft || body.width || 0)
+    const pitchRise = Number(body.pitch_rise || body.pitch || 5)
+
+    if (flatLength <= 0 || flatWidth <= 0) {
+      return c.json({ success: false, error: 'flat_length_ft and flat_width_ft must be > 0' }, 400)
+    }
+    if (pitchRise < 0 || pitchRise > 30) {
+      return c.json({ success: false, error: 'pitch_rise must be 0-30' }, 400)
+    }
+
+    const specs = calculateRoofSpecs(flatLength, flatWidth, pitchRise)
+    return c.json({
+      success: true,
+      engine_version: 'RoofMeasurementEngine v5.0',
+      input: { flat_length_ft: flatLength, flat_width_ft: flatWidth, pitch_rise: pitchRise },
+      results: specs,
+    })
+  } catch (err: any) {
+    return c.json({ success: false, error: err.message }, 500)
+  }
+})
 
 // ============================================================
 // GET /:orderId — Report data
@@ -621,6 +674,7 @@ reportsRoutes.post('/:orderId/trace-remeasure', async (c) => {
     }
   })
 })
+// ============================================================
 // ============================================================
 // POST /calculate-from-trace — PUBLIC pre-order measurement engine
 // Runs BEFORE the user submits their order. No auth required.
