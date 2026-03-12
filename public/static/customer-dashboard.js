@@ -19,6 +19,16 @@ document.addEventListener('DOMContentLoaded', async function() {
   renderDashboard();
   // Auto-refresh when reports are being polished (every 5s)
   startEnhancementPolling();
+
+  // Auto-trigger enhancement for any completed orders that haven't been enhanced yet
+  setTimeout(function() {
+    (custState.orders || []).forEach(function(o) {
+      if (o.status === 'completed' && o.report_status === 'completed' &&
+          (!o.enhancement_status || o.enhancement_status === 'none' || o.enhancement_status === null)) {
+        triggerAsyncEnhancement(o.id);
+      }
+    });
+  }, 2000);
 });
 
 async function loadDashData() {
@@ -409,10 +419,13 @@ function startEnhancementPolling() {
         _prevProcessingIds = nowProcessingIds;
 
         // Show celebration toast for each newly completed report
+        // AND trigger async enhancement + imagery in separate requests
         if (newlyCompleted.length > 0) {
           newlyCompleted.forEach(function(orderId) {
             var order = custState.orders.find(function(o) { return o.id === orderId; });
             showReportReadyToast(order);
+            // Fire-and-forget: trigger enhancement in its own HTTP request
+            triggerAsyncEnhancement(orderId);
           });
         }
         
@@ -493,6 +506,44 @@ async function toggleAutoEmail(enabled) {
       body: JSON.stringify({ enabled: enabled })
     });
   } catch(e) {}
+}
+
+// ============================================================
+// ASYNC ENHANCEMENT & IMAGERY — Triggered after base report completes
+// Each runs in its own HTTP request to stay within Cloudflare's
+// 30-second timeout. Enhancement first, then imagery.
+// ============================================================
+var _enhancedOrderIds = {};
+async function triggerAsyncEnhancement(orderId) {
+  if (_enhancedOrderIds[orderId]) return;
+  _enhancedOrderIds[orderId] = true;
+  try {
+    console.log('[Dashboard] Triggering async enhancement for order', orderId);
+    var res = await fetch('/api/reports/' + orderId + '/enhance-async', {
+      method: 'POST', headers: authHeaders()
+    });
+    var data = await res.json();
+    console.log('[Dashboard] Enhancement result:', data);
+    // After enhancement, trigger AI imagery in a separate request
+    if (data.success || data.already_enhanced) {
+      triggerAsyncImagery(orderId);
+    }
+  } catch(e) {
+    console.warn('[Dashboard] Enhancement trigger failed:', e.message);
+  }
+}
+
+async function triggerAsyncImagery(orderId) {
+  try {
+    console.log('[Dashboard] Triggering AI imagery for order', orderId);
+    var res = await fetch('/api/reports/' + orderId + '/generate-imagery', {
+      method: 'POST', headers: authHeaders()
+    });
+    var data = await res.json();
+    console.log('[Dashboard] Imagery result:', data);
+  } catch(e) {
+    console.warn('[Dashboard] Imagery trigger failed:', e.message);
+  }
 }
 
 // Load auto-email preference after dashboard renders
