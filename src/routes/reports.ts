@@ -19,7 +19,7 @@ import {
 } from '../services/solar-api'
 import { buildDataLayersReport, generateSegmentsFromDLAnalysis, generateSegmentsFromAIGeometry } from '../services/report-engine'
 import { executeRoofOrder, type DataLayersAnalysis } from '../services/solar-datalayers'
-import { generateProfessionalReportHTML, buildVisionFindingsHTML } from '../templates/report-html'
+import { generateProfessionalReportHTML, buildVisionFindingsHTML, generateSimpleTwoPageReport } from '../templates/report-html'
 import { generateTraceBasedDiagramSVG } from '../templates/svg-diagrams'
 import { RoofMeasurementEngine, traceUiToEnginePayload, calculateRoofSpecs, ROOF_PITCH_MULTIPLIERS, HIP_VALLEY_MULTIPLIERS, type TraceReport } from '../services/roof-measurement-engine'
 import { enhanceReportViaGemini } from '../services/gemini-enhance'
@@ -68,7 +68,7 @@ async function validateAdminOrCustomer(db: D1Database, authHeader: string | unde
 
 reportsRoutes.use('/*', async (c, next) => {
   const path = c.req.path
-  if (path.endsWith('/html') || path.endsWith('/pdf') || path.endsWith('/webhook-update') || path.endsWith('/enhancement-status') || path.endsWith('/calculate-from-trace') || path.endsWith('/pitch-multipliers') || path.endsWith('/calculate-roof-specs')) return next()
+  if (path.endsWith('/html') || path.endsWith('/simple') || path.endsWith('/pdf') || path.endsWith('/webhook-update') || path.endsWith('/enhancement-status') || path.endsWith('/calculate-from-trace') || path.endsWith('/pitch-multipliers') || path.endsWith('/calculate-roof-specs')) return next()
   const user = await validateAdminOrCustomer(c.env.DB, c.req.header('Authorization'))
   if (!user) return c.json({ error: 'Authentication required' }, 401)
   c.set('user' as any, user)
@@ -198,6 +198,24 @@ reportsRoutes.get('/:orderId/html', async (c) => {
   const html = resolveHtml(row.professional_report_html, row.api_response_raw)
   if (!html) return c.json({ error: 'Report data not available' }, 404)
   return c.html(html)
+})
+
+// ============================================================
+// GET /:orderId/simple — Simple Two-Page Measurement Report (no auth for sharing/iframes)
+// Returns the clean 2-page report: Page 1 Roof Diagram + Tables, Page 2 Summary + Satellite
+// ============================================================
+reportsRoutes.get('/:orderId/simple', async (c) => {
+  const orderId = c.req.param('orderId')
+  const row = await repo.getReportRawData(c.env.DB, orderId)
+  if (!row) return c.json({ error: 'Report not found' }, 404)
+  try {
+    const data = typeof row.api_response_raw === 'string' ? JSON.parse(row.api_response_raw) : row.api_response_raw
+    if (!data || !data.segments) return c.json({ error: 'Report data incomplete — generate a full report first' }, 404)
+    const html = generateSimpleTwoPageReport(data)
+    return c.html(html)
+  } catch (e: any) {
+    return c.json({ error: 'Failed to render simple report: ' + (e.message || 'unknown error') }, 500)
+  }
 })
 
 // ============================================================
