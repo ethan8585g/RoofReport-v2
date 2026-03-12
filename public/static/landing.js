@@ -46,7 +46,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // ============================================================
 function renderHero() {
   return `
-    <section class="relative overflow-hidden bg-gradient-to-br from-sky-400 via-blue-500 to-sky-600 text-white">
+    <section class="relative overflow-hidden bg-gradient-to-br from-blue-700 via-blue-800 to-slate-900 text-white">
       <!-- Background pattern -->
       <div class="absolute inset-0 opacity-10">
         <div class="absolute inset-0" style="background-image: url('data:image/svg+xml,%3Csvg width=60 height=60 xmlns=%22http://www.w3.org/2000/svg%22%3E%3Cpath d=%22M30 0L60 30L30 60L0 30z%22 fill=%22none%22 stroke=%22white%22 stroke-width=%220.5%22/%3E%3C/svg%3E'); background-size: 60px 60px;"></div>
@@ -57,13 +57,13 @@ function renderHero() {
           <!-- Left: Copy -->
           <div>
             <div class="inline-flex items-center gap-2 bg-brand-500/20 border border-brand-400/30 rounded-full px-4 py-1.5 mb-6">
-              <span class="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></span>
+              <span class="w-2 h-2 bg-cyan-400 rounded-full animate-pulse"></span>
               <span class="text-sm font-medium text-brand-200">Satellite-Powered Roof Measurement Technology</span>
             </div>
 
             <h1 class="text-4xl lg:text-6xl font-extrabold leading-tight mb-6">
               Professional Roof<br/>
-              <span class="bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-cyan-400">Measurement Reports</span><br/>
+              <span class="bg-clip-text text-transparent bg-gradient-to-r from-cyan-300 to-sky-400">Measurement Reports</span><br/>
               In Minutes
             </h1>
 
@@ -162,7 +162,7 @@ function renderHero() {
       <!-- Wave divider -->
       <div class="absolute bottom-0 left-0 right-0">
         <svg viewBox="0 0 1440 120" fill="none" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none" class="w-full h-16">
-          <path d="M0 120L48 105C96 90 192 60 288 52.5C384 45 480 60 576 67.5C672 75 768 75 864 67.5C960 60 1056 45 1152 45C1248 45 1344 60 1392 67.5L1440 75V120H0Z" fill="#ffffff"/>
+          <path d="M0 120L48 105C96 90 192 60 288 52.5C384 45 480 60 576 67.5C672 75 768 75 864 67.5C960 60 1056 45 1152 45C1248 45 1344 60 1392 67.5L1440 75V120H0Z" fill="#f8fafc"/>
         </svg>
       </div>
     </section>

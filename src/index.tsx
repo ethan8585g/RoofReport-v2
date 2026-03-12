@@ -1285,15 +1285,15 @@ function getLandingPageHTML() {
     /* Navbar transparency transition */
     .landing-nav { transition: all 0.3s ease; }
     .landing-nav.scrolled {
-      background: rgba(14, 165, 233, 0.97);
+      background: rgba(30, 58, 138, 0.97);
       backdrop-filter: blur(12px);
-      box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.25);
     }
   </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
   <!-- Sticky Navigation -->
-  <nav id="landing-nav" class="landing-nav fixed top-0 left-0 right-0 z-50 bg-transparent">
+  <nav id="landing-nav" class="landing-nav fixed top-0 left-0 right-0 z-50 bg-blue-800/80 backdrop-blur-sm">
     <div class="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
       <a href="/" class="flex items-center gap-3">
         <div class="w-9 h-9 bg-accent-500 rounded-lg flex items-center justify-center">
