@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import type { Bindings } from '../types'
 import { resolveTeamOwner } from './team'
+import { trackLeadCapture } from '../services/ga4-events'
 
 export const agentsRoutes = new Hono<{ Bindings: Bindings }>()
 
@@ -37,6 +38,13 @@ agentsRoutes.post('/leads', async (c) => {
       source_page || 'unknown',
       message ? String(message).trim().slice(0, 2000) : ''
     ).run()
+
+    // Track lead capture in GA4
+    trackLeadCapture(c.env, source_page || 'unknown', {
+      lead_name: String(name).trim().substring(0, 50),
+      lead_company: company_name ? String(company_name).trim().substring(0, 50) : '',
+      lead_email_domain: emailClean.split('@')[1] || 'unknown'
+    }).catch(() => {})
 
     return c.json({ success: true, message: 'Thank you! We will be in touch shortly.' })
   } catch (e: any) {

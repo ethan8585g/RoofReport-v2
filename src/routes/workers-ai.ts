@@ -10,6 +10,7 @@ import { Hono } from 'hono'
 import type { Bindings } from '../types'
 import { validateAdminSession } from './auth'
 import { resolveTeamOwner } from './team'
+import { trackWorkersAI } from '../services/ga4-events'
 
 export const workersAiRoutes = new Hono<{ Bindings: Bindings }>()
 

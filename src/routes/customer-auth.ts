@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import type { Bindings } from '../types'
-import { trackUserSignup } from '../services/ga4-events'
+import { trackUserSignup, trackUserLogin } from '../services/ga4-events'
 import { resolveTeamOwner } from './team'
 
 export const customerAuthRoutes = new Hono<{ Bindings: Bindings }>()
@@ -690,6 +690,9 @@ customerAuthRoutes.post('/login', async (c) => {
       INSERT INTO customer_sessions (customer_id, session_token, expires_at)
       VALUES (?, ?, ?)
     `).bind(customer.id, token, expiresAt).run()
+
+    // Track login event in GA4
+    trackUserLogin(c.env as any, String(customer.id), 'email', { email_domain: customer.email.split('@')[1] || 'unknown' }).catch(() => {})
 
     return c.json({
       success: true,

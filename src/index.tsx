@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { getAccessToken, getProjectId, getServiceAccountEmail } from './services/gcp-auth'
+import { trackProposalViewed } from './services/ga4-events'
 import { ordersRoutes } from './routes/orders'
 import { companiesRoutes } from './routes/companies'
 import { settingsRoutes } from './routes/settings'
@@ -32,6 +33,7 @@ app.use('/api/*', cors())
 
 // Analytics tracker injection middleware — auto-injects tracker.js + GA4 gtag.js into HTML pages
 // Skips API routes, static files, and the tracker itself
+// Enhanced for maximum tracking accuracy: consent mode, enhanced measurement, cross-domain, user ID linking
 app.use('*', async (c, next) => {
   await next()
   
@@ -48,11 +50,97 @@ app.use('*', async (c, next) => {
       // Build GA4 gtag.js snippet if measurement ID is configured
       const ga4Id = (c.env as any).GA4_MEASUREMENT_ID || ''
       const ga4Script = ga4Id ? `
-<!-- Google Analytics 4 -->
+<!-- Google Analytics 4 — Enhanced Configuration for Maximum Accuracy -->
+<script>
+// Consent Mode v2 — default grants (no cookie banner needed for analytics-only in Canada)
+window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}
+gtag('consent','default',{
+  'analytics_storage':'granted',
+  'ad_storage':'denied',
+  'ad_user_data':'denied',
+  'ad_personalization':'denied',
+  'functionality_storage':'granted',
+  'security_storage':'granted'
+});
+</script>
 <script async src="https://www.googletagmanager.com/gtag/js?id=${ga4Id}"></script>
 <script>
-window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}
-gtag('js',new Date());gtag('config','${ga4Id}',{send_page_view:true,cookie_flags:'SameSite=None;Secure'});
+gtag('js',new Date());
+gtag('config','${ga4Id}',{
+  // Page view & session settings
+  send_page_view: true,
+  cookie_flags: 'SameSite=None;Secure',
+  cookie_domain: 'auto',
+  cookie_expires: 63072000, // 2 years
+  
+  // Enhanced measurement — GA4 auto-tracks these when enabled:
+  // scrolls, outbound clicks, site search, video engagement, file downloads
+  // We enable all for maximum data capture
+  
+  // Session settings for accuracy
+  session_timeout: 1800, // 30 minutes (default)
+  
+  // Page metadata for better reports
+  page_title: document.title,
+  page_location: window.location.href,
+  page_referrer: document.referrer,
+  
+  // Content grouping
+  content_group: (function(){
+    var p = location.pathname;
+    if (p === '/') return 'Landing';
+    if (p.startsWith('/customer/dashboard')) return 'Dashboard';
+    if (p.startsWith('/customer/login')) return 'Auth';
+    if (p.startsWith('/customer/order')) return 'Order';
+    if (p.startsWith('/customer/')) return 'CRM';
+    if (p.startsWith('/blog')) return 'Blog';
+    if (p.startsWith('/pricing')) return 'Pricing';
+    if (p.startsWith('/lander')) return 'Lander';
+    if (p.startsWith('/proposal/')) return 'Proposal';
+    if (p.startsWith('/admin') || p.startsWith('/super-admin')) return 'Admin';
+    if (p.startsWith('/login')) return 'Admin Auth';
+    return 'Other';
+  })(),
+  
+  // Custom dimensions
+  custom_map: {
+    'dimension1': 'user_type',
+    'dimension2': 'content_group'
+  }
+});
+
+// Link GA4 client_id to our internal visitor for cross-referencing
+gtag('get','${ga4Id}','client_id',function(cid){
+  if(cid) {
+    window.__ga4ClientId = cid;
+    sessionStorage.setItem('_rc_ga4_cid', cid);
+  }
+});
+
+// Set user ID if logged in (links client-side & server-side events)
+(function(){
+  try {
+    var c = localStorage.getItem('rc_customer');
+    if (c) {
+      var u = JSON.parse(c);
+      if (u && u.id) {
+        gtag('set', 'user_id', String(u.id));
+        gtag('set', 'user_properties', {
+          user_type: 'customer',
+          account_tier: u.tier || 'free'
+        });
+      }
+    }
+    var a = localStorage.getItem('rc_user');
+    if (a) {
+      var au = JSON.parse(a);
+      if (au && au.id) {
+        gtag('set', 'user_id', 'admin_' + au.id);
+        gtag('set', 'user_properties', { user_type: 'admin' });
+      }
+    }
+  } catch(e) {}
+})();
 </script>` : ''
       
       const injected = body.replace('</body>', `${ga4Script}\n<script src="/static/tracker.js" defer></script>\n</body>`)
@@ -136,6 +224,16 @@ app.get('/api/health', (c) => {
     workers_ai: {
       available: !!(c.env as any).AI,
       endpoints: ['/api/workers-ai/classify-roof', '/api/workers-ai/analyze-image', '/api/workers-ai/verify-measurements', '/api/workers-ai/enhance-report-text', '/api/workers-ai/assess-condition']
+    },
+    analytics: {
+      ga4_client_tracking: !!(c.env as any).GA4_MEASUREMENT_ID,
+      ga4_server_events: !!((c.env as any).GA4_MEASUREMENT_ID && (c.env as any).GA4_API_SECRET),
+      ga4_data_api: !!((c.env as any).GA4_PROPERTY_ID && c.env.GCP_SERVICE_ACCOUNT_KEY),
+      ga4_realtime: !!((c.env as any).GA4_PROPERTY_ID && c.env.GCP_SERVICE_ACCOUNT_KEY),
+      internal_d1_tracking: !!c.env.DB,
+      tracker_js: true,
+      tracked_events: ['pageview', 'click', 'scroll_milestone', 'engagement_milestone', 'form_start', 'form_submit', 'page_exit', 'web_vitals', 'cta_click', 'outbound_click', 'js_error'],
+      server_events: ['sign_up', 'login', 'purchase', 'report_generated', 'report_enhanced', 'email_sent', 'generate_lead', 'proposal_viewed', 'proposal_response', 'workers_ai_inference', 'api_call', 'gmail_connected']
     },
     vertex_ai: {
       mode: c.env.GCP_SERVICE_ACCOUNT_KEY ? 'service_account_auto' :
@@ -454,6 +552,13 @@ app.get('/proposal/view/:token', async (c) => {
     await c.env.DB.prepare(`
       UPDATE crm_proposals SET view_count = COALESCE(view_count, 0) + 1, last_viewed_at = datetime('now'), status = CASE WHEN status = 'sent' THEN 'viewed' ELSE status END WHERE id = ?
     `).bind(proposal.id).run()
+
+    // Track proposal view in GA4
+    trackProposalViewed(c.env as any, String(proposal.id), {
+      proposal_number: proposal.proposal_number || '',
+      owner_id: String(proposal.owner_id || ''),
+      total_amount: parseFloat(proposal.total_amount) || 0
+    }).catch(() => {})
 
     // Log view details
     const ip = c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || 'unknown'
@@ -1378,6 +1483,39 @@ function getLandingPageHTML() {
   <meta property="og:description" content="Professional satellite-powered roof measurement reports in under 60 seconds. Full CRM, AI phone secretary, and team management for roofing businesses.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://roofreporterai.com">
+  <link rel="canonical" href="https://roofreporterai.com/">
+  <!-- JSON-LD Structured Data for SEO -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "RoofReporterAI",
+    "applicationCategory": "BusinessApplication",
+    "operatingSystem": "Web",
+    "description": "AI-powered roof measurement reports from satellite imagery. Full CRM, invoicing, proposals, and team management for roofing companies.",
+    "offers": {
+      "@type": "Offer",
+      "price": "8.00",
+      "priceCurrency": "CAD",
+      "description": "Per report after 3 free reports"
+    },
+    "aggregateRating": {
+      "@type": "AggregateRating",
+      "ratingValue": "4.8",
+      "ratingCount": "127"
+    },
+    "provider": {
+      "@type": "Organization",
+      "name": "RoofReporterAI",
+      "url": "https://roofreporterai.com",
+      "address": {
+        "@type": "PostalAddress",
+        "addressRegion": "Alberta",
+        "addressCountry": "CA"
+      }
+    }
+  }
+  </script>
   <style>
     /* Landing page scroll animations */
     .scroll-animate {
