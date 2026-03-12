@@ -31,29 +31,15 @@ async function geocodeAddress(address: string, apiKey: string): Promise<{ lat: n
 // ============================================================
 async function triggerReportGeneration(orderId: number, env: Bindings): Promise<boolean> {
   try {
-    console.log(`[Auto-Generate] Triggering direct report generation for order ${orderId}`)
+    const startMs = Date.now()
+    console.log(`[Auto-Generate] Phase 1: Base report for order ${orderId}`)
     const result = await generateReportForOrder(orderId, env)
-    console.log(`[Auto-Generate] Order ${orderId}: ${result.success ? 'SUCCESS' : result.error || 'FAILED'} — provider: ${result.provider || 'n/a'}`)
+    const elapsed = Date.now() - startMs
+    console.log(`[Auto-Generate] Order ${orderId}: ${result.success ? 'SUCCESS' : result.error || 'FAILED'} — provider: ${result.provider || 'n/a'}, ${elapsed}ms`)
 
-    // Phase 2: Enhancement — run inline after base report is already saved as 'completed'
-    if (result.success && result.report && result.hasEnhanceKey) {
-      try {
-        const enhVer = await enhanceReportInline(orderId, result.report, env)
-        console.log(`[Auto-Generate] Order ${orderId}: Enhancement ${enhVer ? '✅ v' + enhVer : '⚠️ skipped'}`)
-      } catch (e: any) {
-        console.error(`[Auto-Generate] Order ${orderId}: Enhancement error (base report stands):`, e.message)
-      }
-    }
-
-    // Phase 3: AI Imagery Generation — create professional AI visuals for the "perfect" report
-    if (result.success && result.report) {
-      try {
-        const imagerySuccess = await generateAIImageryForReport(orderId, result.report, env)
-        console.log(`[Auto-Generate] Order ${orderId}: AI Imagery ${imagerySuccess ? '✅ generated' : '⚠️ skipped'}`)
-      } catch (e: any) {
-        console.error(`[Auto-Generate] Order ${orderId}: AI Imagery error (report stands):`, e.message)
-      }
-    }
+    // Enhancement & AI Imagery are NOT run here — they caused
+    // Cloudflare Workers waitUntil() to exceed 30s timeout.
+    // Dashboard triggers them in separate HTTP requests.
 
     return result.success === true
   } catch (err: any) {

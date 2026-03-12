@@ -229,32 +229,15 @@ reportsRoutes.get('/:orderId/simple', async (c) => {
 reportsRoutes.post('/:orderId/generate', async (c) => {
   const orderId = c.req.param('orderId')
 
-  // Generate base report (WELD + PAINT + POLISH + quick AI scans)
+  // Generate base report (WELD + PAINT + POLISH — NO heavy AI)
   // This saves report as 'completed' immediately
   const result = await generateReportForOrder(orderId, c.env)
   if (!result.success) return c.json({ error: result.error }, result.error === 'Order not found' ? 404 : 500)
 
-  // Try inline enhancement — base report already saved as 'completed'
-  let finalVersion = result.version
-  if (result.report && result.hasEnhanceKey && c.env.GEMINI_ENHANCE_API_KEY) {
-    try {
-      const enhanced = await enhanceReportInline(orderId, result.report, c.env)
-      if (enhanced) finalVersion = enhanced
-      console.log(`[Generate] Order ${orderId}: Enhancement ${enhanced ? '✅ v' + enhanced : '⚠️ skipped'}`)
-    } catch (e: any) {
-      console.error(`[Generate] Order ${orderId}: Enhancement error (base report stands):`, e.message)
-    }
-  }
-
-  // Phase 3: AI Imagery Generation — create professional AI visuals
-  if (result.report) {
-    try {
-      const imagerySuccess = await generateAIImageryForReport(orderId, result.report, c.env)
-      console.log(`[Generate] Order ${orderId}: AI Imagery ${imagerySuccess ? '✅ generated' : '⚠️ skipped'}`)
-    } catch (e: any) {
-      console.error(`[Generate] Order ${orderId}: AI Imagery error (report stands):`, e.message)
-    }
-  }
+  // Enhancement and AI Imagery are NOT run inline anymore.
+  // They caused Cloudflare Workers to timeout (>30s).
+  // The dashboard polls /enhancement-status and the client
+  // can trigger /enhance or /ai-imagery in separate requests.
 
   return c.json({
     success: true,
@@ -262,8 +245,9 @@ reportsRoutes.post('/:orderId/generate', async (c) => {
     orderId,
     status: 'completed',
     provider: result.provider,
-    version: finalVersion,
-    report: result.report
+    version: result.version,
+    report: result.report,
+    enhancement_available: result.hasEnhanceKey,
   })
 })
 
@@ -276,33 +260,20 @@ reportsRoutes.post('/:orderId/retry', async (c) => {
   if (!report) return c.json({ error: 'No report record found' }, 404)
   await repo.resetReportForRetry(c.env.DB, orderId)
 
-  // Generate base report (saved as 'completed' immediately)
+  // Generate base report only — no enhancement or AI imagery inline
   const result = await generateReportForOrder(orderId, c.env).catch(e => {
     console.error(`[Retry] ${orderId}:`, e.message)
     return { success: false, error: e.message } as any
   })
 
-  // Enhancement inline — base report already saved
-  let finalVersion = result?.version
-  if (result?.success && result.report && result.hasEnhanceKey && c.env.GEMINI_ENHANCE_API_KEY) {
-    try {
-      const enhanced = await enhanceReportInline(orderId, result.report, c.env)
-      if (enhanced) finalVersion = enhanced
-    } catch (e: any) {
-      console.error(`[Retry] Order ${orderId}: Enhancement error:`, e.message)
-    }
-  }
-
-  // Phase 3: AI Imagery Generation
-  if (result?.success && result.report) {
-    try {
-      await generateAIImageryForReport(orderId, result.report, c.env)
-    } catch (e: any) {
-      console.error(`[Retry] Order ${orderId}: AI Imagery error:`, e.message)
-    }
-  }
-
-  return c.json({ success: true, message: 'Retry completed', previousStatus: report.status, status: 'completed', version: finalVersion })
+  return c.json({
+    success: result?.success || false,
+    message: result?.success ? 'Retry completed' : (result?.error || 'Retry failed'),
+    previousStatus: report.status,
+    status: result?.success ? 'completed' : 'failed',
+    version: result?.version,
+    enhancement_available: result?.hasEnhanceKey,
+  })
 })
 
 // ============================================================
@@ -360,6 +331,102 @@ reportsRoutes.get('/:orderId/vision', async (c) => {
   const q = parseBody(visionFilterQuery, c.req.query())
   const filtered = filterFindings(vf.findings, { minConfidence: q.min_confidence, category: q.category as any, severity: q.severity as any })
   return c.json({ ...vf, findings: filtered, finding_count: filtered.length })
+})
+
+// ============================================================
+// POST /:orderId/enhance-async — Dashboard-triggered enhancement
+// Called by the customer dashboard AFTER base report is completed.
+// Runs enhancement in its own HTTP request (own 30s budget).
+// ============================================================
+reportsRoutes.post('/:orderId/enhance-async', async (c) => {
+  const orderId = c.req.param('orderId')
+  const report = await repo.getReportRawData(c.env.DB, orderId)
+  if (!report?.api_response_raw) return c.json({ error: 'Report not found' }, 404)
+
+  const status = await repo.getReportStatus(c.env.DB, orderId)
+  if (status?.status !== 'completed') {
+    return c.json({ error: 'Report not yet completed', current_status: status?.status }, 400)
+  }
+
+  // Check if already enhanced
+  const enhStatus = await repo.getEnhancementStatus(c.env.DB, orderId)
+  if ((enhStatus as any)?.enhancement_status === 'completed') {
+    return c.json({ success: true, already_enhanced: true, message: 'Report already enhanced' })
+  }
+
+  if (!c.env.GEMINI_ENHANCE_API_KEY) {
+    return c.json({ success: false, error: 'Enhancement not available (no API key)' }, 400)
+  }
+
+  try {
+    const reportData = JSON.parse(report.api_response_raw) as RoofReport
+    const enhVer = await enhanceReportInline(orderId, reportData, c.env)
+
+    // Auto-email enhanced report if customer has auto_email enabled
+    if (enhVer) {
+      try {
+        const custRow = await c.env.DB.prepare(
+          'SELECT c.auto_email_reports, c.email FROM customers c JOIN orders o ON o.customer_id=c.id WHERE o.id=?'
+        ).bind(orderId).first<any>()
+        if (custRow?.auto_email_reports === 1 && custRow?.email) {
+          const enhReport = await repo.getReportHtml(c.env.DB, orderId)
+          if (enhReport?.professional_report_html) {
+            const order = await repo.getOrderById(c.env.DB, orderId)
+            const emailHtml = buildEmailWrapper(enhReport.professional_report_html, order?.property_address || '', `RM-${orderId}`, custRow.email)
+            const rt = (c.env as any).GMAIL_REFRESH_TOKEN, ci = (c.env as any).GMAIL_CLIENT_ID, cs = (c.env as any).GMAIL_CLIENT_SECRET
+            if (rt && ci && cs) {
+              await sendGmailOAuth2(ci, cs, rt, custRow.email, `Roof Report - ${order?.property_address || 'Property'}`, emailHtml, c.env.GMAIL_SENDER_EMAIL)
+              console.log(`[AutoEmail] Enhanced report ${orderId} auto-sent to ${custRow.email}`)
+            }
+          }
+        }
+      } catch (emailErr: any) {
+        console.warn(`[EnhanceAsync] Auto-email failed for order ${orderId}: ${emailErr.message}`)
+      }
+    }
+
+    return c.json({
+      success: true,
+      enhanced: !!enhVer,
+      version: enhVer || null,
+      message: enhVer ? `Enhanced to v${enhVer}` : 'Enhancement skipped (Gemini returned null)',
+    })
+  } catch (err: any) {
+    return c.json({ success: false, error: err.message }, 500)
+  }
+})
+
+// ============================================================
+// POST /:orderId/generate-imagery — Dashboard-triggered AI imagery
+// Called AFTER base report is completed.
+// Runs in its own HTTP request (own 30s timeout budget).
+// ============================================================
+reportsRoutes.post('/:orderId/generate-imagery', async (c) => {
+  const orderId = c.req.param('orderId')
+  const report = await repo.getReportRawData(c.env.DB, orderId)
+  if (!report?.api_response_raw) return c.json({ error: 'Report not found' }, 404)
+
+  const status = await repo.getReportStatus(c.env.DB, orderId)
+  if (status?.status !== 'completed') {
+    return c.json({ error: 'Report not yet completed', current_status: status?.status }, 400)
+  }
+
+  // Check if already generated
+  const imgStatus = await repo.getAIImageryStatus(c.env.DB, orderId)
+  if (imgStatus?.ai_imagery_status === 'completed') {
+    return c.json({ success: true, already_generated: true, message: 'AI imagery already generated' })
+  }
+
+  try {
+    const reportData = JSON.parse(report.api_response_raw) as RoofReport
+    const success = await generateAIImageryForReport(orderId, reportData, c.env)
+    return c.json({
+      success,
+      message: success ? 'AI imagery generated' : 'AI imagery skipped (no images generated)',
+    })
+  } catch (err: any) {
+    return c.json({ success: false, error: err.message }, 500)
+  }
 })
 
 // ============================================================
@@ -910,6 +977,19 @@ reportsRoutes.post('/:orderId/generate-enhanced', async (c) => {
   await repo.markOrderStatus(c.env.DB, orderId, 'completed')
   await repo.logApiRequest(c.env.DB, orderId, 'solar_datalayers', 'dataLayers:get + GeoTIFF', 200, dlAnalysis.durationMs)
 
+  // Auto-email: check if customer has auto_email_reports enabled
+  let autoEmailEnabled = false
+  let autoEmailRecipient = ''
+  try {
+    const custRow = await c.env.DB.prepare(
+      'SELECT c.auto_email_reports, c.email FROM customers c JOIN orders o ON o.customer_id=c.id WHERE o.id=?'
+    ).bind(orderId).first<any>()
+    if (custRow?.auto_email_reports === 1 && custRow?.email) {
+      autoEmailEnabled = true
+      autoEmailRecipient = custRow.email
+    }
+  } catch {}
+
   // Enhancement: attempt inline with tight timeout — if it fails, base report stands
   if (c.env.GEMINI_ENHANCE_API_KEY) {
     try {
@@ -931,13 +1011,14 @@ reportsRoutes.post('/:orderId/generate-enhanced', async (c) => {
         trackReportEnhanced(c.env, String(orderId), { version: enhVer, enhanced: true }).catch(() => {})
 
         // Send email with polished report
-        if (email_report) {
-          const recipient = to_email || order.homeowner_email || order.requester_email
+        if (email_report || autoEmailEnabled) {
+          const recipient = to_email || (autoEmailEnabled ? autoEmailRecipient : '') || order.homeowner_email || order.requester_email
           if (recipient) {
             try {
               const emailHtml = buildEmailWrapper(enhHtml, order.property_address, `RM-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${String(orderId).padStart(4,'0')}`, recipient)
               const rt = (c.env as any).GMAIL_REFRESH_TOKEN, ci = (c.env as any).GMAIL_CLIENT_ID, cs = (c.env as any).GMAIL_CLIENT_SECRET
               if (rt && ci && cs) await sendGmailOAuth2(ci, cs, rt, recipient, `Roof Report - ${order.property_address}`, emailHtml, c.env.GMAIL_SENDER_EMAIL)
+              if (autoEmailEnabled) console.log(`[AutoEmail] Enhanced report ${orderId} auto-sent to ${recipient}`)
             } catch {}
           }
         }
@@ -954,13 +1035,14 @@ reportsRoutes.post('/:orderId/generate-enhanced', async (c) => {
   }
 
   // Send email with base report (no enhancement or enhancement failed)
-  if (email_report) {
-    const recipient = to_email || order.homeowner_email || order.requester_email
+  if (email_report || autoEmailEnabled) {
+    const recipient = to_email || (autoEmailEnabled ? autoEmailRecipient : '') || order.homeowner_email || order.requester_email
     if (recipient) {
       try {
         const emailHtml = buildEmailWrapper(baseHtml, order.property_address, `RM-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${String(orderId).padStart(4,'0')}`, recipient)
         const rt = (c.env as any).GMAIL_REFRESH_TOKEN, ci = (c.env as any).GMAIL_CLIENT_ID, cs = (c.env as any).GMAIL_CLIENT_SECRET
         if (rt && ci && cs) await sendGmailOAuth2(ci, cs, rt, recipient, `Roof Report - ${order.property_address}`, emailHtml, c.env.GMAIL_SENDER_EMAIL)
+        if (autoEmailEnabled) console.log(`[AutoEmail] Report ${orderId} auto-sent to ${recipient}`)
       } catch {}
     }
   }
@@ -1780,53 +1862,14 @@ export async function generateReportForOrder(
       reportData.quality.confidence_score = Math.min(reportData.quality.confidence_score, 75)
     }
 
-    // ── DUAL-PATH AI ANALYSIS: Cloud Run Custom Model + Gemini Fallback ──
-    const satUrl = reportData.imagery?.satellite_overhead_url || reportData.imagery?.satellite_url
-    let cloudRunVision: VisionFindings | null = null
-    let cloudRunGeometry: any = null
-
-    const crConfig = buildCloudRunConfig(env)
-    if (crConfig && satUrl) {
-      try {
-        const crResult = await analyzeViaCloudRun(crConfig, {
-          image_urls: [satUrl], analysis_type: 'full',
-          coordinates: order.latitude && order.longitude ? { lat: order.latitude, lng: order.longitude } : undefined,
-          address: order.property_address || undefined,
-          known_footprint_sqft: reportData.total_footprint_sqft,
-          known_pitch_deg: reportData.roof_pitch_degrees,
-          image_meta: { source: 'google_maps_satellite', zoom_level: 20, resolution_px: 640 }
-        })
-        if (crResult?.success) {
-          cloudRunVision = convertToVisionFindings(crResult)
-          cloudRunGeometry = convertToAIGeometry(crResult)
-          if (cloudRunGeometry?.facets?.length) {
-            reportData.ai_geometry = cloudRunGeometry
-            console.log(`[Generate] Cloud Run geometry: ${cloudRunGeometry.facets.length} facets`)
-          }
-          console.log(`[Generate] Cloud Run vision: ${cloudRunVision?.finding_count || 0} findings`)
-        }
-      } catch (e: any) { console.warn(`[Generate] Cloud Run AI failed (graceful fallback):`, e.message) }
-    }
-
-    if (!cloudRunGeometry && satUrl && (env.GCP_SERVICE_ACCOUNT_KEY || env.GOOGLE_VERTEX_API_KEY)) {
-      try {
-        const geo = await analyzeRoofGeometry(satUrl, { apiKey: env.GOOGLE_VERTEX_API_KEY, project: env.GOOGLE_CLOUD_PROJECT, location: env.GOOGLE_CLOUD_LOCATION || 'us-central1', serviceAccountKey: env.GCP_SERVICE_ACCOUNT_KEY }, { maxRetries: 1, timeoutMs: 20000, acceptScore: 10, model: 'gemini-2.0-flash' })
-        if (geo?.facets?.length) reportData.ai_geometry = geo
-      } catch {}
-    }
-
-    let geminiVision: VisionFindings | null = null
-    if (satUrl && (env.GCP_SERVICE_ACCOUNT_KEY || env.GOOGLE_VERTEX_API_KEY)) {
-      try {
-        geminiVision = await visionScan(satUrl, { apiKey: env.GOOGLE_VERTEX_API_KEY, project: env.GOOGLE_CLOUD_PROJECT, location: env.GOOGLE_CLOUD_LOCATION || 'us-central1', serviceAccountKey: env.GCP_SERVICE_ACCOUNT_KEY }, { model: 'gemini-2.0-flash', timeoutMs: 20000, sourceType: 'satellite_overhead' })
-      } catch {}
-    }
-
-    const mergedVision = mergeVisionFindings(cloudRunVision, geminiVision)
-    if (mergedVision) {
-      reportData.vision_findings = mergedVision
-      if (mergedVision.heat_score.total >= 60) { reportData.quality.confidence_score = Math.min(reportData.quality.confidence_score, 70); reportData.quality.field_verification_recommended = true }
-    }
+    // ── AI ANALYSIS REMOVED FROM BASE REPORT ──
+    // Cloud Run, Gemini geometry, and Gemini vision scans have been
+    // removed from the base report pipeline to stay within Cloudflare
+    // Workers' 30-second waitUntil() budget. They are triggered
+    // separately by the dashboard via /enhance and /vision-inspect
+    // endpoints, each in their own HTTP request/timeout window.
+    // The base report relies on trace measurements + Solar pitch only,
+    // which is already accurate and fast (~5-10s total).
 
     // ── CUSTOMER PRICING ──
     if (order.price_per_bundle && order.price_per_bundle > 0) {

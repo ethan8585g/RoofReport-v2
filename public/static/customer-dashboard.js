@@ -235,6 +235,23 @@ function renderDashboard() {
       '</div>' +
     '</div>' +
 
+    // ── Auto-Email Settings ──
+    '<div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden mb-8">' +
+      '<div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between">' +
+        '<h3 class="font-bold text-gray-800 text-sm"><i class="fas fa-envelope text-cyan-500 mr-2"></i>Report Delivery Settings</h3>' +
+      '</div>' +
+      '<div class="p-5 flex items-center justify-between">' +
+        '<div>' +
+          '<p class="font-medium text-gray-800 text-sm">Auto-email reports when ready</p>' +
+          '<p class="text-xs text-gray-500 mt-0.5">Automatically send every completed roof report to your email address (' + (c.email || '') + ')</p>' +
+        '</div>' +
+        '<label class="relative inline-flex items-center cursor-pointer">' +
+          '<input type="checkbox" id="auto-email-toggle" class="sr-only peer" onchange="toggleAutoEmail(this.checked)">' +
+          '<div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-cyan-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[\\'\\'] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-500"></div>' +
+        '</label>' +
+      '</div>' +
+    '</div>' +
+
     // Footer
     '<div class="text-center py-6 text-xs text-gray-400">' +
       '<p>Powered by <strong>RoofReporterAI</strong> &middot; Antigravity Gemini Roof Measurement Suite</p>' +
@@ -453,3 +470,32 @@ function showReportReadyToast(order) {
     setTimeout(function() { toast.remove(); }, 500);
   }, 8000);
 }
+
+// ============================================================
+// Auto-Email Toggle
+// ============================================================
+async function loadAutoEmailPref() {
+  try {
+    var res = await fetch('/api/agents/auto-email', { headers: authHeaders() });
+    if (res.ok) {
+      var data = await res.json();
+      var toggle = document.getElementById('auto-email-toggle');
+      if (toggle) toggle.checked = !!data.auto_email_reports;
+    }
+  } catch(e) {}
+}
+
+async function toggleAutoEmail(enabled) {
+  try {
+    await fetch('/api/agents/auto-email', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ enabled: enabled })
+    });
+  } catch(e) {}
+}
+
+// Load auto-email preference after dashboard renders
+document.addEventListener('DOMContentLoaded', function() {
+  setTimeout(loadAutoEmailPref, 500);
+});

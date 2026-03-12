@@ -21,6 +21,7 @@ import { emailOutreachRoutes } from './routes/email-outreach'
 import { analyticsRoutes } from './routes/analytics'
 import { virtualTryonRoutes } from './routes/virtual-tryon'
 import { teamRoutes } from './routes/team'
+import { agentsRoutes } from './routes/agents'
 import type { Bindings } from './types'
 
 const app = new Hono<{ Bindings: Bindings }>()
@@ -85,6 +86,7 @@ app.route('/api/email-outreach', emailOutreachRoutes)
 app.route('/api/analytics', analyticsRoutes)
 app.route('/api/virtual-tryon', virtualTryonRoutes)
 app.route('/api/team', teamRoutes)
+app.route('/api/agents', agentsRoutes)
 
 // Health check
 app.get('/api/health', (c) => {
@@ -849,6 +851,89 @@ function getRoverWidget() {
   return `<script src="/static/rover-widget.js" defer></script>`
 }
 
+// ============================================================
+// CONTACT US LEAD CAPTURE — Reusable form for all public pages
+// ============================================================
+function getContactFormHTML(sourcePage: string = 'unknown') {
+  return `
+  <section id="contact-section" class="py-16 bg-gradient-to-br from-slate-900 via-cyan-900 to-slate-900">
+    <div class="max-w-3xl mx-auto px-4">
+      <div class="text-center mb-10">
+        <span class="inline-block bg-cyan-500/20 text-cyan-300 text-xs font-bold px-3 py-1 rounded-full mb-4">GET IN TOUCH</span>
+        <h2 class="text-3xl md:text-4xl font-bold text-white mb-3">Ready to Transform Your Roofing Business?</h2>
+        <p class="text-gray-300 max-w-xl mx-auto">Fill out the form below and our team will reach out within 24 hours to get you set up with AI-powered roof measurement reports.</p>
+      </div>
+      <form id="lead-capture-form" onsubmit="return submitLeadForm(event, '${sourcePage}')" class="bg-white/10 backdrop-blur-lg border border-white/20 rounded-2xl p-8 space-y-5">
+        <div class="grid md:grid-cols-2 gap-5">
+          <div>
+            <label class="block text-sm font-medium text-gray-200 mb-1.5">Full Name <span class="text-red-400">*</span></label>
+            <input type="text" id="lead-name" required placeholder="John Smith" class="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:ring-2 focus:ring-cyan-400 focus:border-transparent outline-none">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-200 mb-1.5">Company Name</label>
+            <input type="text" id="lead-company" placeholder="ABC Roofing Ltd." class="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:ring-2 focus:ring-cyan-400 focus:border-transparent outline-none">
+          </div>
+        </div>
+        <div class="grid md:grid-cols-2 gap-5">
+          <div>
+            <label class="block text-sm font-medium text-gray-200 mb-1.5">Phone Number</label>
+            <input type="tel" id="lead-phone" placeholder="(780) 555-1234" class="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:ring-2 focus:ring-cyan-400 focus:border-transparent outline-none">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-200 mb-1.5">Email Address <span class="text-red-400">*</span></label>
+            <input type="email" id="lead-email" required placeholder="john@abcroofing.com" class="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:ring-2 focus:ring-cyan-400 focus:border-transparent outline-none">
+          </div>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-200 mb-1.5">How can we help?</label>
+          <textarea id="lead-message" rows="3" placeholder="Tell us about your roofing business and what you're looking for..." class="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:ring-2 focus:ring-cyan-400 focus:border-transparent outline-none resize-none"></textarea>
+        </div>
+        <div id="lead-form-msg" class="hidden text-sm font-medium px-4 py-3 rounded-lg"></div>
+        <button type="submit" id="lead-submit-btn" class="w-full bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-bold py-4 px-8 rounded-xl shadow-lg transition-all hover:scale-[1.01] text-lg">
+          <i class="fas fa-paper-plane mr-2"></i>Get Started — It's Free
+        </button>
+        <p class="text-center text-gray-400 text-xs">No credit card required. 3 free reports included.</p>
+      </form>
+    </div>
+  </section>
+  <script>
+  async function submitLeadForm(e, source) {
+    e.preventDefault();
+    var btn = document.getElementById('lead-submit-btn');
+    var msg = document.getElementById('lead-form-msg');
+    btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Submitting...';
+    msg.className = 'hidden';
+    try {
+      var res = await fetch('/api/agents/leads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: document.getElementById('lead-name').value.trim(),
+          company_name: document.getElementById('lead-company').value.trim(),
+          phone: document.getElementById('lead-phone').value.trim(),
+          email: document.getElementById('lead-email').value.trim(),
+          source_page: source,
+          message: document.getElementById('lead-message').value.trim()
+        })
+      });
+      var data = await res.json();
+      if (data.success) {
+        msg.className = 'text-sm font-medium px-4 py-3 rounded-lg bg-green-500/20 text-green-300 border border-green-500/30';
+        msg.innerHTML = '<i class="fas fa-check-circle mr-2"></i>Thank you! We\\'ll be in touch within 24 hours.';
+        document.getElementById('lead-capture-form').reset();
+      } else {
+        msg.className = 'text-sm font-medium px-4 py-3 rounded-lg bg-red-500/20 text-red-300 border border-red-500/30';
+        msg.innerHTML = '<i class="fas fa-exclamation-circle mr-2"></i>' + (data.error || 'Something went wrong');
+      }
+    } catch(err) {
+      msg.className = 'text-sm font-medium px-4 py-3 rounded-lg bg-red-500/20 text-red-300 border border-red-500/30';
+      msg.innerHTML = '<i class="fas fa-exclamation-circle mr-2"></i>Network error. Please try again.';
+    }
+    btn.disabled = false; btn.innerHTML = '<i class="fas fa-paper-plane mr-2"></i>Get Started — It\\'s Free';
+  }
+  </script>`
+}
+
 function getMainPageHTML(mapsApiKey: string) {
   const mapsScript = mapsApiKey
     ? `<script>
@@ -1365,6 +1450,9 @@ function getLandingPageHTML() {
 
   <!-- Landing page content -->
   <div id="landing-root"></div>
+
+  <!-- Contact Us Lead Capture -->
+  ${getContactFormHTML('homepage')}
 
   <!-- Footer — Dark premium style -->
   <footer class="bg-slate-900 text-gray-400">
@@ -1918,6 +2006,7 @@ function getPricingPageHTML() {
       <div class="text-center animate-pulse text-gray-400 py-8">Loading pricing...</div>
     </div>
   </main>
+  ${getContactFormHTML('pricing')}
   <script src="/static/pricing.js"></script>
   ${getRoverWidget()}
 </body>
@@ -2029,6 +2118,9 @@ function getBlogListingHTML() {
     </div>
   </main>
 
+  <!-- Contact Us Lead Capture -->
+  ${getContactFormHTML('blog')}
+
   <!-- Footer — Dark style matching new brand -->
   <footer class="bg-slate-900 text-gray-500 border-t border-gray-800">
     <div class="max-w-7xl mx-auto px-4 py-12">
@@ -2126,6 +2218,9 @@ function getBlogPostHTML() {
       <div id="blog-related-grid" class="grid md:grid-cols-3 gap-6"></div>
     </div>
   </main>
+
+  <!-- Contact Us Lead Capture -->
+  ${getContactFormHTML('blog-post')}
 
   <!-- Footer -->
   <footer class="bg-slate-100 text-gray-600 border-t border-slate-200">
@@ -2341,6 +2436,9 @@ function getLanderFunnelHTML() {
       <p class="text-sm text-gray-400 mt-6">Then $8 CAD per report. No subscriptions. Cancel anytime.</p>
     </div>
   </section>
+
+  <!-- Contact Us Lead Capture -->
+  ${getContactFormHTML('lander')}
 
   <!-- Mini footer -->
   <footer class="bg-slate-900 text-gray-500 py-8 border-t border-gray-800">
