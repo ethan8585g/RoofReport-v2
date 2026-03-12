@@ -7,6 +7,7 @@ import { Hono } from 'hono'
 import type { Bindings, RoofReport } from '../types'
 import { computeMaterialEstimate } from '../utils/geo-math'
 import { validateAdminSession } from '../routes/auth'
+import { resolveTeamOwner } from './team'
 
 // Services
 import { analyzeRoofGeometry } from '../services/gemini'
@@ -62,8 +63,10 @@ async function validateAdminOrCustomer(db: D1Database, authHeader: string | unde
     JOIN customers c ON c.id = cs.customer_id
     WHERE cs.session_token = ? AND cs.expires_at > datetime('now')
   `).bind(token).first<any>()
-  if (session) return { id: session.customer_id, email: session.email, name: session.name, role: 'customer' }
-  return null
+  if (!session) return null
+  // Resolve team membership — team members access owner's reports
+  const teamInfo = await resolveTeamOwner(db, session.customer_id)
+  return { id: teamInfo.ownerId, email: session.email, name: session.name, role: 'customer', isTeamMember: teamInfo.isTeamMember, realCustomerId: session.customer_id }
 }
 
 reportsRoutes.use('/*', async (c, next) => {

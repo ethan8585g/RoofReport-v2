@@ -15,6 +15,7 @@
 
 import { Hono } from 'hono'
 import type { Bindings } from '../types'
+import { resolveTeamOwner } from './team'
 
 const virtualTryonRoutes = new Hono<{ Bindings: Bindings }>()
 
@@ -38,6 +39,7 @@ const ROOF_PROMPTS: Record<string, (color: string) => string> = {
 const NEGATIVE_PROMPT = 'ugly, distorted, messy edges, low resolution, blurry, deformed, cartoon, painting, illustration, sketch, watermark, text, artifacts, oversaturated'
 
 // ── HELPER: Get customer ID from auth token ────────────────
+// Team members resolve to their team owner's account for shared data
 
 async function getCustomerId(c: any): Promise<number | null> {
   const token = c.req.header('Authorization')?.replace('Bearer ', '')
@@ -46,7 +48,10 @@ async function getCustomerId(c: any): Promise<number | null> {
     SELECT customer_id FROM customer_sessions
     WHERE session_token = ? AND expires_at > datetime('now')
   `).bind(token).first<any>()
-  return session?.customer_id || null
+  if (!session?.customer_id) return null
+  // Resolve team membership — team members use owner's virtual try-on history
+  const teamInfo = await resolveTeamOwner(c.env.DB, session.customer_id)
+  return teamInfo.ownerId
 }
 
 // ============================================================

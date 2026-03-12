@@ -3,6 +3,7 @@ import type { Bindings } from '../types'
 import { generateReportForOrder, enhanceReportInline, generateAIImageryForReport } from './reports'
 import { isDevAccount } from './customer-auth'
 import { trackPaymentCompleted, trackCreditPurchase } from '../services/ga4-events'
+import { resolveTeamOwner } from './team'
 
 export const squareRoutes = new Hono<{ Bindings: Bindings }>()
 
@@ -128,6 +129,7 @@ async function verifySquareSignature(body: string, signature: string, signatureK
 
 // ============================================================
 // AUTH MIDDLEWARE — Extract customer from session token
+// Team members resolve to owner's billing & credits
 // ============================================================
 async function getCustomerFromToken(db: D1Database, token: string | undefined): Promise<any | null> {
   if (!token) return null
@@ -136,6 +138,23 @@ async function getCustomerFromToken(db: D1Database, token: string | undefined): 
     JOIN customers c ON c.id = cs.customer_id
     WHERE cs.session_token = ? AND cs.expires_at > datetime('now') AND c.is_active = 1
   `).bind(token).first<any>()
+  if (!session) return null
+
+  // Resolve team membership — team members use the owner's credits & billing
+  const teamInfo = await resolveTeamOwner(db, session.customer_id)
+  if (teamInfo.isTeamMember) {
+    // Fetch the owner's customer record for credits/billing
+    const owner = await db.prepare(`
+      SELECT c.*, ? as real_customer_id FROM customers c WHERE c.id = ? AND c.is_active = 1
+    `).bind(session.customer_id, teamInfo.ownerId).first<any>()
+    if (owner) {
+      owner.customer_id = teamInfo.ownerId
+      owner.is_team_member = true
+      owner.real_customer_id = session.customer_id
+      owner.team_member_role = teamInfo.teamMemberRole
+      return owner
+    }
+  }
   return session
 }
 

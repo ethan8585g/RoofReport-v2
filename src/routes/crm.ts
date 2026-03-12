@@ -1,10 +1,13 @@
 import { Hono } from 'hono'
 import type { Bindings } from '../types'
+import { resolveTeamOwner } from './team'
 
 export const crmRoutes = new Hono<{ Bindings: Bindings }>()
 
 // ============================================================
 // AUTH MIDDLEWARE — Validate customer session token
+// Now supports team members: resolves to owner's account
+// so team members see/manage the owner's CRM data.
 // ============================================================
 async function getOwnerId(c: any): Promise<number | null> {
   const auth = c.req.header('Authorization')
@@ -13,7 +16,11 @@ async function getOwnerId(c: any): Promise<number | null> {
   const session = await c.env.DB.prepare(
     "SELECT customer_id FROM customer_sessions WHERE session_token = ? AND expires_at > datetime('now')"
   ).bind(token).first<any>()
-  return session ? session.customer_id : null
+  if (!session) return null
+
+  // Resolve team membership — if this user is a team member, return owner's ID
+  const { ownerId } = await resolveTeamOwner(c.env.DB, session.customer_id)
+  return ownerId
 }
 
 // ============================================================

@@ -24,7 +24,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 async function loadDashData() {
   custState.loading = true;
   try {
-    var [profileRes, ordersRes, billingRes, crmCustRes, crmInvRes, crmPropRes, crmJobRes, secRes] = await Promise.all([
+    var [profileRes, ordersRes, billingRes, crmCustRes, crmInvRes, crmPropRes, crmJobRes, secRes, teamRes] = await Promise.all([
       fetch('/api/customer/me', { headers: authHeaders() }),
       fetch('/api/customer/orders', { headers: authHeaders() }),
       fetch('/api/square/billing', { headers: authHeaders() }),
@@ -32,7 +32,8 @@ async function loadDashData() {
       fetch('/api/crm/invoices', { headers: authHeaders() }).catch(function() { return { ok: false }; }),
       fetch('/api/crm/proposals', { headers: authHeaders() }).catch(function() { return { ok: false }; }),
       fetch('/api/crm/jobs', { headers: authHeaders() }).catch(function() { return { ok: false }; }),
-      fetch('/api/secretary/status', { headers: authHeaders() }).catch(function() { return { ok: false }; })
+      fetch('/api/secretary/status', { headers: authHeaders() }).catch(function() { return { ok: false }; }),
+      fetch('/api/team/members', { headers: authHeaders() }).catch(function() { return { ok: false }; })
     ]);
     if (profileRes.ok) {
       var pd = await profileRes.json();
@@ -55,6 +56,20 @@ async function loadDashData() {
     custState.secretaryActive = false;
     custState.secretaryCalls = 0;
     if (secRes.ok) { var secData = await secRes.json(); custState.secretaryActive = secData.has_active_subscription; custState.secretaryCalls = secData.total_calls || 0; }
+    // Team members data
+    custState.teamMembers = 0;
+    custState.isTeamMember = false;
+    custState.teamOwnerName = '';
+    custState.teamOwnerCompany = '';
+    custState.teamRole = '';
+    if (teamRes.ok) { var teamData = await teamRes.json(); custState.teamMembers = (teamData.billing && teamData.billing.active_seats) || (teamData.members || []).length; custState.isTeamMember = teamData.is_team_member || false; }
+    // Also pull team info from customer profile
+    if (custState.customer) {
+      custState.isTeamMember = custState.customer.is_team_member || false;
+      custState.teamOwnerName = custState.customer.team_owner_name || '';
+      custState.teamOwnerCompany = custState.customer.team_owner_company || '';
+      custState.teamRole = custState.customer.team_role || '';
+    }
   } catch(e) { console.error('Dashboard load error:', e); }
   custState.loading = false;
 }
@@ -91,6 +106,7 @@ function renderDashboard() {
     { id: 'jobs', href: '/customer/jobs', icon: 'fa-hard-hat', label: 'Job Management', desc: 'Calendar & scheduling', color: 'from-rose-500 to-rose-600', badge: s.jobs_total > 0 ? s.jobs_total + (s.jobs_in_progress > 0 ? ' (' + s.jobs_in_progress + ' active)' : '') : '', badgeColor: 'bg-rose-500' },
     { id: 'pipeline', href: '/customer/pipeline', icon: 'fa-funnel-dollar', label: 'Sales Pipeline', desc: 'Leads & to-do\'s', color: 'from-cyan-500 to-cyan-600', badge: 'Coming Soon', badgeColor: 'bg-gray-400' },
     { id: 'd2d', href: '/customer/d2d', icon: 'fa-door-open', label: 'D2D Manager', desc: 'Door-to-door teams', color: 'from-orange-500 to-orange-600', badge: '', badgeColor: '' },
+    { id: 'team', href: '/customer/team', icon: 'fa-users-cog', label: 'Sales Team', desc: 'Add team members', color: 'from-teal-500 to-emerald-600', badge: custState.teamMembers > 0 ? custState.teamMembers + ' members' : '$50/user/mo', badgeColor: custState.teamMembers > 0 ? 'bg-teal-500' : 'bg-gray-400' },
     { id: 'secretary', href: '/customer/secretary', icon: 'fa-headset', label: 'Roofer Secretary', desc: 'AI phone answering service', color: 'from-violet-500 to-purple-700', badge: custState.secretaryActive ? (custState.secretaryCalls > 0 ? custState.secretaryCalls + ' calls' : 'Active') : '$149/mo', badgeColor: custState.secretaryActive ? 'bg-green-500' : 'bg-violet-500' }
   ];
 
@@ -137,6 +153,26 @@ function renderDashboard() {
             '<a href="/pricing" class="px-6 py-3 bg-amber-500 hover:bg-amber-400 text-gray-900 font-black rounded-xl shadow-lg transition-all hover:scale-105 text-sm"><i class="fas fa-tags mr-2"></i>View Credit Packs</a>' +
             '<a href="/customer/order" class="px-6 py-3 bg-white/10 hover:bg-white/20 text-white font-semibold rounded-xl transition-all text-sm border border-white/20"><i class="fas fa-credit-card mr-2"></i>Pay Per Report</a>' +
           '</div>' +
+        '</div>' +
+      '</div>' : '') +
+
+    // ── Team Context Banner (shows when logged in as team member) ──
+    (custState.isTeamMember ? 
+      '<div class="bg-gradient-to-r from-blue-600 to-indigo-700 rounded-2xl p-5 mb-6 shadow-lg border border-blue-500/30">' +
+        '<div class="flex items-center gap-4">' +
+          '<div class="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center flex-shrink-0 backdrop-blur">' +
+            '<i class="fas fa-users text-white text-xl"></i>' +
+          '</div>' +
+          '<div class="flex-1">' +
+            '<div class="flex items-center gap-2">' +
+              '<h3 class="text-white font-bold text-sm">Team Account Access</h3>' +
+              '<span class="px-2 py-0.5 bg-white/20 rounded-full text-[10px] font-bold text-blue-100 uppercase">' + (custState.teamRole || 'member') + '</span>' +
+            '</div>' +
+            '<p class="text-blue-200 text-xs mt-0.5">You are accessing <strong class="text-white">' + (custState.teamOwnerCompany || custState.teamOwnerName || 'Team') + '</strong>\u2019s account. All reports, CRM, and features are shared.</p>' +
+          '</div>' +
+          '<a href="/customer/team" class="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg text-xs font-semibold transition-all border border-white/20 flex-shrink-0">' +
+            '<i class="fas fa-users-cog mr-1"></i>View Team' +
+          '</a>' +
         '</div>' +
       '</div>' : '') +
 

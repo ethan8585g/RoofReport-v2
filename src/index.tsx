@@ -20,6 +20,7 @@ import { roverRoutes } from './routes/rover'
 import { emailOutreachRoutes } from './routes/email-outreach'
 import { analyticsRoutes } from './routes/analytics'
 import { virtualTryonRoutes } from './routes/virtual-tryon'
+import { teamRoutes } from './routes/team'
 import type { Bindings } from './types'
 
 const app = new Hono<{ Bindings: Bindings }>()
@@ -83,6 +84,7 @@ app.route('/api/rover', roverRoutes)
 app.route('/api/email-outreach', emailOutreachRoutes)
 app.route('/api/analytics', analyticsRoutes)
 app.route('/api/virtual-tryon', virtualTryonRoutes)
+app.route('/api/team', teamRoutes)
 
 // Health check
 app.get('/api/health', (c) => {
@@ -411,6 +413,12 @@ app.get('/customer/pipeline', (c) => c.html(getCrmSubPageHTML('pipeline', 'Sales
 
 // Virtual Try-On — AI Roof Visualization
 app.get('/customer/virtual-tryon', (c) => c.html(getVirtualTryOnPageHTML()))
+
+// Team Management — Add/manage sales team members ($50/user/month)
+app.get('/customer/team', (c) => c.html(getTeamManagementPageHTML()))
+
+// Join Team — Accept invitation (public landing with auth redirect)
+app.get('/customer/join-team', (c) => c.html(getJoinTeamPageHTML()))
 
 // Public proposal view page — tracks views when customer opens shared link
 app.get('/proposal/view/:token', async (c) => {
@@ -2201,6 +2209,179 @@ function getVirtualTryOnPageHTML() {
     }
   </script>
   <script src="/static/virtual-tryon.js"></script>
+</body>
+</html>`
+}
+
+// ============================================================
+// TEAM MANAGEMENT PAGE — Add/manage sales team members
+// ============================================================
+function getTeamManagementPageHTML() {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  ${getHeadTags()}
+  <title>Team Management - RoofReporterAI</title>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <header class="bg-gradient-to-r from-sky-500 to-blue-600 text-white shadow-lg">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <a href="/customer/dashboard" class="flex items-center space-x-3 hover:opacity-90">
+          <div class="w-10 h-10 bg-gradient-to-br from-teal-500 to-emerald-600 rounded-lg flex items-center justify-center">
+            <i class="fas fa-users-cog text-white text-lg"></i>
+          </div>
+          <div>
+            <h1 class="text-lg font-bold">Team Management</h1>
+            <p class="text-brand-200 text-xs">Add sales team members - $50/user/month</p>
+          </div>
+        </a>
+      </div>
+      <nav class="flex items-center space-x-3">
+        <span id="custGreeting" class="text-brand-200 text-sm hidden"><i class="fas fa-user-circle mr-1"></i><span id="custName"></span></span>
+        <a href="/customer/dashboard" class="text-brand-200 hover:text-white text-sm"><i class="fas fa-th-large mr-1"></i>Dashboard</a>
+        <button onclick="custLogout()" class="text-brand-200 hover:text-white text-sm"><i class="fas fa-sign-out-alt mr-1"></i>Logout</button>
+      </nav>
+    </div>
+  </header>
+  <main class="max-w-5xl mx-auto px-4 py-6">
+    <div id="team-root"></div>
+  </main>
+  <script>
+    (function() {
+      var c = localStorage.getItem('rc_customer');
+      if (!c) { window.location.href = '/customer/login'; return; }
+      try {
+        var u = JSON.parse(c);
+        var g = document.getElementById('custGreeting');
+        var n = document.getElementById('custName');
+        if (g && n) { n.textContent = u.name || u.email; g.classList.remove('hidden'); }
+      } catch(e) {}
+    })();
+    function custLogout() {
+      var token = localStorage.getItem('rc_customer_token');
+      if (token) fetch('/api/customer/logout', { method: 'POST', headers: { 'Authorization': 'Bearer ' + token } })['catch'](function(){});
+      localStorage.removeItem('rc_customer');
+      localStorage.removeItem('rc_customer_token');
+      window.location.href = '/customer/login';
+    }
+  </script>
+  <script src="/static/team-management.js"></script>
+</body>
+</html>`
+}
+
+// ============================================================
+// JOIN TEAM PAGE — Accept invitation landing page
+// ============================================================
+function getJoinTeamPageHTML() {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  ${getHeadTags()}
+  <title>Join Team - RoofReporterAI</title>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <header class="bg-gradient-to-r from-sky-500 to-blue-600 text-white shadow-lg">
+    <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
+      <a href="/" class="flex items-center space-x-3">
+        <div class="w-10 h-10 bg-accent-500 rounded-lg flex items-center justify-center">
+          <i class="fas fa-home text-white text-lg"></i>
+        </div>
+        <div>
+          <h1 class="text-xl font-bold">Team Invitation</h1>
+          <p class="text-brand-200 text-xs">RoofReporterAI</p>
+        </div>
+      </a>
+    </div>
+  </header>
+  <main class="max-w-lg mx-auto px-4 py-12">
+    <div id="join-root">
+      <div class="flex items-center justify-center py-20">
+        <div class="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-brand-500"></div>
+        <span class="ml-3 text-gray-500">Validating invitation...</span>
+      </div>
+    </div>
+  </main>
+  <script>
+    function getToken() { return localStorage.getItem('rc_customer_token') || ''; }
+    (async function() {
+      var root = document.getElementById('join-root');
+      var params = new URLSearchParams(window.location.search);
+      var inviteToken = params.get('token');
+      if (!inviteToken) { root.innerHTML = '<div class="bg-red-50 border border-red-200 rounded-xl p-8 text-center"><i class="fas fa-exclamation-circle text-red-500 text-4xl mb-3"></i><p class="text-red-700 font-semibold text-lg">No invitation token provided</p><a href="/" class="mt-4 inline-block text-blue-600 hover:underline">Go to homepage</a></div>'; return; }
+
+      // Validate the invite
+      try {
+        var res = await fetch('/api/team/invite/' + inviteToken);
+        var data = await res.json();
+        if (!res.ok || !data.valid) {
+          root.innerHTML = '<div class="bg-red-50 border border-red-200 rounded-xl p-8 text-center"><i class="fas fa-times-circle text-red-500 text-4xl mb-3"></i><p class="text-red-700 font-semibold text-lg">' + (data.error || 'Invalid invitation') + '</p><a href="/" class="mt-4 inline-block text-blue-600 hover:underline">Go to homepage</a></div>';
+          return;
+        }
+
+        var inv = data.invite;
+        var isLoggedIn = !!getToken();
+
+        root.innerHTML = '<div class="bg-white rounded-2xl shadow-xl border overflow-hidden">' +
+          '<div class="bg-gradient-to-r from-teal-500 to-emerald-600 px-8 py-6 text-center text-white">' +
+            '<i class="fas fa-user-plus text-4xl mb-2"></i>' +
+            '<h2 class="text-2xl font-bold">You\\\'re Invited!</h2>' +
+            '<p class="text-teal-100 mt-1">' + (inv.owner_name || '') + ' from <strong>' + (inv.owner_company || 'a roofing team') + '</strong></p>' +
+          '</div>' +
+          '<div class="px-8 py-6">' +
+            '<div class="bg-gray-50 rounded-lg p-4 mb-4">' +
+              '<p class="text-gray-700"><strong>Name:</strong> ' + inv.name + '</p>' +
+              '<p class="text-gray-700"><strong>Role:</strong> ' + (inv.role === 'admin' ? 'Team Admin' : 'Team Member') + '</p>' +
+              '<p class="text-gray-700"><strong>Email:</strong> ' + inv.email + '</p>' +
+            '</div>' +
+            '<div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">' +
+              '<p class="text-blue-800 font-semibold text-sm mb-2"><i class="fas fa-check-circle mr-1"></i> Full access included:</p>' +
+              '<ul class="text-blue-700 text-sm space-y-1 ml-5 list-disc">' +
+                '<li>Order roof measurement reports</li>' +
+                '<li>Full CRM (customers, invoices, proposals, jobs)</li>' +
+                '<li>AI Roofer Secretary</li>' +
+                '<li>Virtual Roof Try-On</li>' +
+              '</ul>' +
+            '</div>' +
+            (isLoggedIn ?
+              '<button id="btnAccept" onclick="acceptInvite(\\'' + inviteToken + '\\')" class="w-full bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 px-6 rounded-lg text-lg transition-all"><i class="fas fa-check mr-2"></i>Accept & Join Team</button>' :
+              '<p class="text-gray-600 text-center mb-3">Please log in or create an account first:</p>' +
+              '<a href="/customer/login?redirect=' + encodeURIComponent('/customer/join-team?token=' + inviteToken) + '" class="block w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg text-lg text-center transition-all"><i class="fas fa-sign-in-alt mr-2"></i>Log In to Accept</a>'
+            ) +
+            '<div id="acceptMsg" class="mt-3 text-center"></div>' +
+          '</div>' +
+        '</div>';
+      } catch(err) {
+        root.innerHTML = '<div class="bg-red-50 border border-red-200 rounded-xl p-8 text-center"><p class="text-red-700">Failed to load invitation</p></div>';
+      }
+    })();
+
+    async function acceptInvite(token) {
+      var btn = document.getElementById('btnAccept');
+      var msg = document.getElementById('acceptMsg');
+      btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Joining...';
+      try {
+        var res = await fetch('/api/team/accept', {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + getToken(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ invite_token: token })
+        });
+        var data = await res.json();
+        if (res.ok && data.success) {
+          msg.innerHTML = '<div class="bg-green-50 border border-green-200 rounded-lg p-4 text-green-700"><i class="fas fa-check-circle mr-1"></i> ' + data.message + '</div>';
+          btn.innerHTML = '<i class="fas fa-check mr-2"></i>Joined!';
+          setTimeout(function() { window.location.href = '/customer/dashboard'; }, 1500);
+        } else {
+          msg.innerHTML = '<div class="bg-red-50 border border-red-200 rounded-lg p-3 text-red-700 text-sm">' + (data.error || 'Failed to accept') + '</div>';
+          btn.disabled = false; btn.innerHTML = '<i class="fas fa-check mr-2"></i>Accept & Join Team';
+        }
+      } catch(err) {
+        msg.innerHTML = '<div class="bg-red-50 border border-red-200 rounded-lg p-3 text-red-700 text-sm">Network error</div>';
+        btn.disabled = false; btn.innerHTML = '<i class="fas fa-check mr-2"></i>Accept & Join Team';
+      }
+    }
+  </script>
 </body>
 </html>`
 }

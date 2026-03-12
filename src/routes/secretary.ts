@@ -15,6 +15,7 @@
 
 import { Hono } from 'hono'
 import type { Bindings } from '../types'
+import { resolveTeamOwner } from './team'
 import { isDevAccount } from './customer-auth'
 
 export const secretaryRoutes = new Hono<{ Bindings: Bindings }>()
@@ -22,7 +23,7 @@ export const secretaryRoutes = new Hono<{ Bindings: Bindings }>()
 // ============================================================
 // AUTH MIDDLEWARE — Customer must be logged in
 // ============================================================
-async function getCustomerInfo(c: any): Promise<{ id: number; email: string } | null> {
+async function getCustomerInfo(c: any): Promise<{ id: number; email: string; effectiveOwnerId: number; isTeamMember: boolean } | null> {
   const auth = c.req.header('Authorization')
   if (!auth?.startsWith('Bearer ')) return null
   const token = auth.slice(7)
@@ -30,15 +31,20 @@ async function getCustomerInfo(c: any): Promise<{ id: number; email: string } | 
     `SELECT cs.customer_id, cu.email FROM customer_sessions cs JOIN customers cu ON cu.id = cs.customer_id WHERE cs.session_token = ? AND cs.expires_at > datetime('now')`
   ).bind(token).first<any>()
   if (!session?.customer_id) return null
-  return { id: session.customer_id, email: session.email || '' }
+  // Resolve team membership — team members use the owner's secretary config
+  const teamInfo = await resolveTeamOwner(c.env.DB, session.customer_id)
+  return { id: session.customer_id, email: session.email || '', effectiveOwnerId: teamInfo.ownerId, isTeamMember: teamInfo.isTeamMember }
 }
 
 secretaryRoutes.use('/*', async (c, next) => {
   const info = await getCustomerInfo(c)
   if (!info) return c.json({ error: 'Authentication required' }, 401)
-  c.set('customerId' as any, info.id)
+  // Team members access the owner's secretary subscription & config
+  c.set('customerId' as any, info.effectiveOwnerId)
+  c.set('realCustomerId' as any, info.id)
   c.set('customerEmail' as any, info.email)
   c.set('isDev' as any, isDevAccount(info.email))
+  c.set('isTeamMember' as any, info.isTeamMember)
   return next()
 })
 

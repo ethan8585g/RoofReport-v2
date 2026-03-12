@@ -1,12 +1,14 @@
 import { Hono } from 'hono'
 import type { Bindings } from '../types'
+import { resolveTeamOwner } from './team'
 
 export const d2dRoutes = new Hono<{ Bindings: Bindings }>()
 
 // ============================================================
 // AUTH MIDDLEWARE — Validate customer session token
+// Team members resolve to the owner's D2D data
 // ============================================================
-async function getUser(c: any): Promise<{ id: number; role?: string } | null> {
+async function getUser(c: any): Promise<{ id: number; role?: string; effectiveOwnerId: number; isTeamMember: boolean } | null> {
   const auth = c.req.header('Authorization')
   if (!auth || !auth.startsWith('Bearer ')) return null
   const token = auth.slice(7)
@@ -15,12 +17,16 @@ async function getUser(c: any): Promise<{ id: number; role?: string } | null> {
   ).bind(token).first<any>()
   if (!session) return null
 
+  // Resolve team membership — team members access owner's D2D data
+  const teamInfo = await resolveTeamOwner(c.env.DB, session.customer_id)
+  const effectiveId = teamInfo.ownerId
+
   // Check if user has a d2d_team_members entry for role
   const member = await c.env.DB.prepare(
     'SELECT role FROM d2d_team_members WHERE customer_id = ?'
-  ).bind(session.customer_id).first<any>()
+  ).bind(effectiveId).first<any>()
 
-  return { id: session.customer_id, role: member?.role || 'member' }
+  return { id: effectiveId, role: member?.role || 'member', effectiveOwnerId: effectiveId, isTeamMember: teamInfo.isTeamMember }
 }
 
 // ============================================================

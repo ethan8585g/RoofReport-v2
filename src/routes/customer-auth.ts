@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import type { Bindings } from '../types'
 import { trackUserSignup } from '../services/ga4-events'
+import { resolveTeamOwner } from './team'
 
 export const customerAuthRoutes = new Hono<{ Bindings: Bindings }>()
 
@@ -733,6 +734,29 @@ customerAuthRoutes.get('/me', async (c) => {
   const freeTrialRemaining = isDev ? 999999 : ((session.free_trial_total || 0) - (session.free_trial_used || 0))
   const totalRemaining = isDev ? 999999 : (Math.max(0, freeTrialRemaining) + Math.max(0, paidCreditsRemaining))
 
+  // Check team membership
+  const teamInfo = await resolveTeamOwner(c.env.DB, session.customer_id)
+
+  // If team member, fetch owner's credit balances so team member sees shared credits
+  let creditSource = session
+  let ownerName = ''
+  let ownerCompany = ''
+  if (teamInfo.isTeamMember) {
+    const owner = await c.env.DB.prepare(`
+      SELECT report_credits, credits_used, free_trial_total, free_trial_used, name, company_name FROM customers WHERE id = ?
+    `).bind(teamInfo.ownerId).first<any>()
+    if (owner) {
+      creditSource = owner
+      ownerName = owner.name || ''
+      ownerCompany = owner.company_name || ''
+    }
+  }
+
+  const ownerIsDev = teamInfo.isTeamMember ? false : isDev
+  const paidCreditsRemainingCalc = ownerIsDev ? 999999 : ((creditSource.report_credits || 0) - (creditSource.credits_used || 0))
+  const freeTrialRemainingCalc = ownerIsDev ? 999999 : ((creditSource.free_trial_total || 0) - (creditSource.free_trial_used || 0))
+  const totalRemainingCalc = ownerIsDev ? 999999 : (Math.max(0, freeTrialRemainingCalc) + Math.max(0, paidCreditsRemainingCalc))
+
   return c.json({
     customer: {
       id: session.customer_id,
@@ -747,15 +771,21 @@ customerAuthRoutes.get('/me', async (c) => {
       postal_code: session.postal_code,
       role: 'customer',
       is_dev: isDev || undefined,
-      credits_remaining: totalRemaining,
-      free_trial_remaining: isDev ? 999999 : Math.max(0, freeTrialRemaining),
-      free_trial_total: isDev ? 999999 : (session.free_trial_total || 0),
-      free_trial_used: isDev ? 0 : (session.free_trial_used || 0),
-      paid_credits_remaining: isDev ? 999999 : Math.max(0, paidCreditsRemaining),
-      paid_credits_total: isDev ? 999999 : (session.report_credits || 0),
-      paid_credits_used: isDev ? 0 : (session.credits_used || 0),
+      credits_remaining: totalRemainingCalc,
+      free_trial_remaining: ownerIsDev ? 999999 : Math.max(0, freeTrialRemainingCalc),
+      free_trial_total: ownerIsDev ? 999999 : (creditSource.free_trial_total || 0),
+      free_trial_used: ownerIsDev ? 0 : (creditSource.free_trial_used || 0),
+      paid_credits_remaining: ownerIsDev ? 999999 : Math.max(0, paidCreditsRemainingCalc),
+      paid_credits_total: ownerIsDev ? 999999 : (creditSource.report_credits || 0),
+      paid_credits_used: ownerIsDev ? 0 : (creditSource.credits_used || 0),
       brand_logo_url: session.brand_logo_url || null,
-      brand_business_name: session.brand_business_name || null
+      brand_business_name: session.brand_business_name || null,
+      // Team membership info
+      is_team_member: teamInfo.isTeamMember,
+      team_owner_id: teamInfo.isTeamMember ? teamInfo.ownerId : undefined,
+      team_role: teamInfo.teamMemberRole || undefined,
+      team_owner_name: teamInfo.isTeamMember ? ownerName : undefined,
+      team_owner_company: teamInfo.isTeamMember ? ownerCompany : undefined
     }
   })
 })
@@ -842,6 +872,9 @@ customerAuthRoutes.get('/orders', async (c) => {
 
   if (!session) return c.json({ error: 'Session expired' }, 401)
 
+  // Resolve team membership — show owner's orders if team member
+  const { ownerId } = await resolveTeamOwner(c.env.DB, session.customer_id)
+
   const orders = await c.env.DB.prepare(`
     SELECT o.*, r.status as report_status, r.roof_area_sqft, r.total_material_cost_cad,
            r.complexity_class, r.confidence_score,
@@ -851,7 +884,7 @@ customerAuthRoutes.get('/orders', async (c) => {
     LEFT JOIN reports r ON r.order_id = o.id
     WHERE o.customer_id = ?
     ORDER BY o.created_at DESC
-  `).bind(session.customer_id).all()
+  `).bind(ownerId).all()
 
   return c.json({ orders: orders.results })
 })
