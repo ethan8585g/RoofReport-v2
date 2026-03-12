@@ -46,14 +46,16 @@ export function generateProfessionalReportHTML(report: RoofReport): string {
   const predominantPitchDeg = largestSeg?.pitch_degrees || report.roof_pitch_degrees || 0
 
   // Slope classification by segment
+  // Industry-standard ranges: Flat 0-2:12, Low 2-4:12, Standard 4-9:12, Steep 9:12+
+  // (EagleView/GAF/CertainTeed use 4:12-9:12 as "standard walkable" range)
   const slopeClasses = { standard: 0, flat: 0, low: 0, steep: 0, high_roof: 0 }
   const segFaceLetters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
   report.segments.forEach(seg => {
     const rise = 12 * Math.tan(seg.pitch_degrees * Math.PI / 180)
     const sq = seg.true_area_sqft / 100
     if (rise <= 2) slopeClasses.flat += sq
-    else if (rise <= 3) slopeClasses.low += sq
-    else if (rise <= 6) slopeClasses.standard += sq
+    else if (rise <= 4) slopeClasses.low += sq
+    else if (rise <= 9) slopeClasses.standard += sq
     else slopeClasses.steep += sq
     if ((seg.plane_height_meters || 0) > 3.5) slopeClasses.high_roof += sq
   })
@@ -190,27 +192,31 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
         <span class="pt-value" style="font-size:12px">${netSquares} SQ</span>
       </div>
 
-      <!-- Slope classifications -->
+      <!-- Slope classifications (only show categories with area) -->
       <div class="pt-row">
-        <span class="pt-label">Standard Slope<span class="pt-sub">(4:12–6:12)</span></span>
-        <span class="pt-value">${slopeClasses.standard} SQ</span>
+        <span class="pt-label">Predominant Pitch</span>
+        <span class="pt-value">${predominantPitch}</span>
       </div>
-      <div class="pt-row">
+      ${slopeClasses.standard > 0 ? `<div class="pt-row">
+        <span class="pt-label">Standard Slope<span class="pt-sub">(4:12–9:12)</span></span>
+        <span class="pt-value">${slopeClasses.standard} SQ</span>
+      </div>` : ''}
+      ${slopeClasses.flat > 0 ? `<div class="pt-row">
         <span class="pt-label">Flat Slope<span class="pt-sub">(0:12–2:12)</span></span>
         <span class="pt-value">${slopeClasses.flat} SQ</span>
-      </div>
-      <div class="pt-row">
-        <span class="pt-label">Low Slope<span class="pt-sub">(2:12–3:12)</span></span>
+      </div>` : ''}
+      ${slopeClasses.low > 0 ? `<div class="pt-row">
+        <span class="pt-label">Low Slope<span class="pt-sub">(2:12–4:12)</span></span>
         <span class="pt-value">${slopeClasses.low} SQ</span>
-      </div>
-      <div class="pt-row">
-        <span class="pt-label">Steep Slope<span class="pt-sub">(7:12 or greater)</span></span>
+      </div>` : ''}
+      ${slopeClasses.steep > 0 ? `<div class="pt-row">
+        <span class="pt-label">Steep Slope<span class="pt-sub">(9:12 or greater)</span></span>
         <span class="pt-value">${slopeClasses.steep} SQ</span>
-      </div>
-      <div class="pt-row">
+      </div>` : ''}
+      ${slopeClasses.high_roof > 0 ? `<div class="pt-row">
         <span class="pt-label">High Roof<span class="pt-sub">(over 1 storey)</span></span>
         <span class="pt-value">${slopeClasses.high_roof} SQ</span>
-      </div>
+      </div>` : ''}
       <div class="pt-row">
         <span class="pt-label">IWB<span class="pt-sub">(Ice &amp; Water Barrier)</span></span>
         <span class="pt-value">${iwbSqFt} SF</span>
@@ -246,10 +252,10 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
 
     <!-- RIGHT COLUMN: Aerial Satellite Image (~58%) -->
     <div style="flex:1;display:flex;flex-direction:column">
-      <div style="flex:1;border:1px solid #ccc;border-radius:4px;overflow:hidden;background:#1a2332;min-height:380px;display:flex;align-items:center;justify-content:center">
+      <div style="border:1px solid #ccc;border-radius:4px;overflow:hidden;background:#1a2332;height:480px;display:flex;align-items:center;justify-content:center">
         ${overheadUrl
-          ? `<img src="${overheadUrl}" alt="Aerial View" style="width:100%;height:100%;object-fit:contain;display:block" onerror="this.parentElement.innerHTML='<div style=\\'height:380px;display:flex;align-items:center;justify-content:center;color:#999;font-size:13px\\'>Satellite imagery not available</div>'">`
-          : '<div style="height:380px;display:flex;align-items:center;justify-content:center;color:#999;font-size:13px">Satellite imagery not available</div>'}
+          ? `<img src="${overheadUrl}" alt="Aerial View" style="max-width:100%;max-height:100%;object-fit:contain;display:block" onerror="this.parentElement.innerHTML='<div style=\\'height:480px;display:flex;align-items:center;justify-content:center;color:#999;font-size:13px\\'>Satellite imagery not available</div>'">`
+          : '<div style="height:480px;display:flex;align-items:center;justify-content:center;color:#999;font-size:13px">Satellite imagery not available</div>'}
       </div>
       <div style="font-size:7px;color:#888;text-align:right;margin-top:2px">&copy; Google Maps &mdash; Imagery for measurement reference only</div>
     </div>
@@ -628,13 +634,14 @@ export function generateSimpleTwoPageReport(report: RoofReport): string {
   const overheadUrl = report.imagery?.satellite_overhead_url || report.imagery?.satellite_url || ''
 
   // Slope breakdown (classify segments)
+  // Industry-standard ranges: Flat 0-2:12, Low 2-4:12, Standard 4-9:12, Steep 9:12+
   let standardSlopeArea = 0, flatSlopeArea = 0, lowSlopeArea = 0, steepSlopeArea = 0, highRoofArea = 0
   report.segments.forEach(seg => {
-    const pitchRise = Math.round(Math.tan(seg.pitch_degrees * Math.PI / 180) * 12)
-    if (pitchRise >= 4 && pitchRise <= 6) standardSlopeArea += seg.true_area_sqft
-    else if (pitchRise <= 1) flatSlopeArea += seg.true_area_sqft
-    else if (pitchRise <= 3) lowSlopeArea += seg.true_area_sqft
-    else if (pitchRise >= 7) steepSlopeArea += seg.true_area_sqft
+    const pitchRise = Math.tan(seg.pitch_degrees * Math.PI / 180) * 12
+    if (pitchRise <= 2) flatSlopeArea += seg.true_area_sqft
+    else if (pitchRise <= 4) lowSlopeArea += seg.true_area_sqft
+    else if (pitchRise <= 9) standardSlopeArea += seg.true_area_sqft
+    else steepSlopeArea += seg.true_area_sqft
     // high roof heuristic: plane height > 1 story (~3.5m)
     if (seg.plane_height_meters && seg.plane_height_meters > 3.5) highRoofArea += seg.true_area_sqft
   })
@@ -873,12 +880,12 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
       </div>
 
       <!-- Slope breakdown -->
-      <div style="font-size:8px;color:#666;margin-bottom:2px;font-weight:600">Slope Breakdown</div>
+      <div style="font-size:8px;color:#666;margin-bottom:2px;font-weight:600">Slope Breakdown &mdash; Predominant ${predominantPitch}</div>
       <div style="border:1px solid #e5e5e5;border-radius:4px;overflow:hidden;margin-bottom:6px">
-        ${standardSlopeArea > 0 ? `<div style="display:flex;justify-content:space-between;padding:4px 10px;font-size:8px;border-bottom:1px solid #eee"><span style="color:#555">Standard Slope (4:12-6:12)</span><span style="font-weight:700;color:#1a1a1a">${(standardSlopeArea / 100).toFixed(2)} SQ</span></div>` : ''}
-        ${flatSlopeArea > 0 ? `<div style="display:flex;justify-content:space-between;padding:4px 10px;font-size:8px;border-bottom:1px solid #eee"><span style="color:#555">Flat Slope (0:12-1:12)</span><span style="font-weight:700;color:#1a1a1a">${(flatSlopeArea / 100).toFixed(2)} SQ</span></div>` : ''}
-        ${lowSlopeArea > 0 ? `<div style="display:flex;justify-content:space-between;padding:4px 10px;font-size:8px;border-bottom:1px solid #eee"><span style="color:#555">Low Slope (2:12-3:12)</span><span style="font-weight:700;color:#1a1a1a">${(lowSlopeArea / 100).toFixed(2)} SQ</span></div>` : ''}
-        ${steepSlopeArea > 0 ? `<div style="display:flex;justify-content:space-between;padding:4px 10px;font-size:8px;border-bottom:1px solid #eee;background:#e0f7fa"><span style="color:#00695C;font-weight:600">Steep Slope (7:12 or greater)</span><span style="font-weight:800;color:#00695C">${(steepSlopeArea / 100).toFixed(2)} SQ</span></div>` : ''}
+        ${standardSlopeArea > 0 ? `<div style="display:flex;justify-content:space-between;padding:4px 10px;font-size:8px;border-bottom:1px solid #eee"><span style="color:#555">Standard Slope (4:12–9:12)</span><span style="font-weight:700;color:#1a1a1a">${(standardSlopeArea / 100).toFixed(2)} SQ</span></div>` : ''}
+        ${flatSlopeArea > 0 ? `<div style="display:flex;justify-content:space-between;padding:4px 10px;font-size:8px;border-bottom:1px solid #eee"><span style="color:#555">Flat Slope (0:12–2:12)</span><span style="font-weight:700;color:#1a1a1a">${(flatSlopeArea / 100).toFixed(2)} SQ</span></div>` : ''}
+        ${lowSlopeArea > 0 ? `<div style="display:flex;justify-content:space-between;padding:4px 10px;font-size:8px;border-bottom:1px solid #eee"><span style="color:#555">Low Slope (2:12–4:12)</span><span style="font-weight:700;color:#1a1a1a">${(lowSlopeArea / 100).toFixed(2)} SQ</span></div>` : ''}
+        ${steepSlopeArea > 0 ? `<div style="display:flex;justify-content:space-between;padding:4px 10px;font-size:8px;border-bottom:1px solid #eee;background:#e0f7fa"><span style="color:#00695C;font-weight:600">Steep Slope (9:12 or greater)</span><span style="font-weight:800;color:#00695C">${(steepSlopeArea / 100).toFixed(2)} SQ</span></div>` : ''}
         ${highRoofArea > 0 ? `<div style="display:flex;justify-content:space-between;padding:4px 10px;font-size:8px;border-bottom:1px solid #eee"><span style="color:#555">High Roof (over 1 story)</span><span style="font-weight:700;color:#1a1a1a">${(highRoofArea / 100).toFixed(2)} SQ</span></div>` : ''}
         ${iwbSqft > 0 ? `<div style="display:flex;justify-content:space-between;padding:4px 10px;font-size:8px"><span style="color:#555">IWB (Ice &amp; Water Barrier)</span><span style="font-weight:700;color:#1a1a1a">${iwbSqft.toLocaleString()} SF</span></div>` : ''}
       </div>
@@ -911,10 +918,10 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
 
     <!-- RIGHT COLUMN: Satellite Image -->
     <div>
-      <div style="border:1px solid #ddd;border-radius:4px;overflow:hidden;background:#1a2332;display:flex;align-items:center;justify-content:center">
+      <div style="border:1px solid #ddd;border-radius:4px;overflow:hidden;background:#1a2332;height:380px;display:flex;align-items:center;justify-content:center">
         ${overheadUrl
-          ? `<img src="${overheadUrl}" alt="Aerial View" style="width:100%;height:340px;object-fit:contain;display:block" onerror="this.style.display='none'">`
-          : `<div style="height:340px;background:#e8ecf1;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:12px">Satellite imagery not available</div>`
+          ? `<img src="${overheadUrl}" alt="Aerial View" style="max-width:100%;max-height:100%;object-fit:contain;display:block" onerror="this.style.display='none'">`
+          : `<div style="height:380px;background:#e8ecf1;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:12px">Satellite imagery not available</div>`
         }
       </div>
       <div style="font-size:7px;color:#999;text-align:right;margin-top:2px">Aerial satellite imagery &copy; Google Maps</div>

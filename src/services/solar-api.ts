@@ -373,19 +373,38 @@ export function generateEdgesFromSegments(
   }
 
   // ---- RAKE EDGES ----
-  // Rakes are the sloped edges at gable ends
-  if (segments.length <= 3) {
-    // Gable roof — has rakes at each end
-    const rakeRiseFt = (buildingWidthFt / 2) * Math.tan(avgPitch * Math.PI / 180)
-    const rakePlanFt = buildingWidthFt / 2
-    const rakeRealFt = rakePlanFt * rakeFactor(avgPitch)
+  // Rakes are the sloped edges at gable ends.
+  // Simple gable (2-3 segments): full gable ends on both sides.
+  // Multi-plane (4+ segments): cross-gable, T-shape, L-shape roofs commonly
+  // have some gable ends. Only pure hip roofs have zero rakes, but even those
+  // often have a small gable dormer. Generate proportional rakes for all configs.
+  const rakeRiseFt = (buildingWidthFt / 2) * Math.tan(avgPitch * Math.PI / 180)
+  const rakePlanFt = buildingWidthFt / 2
+  const rakeRealFt = rakePlanFt * rakeFactor(avgPitch)
 
+  if (segments.length <= 3) {
+    // Gable roof — full rakes at each end (4 rake edges)
     for (const label of ['East Rake (Left)', 'East Rake (Right)', 'West Rake (Left)', 'West Rake (Right)']) {
       edges.push({
         edge_type: 'rake',
         label,
         plan_length_ft: Math.round(rakePlanFt),
         true_length_ft: Math.round(rakeRealFt),
+        pitch_factor: Math.round(rakeFactor(avgPitch) * 1000) / 1000
+      })
+    }
+  } else {
+    // Multi-plane roofs (4+ segments): cross-gable / T-shape / L-shape
+    // Typically have 2 rake edges at the gable wing end(s)
+    // Estimate: number of gable rake pairs = max(1, segments - 4) for cross-gables
+    const rakeCount = Math.max(2, Math.min(segments.length - 2, 4))
+    const rakeLabels = ['Wing Rake (Left)', 'Wing Rake (Right)', 'Gable Rake (Left)', 'Gable Rake (Right)']
+    for (let i = 0; i < rakeCount; i++) {
+      edges.push({
+        edge_type: 'rake',
+        label: rakeLabels[i] || `Rake ${i + 1}`,
+        plan_length_ft: Math.round(rakePlanFt * 0.7), // wing rakes shorter than full gable
+        true_length_ft: Math.round(rakeRealFt * 0.7),
         pitch_factor: Math.round(rakeFactor(avgPitch) * 1000) / 1000
       })
     }
