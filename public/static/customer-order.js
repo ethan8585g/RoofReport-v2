@@ -994,7 +994,8 @@ function closeEavesPolygon() {
     fillColor: '#22c55e',
     fillOpacity: 0.15,
     editable: true,
-    draggable: false
+    draggable: false,
+    clickable: false  // Let clicks pass through to map so ridges/hips/valleys can be placed on/near edges
   });
 
   const path = orderState.traceEavesPolygon.getPath();
@@ -1006,6 +1007,10 @@ function closeEavesPolygon() {
 
   showMsg('success', '<i class="fas fa-check-circle mr-1"></i>Eaves outline closed! Now add ridges and hips.');
   orderState.traceMode = 'ridge';
+  // Disable polygon editing while in ridge mode so it doesn't steal clicks
+  if (orderState.traceEavesPolygon) {
+    orderState.traceEavesPolygon.setEditable(false);
+  }
   updateTraceUI();
 }
 
@@ -1044,6 +1049,7 @@ function addTraceMarker(pt, color, label) {
   const marker = new google.maps.Marker({
     position: { lat: pt.lat, lng: pt.lng },
     map: orderState.traceMap,
+    clickable: false,  // CRITICAL: Don't consume map clicks — let them pass through to the map
     icon: {
       url: 'data:image/svg+xml,' + encodeURIComponent(
         `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" width="16" height="16">
@@ -1065,6 +1071,7 @@ function drawPolyline(points, color, weight, dashed) {
     strokeColor: color,
     strokeWeight: weight,
     strokeOpacity: dashed ? 0.6 : 0.9,
+    clickable: false,  // Let clicks pass through to map
   });
   orderState.tracePolylines.push(polyline);
 }
@@ -1081,7 +1088,13 @@ function clearTraceOverlays() {
 }
 
 function restoreTraceOverlays() {
-  if (orderState.traceEavesPoints.length >= 3 && !orderState.traceEavesPolygon) {
+  // Only auto-close polygon during initial restore (page load), not after undo.
+  // The undo function handles its own restore to avoid auto-closing.
+  if (orderState.traceEavesPoints.length >= 3 && orderState.traceEavesPolygon) {
+    // Polygon already exists — just re-draw markers on top
+    orderState.traceEavesPoints.forEach((p, i) => addTraceMarker(p, '#22c55e', i + 1));
+  } else if (orderState.traceEavesPoints.length >= 3 && !orderState.traceEavesPolygon) {
+    // No polygon yet and 3+ points — close it (happens on page restore)
     closeEavesPolygon();
   } else if (orderState.traceEavesPoints.length > 0) {
     orderState.traceEavesPoints.forEach((p, i) => addTraceMarker(p, '#22c55e', i + 1));
@@ -1099,20 +1112,55 @@ function restoreLineOverlays() {
 function setTraceMode(mode) {
   if (orderState.traceCurrentLine.length > 0) finishCurrentLine();
   orderState.traceMode = mode;
+  // Toggle polygon editability: editable only in eaves mode
+  // so the edit handles don't steal clicks when placing ridges/hips/valleys
+  if (orderState.traceEavesPolygon) {
+    orderState.traceEavesPolygon.setEditable(mode === 'eaves');
+  }
   updateTraceUI();
 }
 
 function undoLastTrace() {
   const mode = orderState.traceMode;
   if (mode === 'eaves') {
-    if (orderState.traceEavesPolygon) { orderState.traceEavesPolygon.setMap(null); orderState.traceEavesPolygon = null; }
+    if (orderState.traceEavesPolygon) {
+      orderState.traceEavesPolygon.setMap(null);
+      orderState.traceEavesPolygon = null;
+    }
     if (orderState.traceEavesPoints.length > 0) orderState.traceEavesPoints.pop();
-  } else if (mode === 'ridge' && orderState.traceRidgeLines.length > 0) orderState.traceRidgeLines.pop();
-  else if (mode === 'hip' && orderState.traceHipLines.length > 0) orderState.traceHipLines.pop();
-  else if (mode === 'valley' && orderState.traceValleyLines.length > 0) orderState.traceValleyLines.pop();
+    // After undo, DO NOT auto-close even if 3+ points remain.
+    // Clear and redraw as open polyline + markers so user can keep editing.
+    clearTraceOverlays();
+    if (orderState.traceEavesPoints.length > 0) {
+      orderState.traceEavesPoints.forEach((p, i) => addTraceMarker(p, '#22c55e', i + 1));
+      if (orderState.traceEavesPoints.length > 1) drawPolyline(orderState.traceEavesPoints, '#22c55e', 3, false);
+    }
+    restoreLineOverlays();
+  } else if (mode === 'ridge') {
+    if (orderState.traceRidgeLines.length > 0) {
+      orderState.traceRidgeLines.pop();
+    } else if (orderState.traceEavesPolygon) {
+      // No ridges to undo — undo the eaves polygon closure instead
+      orderState.traceEavesPolygon.setMap(null);
+      orderState.traceEavesPolygon = null;
+      orderState.traceMode = 'eaves';
+    }
+    clearTraceOverlays();
+    restoreTraceOverlays();
+  } else if (mode === 'hip') {
+    if (orderState.traceHipLines.length > 0) {
+      orderState.traceHipLines.pop();
+    }
+    clearTraceOverlays();
+    restoreTraceOverlays();
+  } else if (mode === 'valley') {
+    if (orderState.traceValleyLines.length > 0) {
+      orderState.traceValleyLines.pop();
+    }
+    clearTraceOverlays();
+    restoreTraceOverlays();
+  }
   orderState.traceCurrentLine = [];
-  clearTraceOverlays();
-  restoreTraceOverlays();
   updateTraceUI();
 }
 
