@@ -391,6 +391,11 @@ app.get('/blog/:slug', (c) => {
   return c.html(getBlogPostHTML())
 })
 
+// Landing Funnel — Social media & blog traffic funnels here
+app.get('/lander', (c) => {
+  return c.html(getLanderFunnelHTML())
+})
+
 // Customer Order & Pay page
 app.get('/customer/order', (c) => {
   const mapsKey = c.env.GOOGLE_MAPS_API_KEY || ''
@@ -1277,8 +1282,12 @@ function getLandingPageHTML() {
 <html lang="en">
 <head>
   ${getHeadTags()}
-  <title>Professional Roof Measurement Reports - RoofReporterAI</title>
-  <meta name="description" content="Get accurate roof area, pitch analysis, edge breakdowns, material estimates, and solar potential from satellite imagery. Sign up and get 3 free reports instantly. Powered by RoofReporterAI Business Management CRM.">
+  <title>RoofReporterAI — Professional Roof Measurement Reports & CRM for Roofing Companies</title>
+  <meta name="description" content="Get accurate roof area, pitch analysis, edge breakdowns, material estimates, and solar potential from satellite imagery in under 60 seconds. Full CRM, AI Secretary, team management. Start with 3 free reports.">
+  <meta property="og:title" content="RoofReporterAI — Precision Roof Measurement Reports">
+  <meta property="og:description" content="Professional satellite-powered roof measurement reports in under 60 seconds. Full CRM, AI phone secretary, and team management for roofing businesses.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://roofreporterai.com">
   <style>
     /* Landing page scroll animations */
     .scroll-animate {
@@ -1290,58 +1299,62 @@ function getLandingPageHTML() {
       opacity: 1 !important;
       transform: translateY(0) !important;
     }
-    /* Smooth scrolling */
     html { scroll-behavior: smooth; }
-    /* Navbar transparency transition */
-    .landing-nav { transition: all 0.3s ease; }
+    /* Navbar: starts transparent, turns dark on scroll */
+    .landing-nav {
+      transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+      background: transparent;
+    }
     .landing-nav.scrolled {
-      background: rgba(30, 58, 138, 0.97);
-      backdrop-filter: blur(12px);
-      box-shadow: 0 4px 20px rgba(0,0,0,0.25);
+      background: rgba(15, 23, 42, 0.97);
+      backdrop-filter: blur(16px);
+      box-shadow: 0 4px 30px rgba(0,0,0,0.3);
     }
   </style>
 </head>
-<body class="bg-gray-50 min-h-screen">
-  <!-- Sticky Navigation -->
-  <nav id="landing-nav" class="landing-nav fixed top-0 left-0 right-0 z-50 bg-blue-800/80 backdrop-blur-sm">
-    <div class="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+<body class="bg-white min-h-screen">
+  <!-- Sticky Navigation — Starts fully transparent over hero image -->
+  <nav id="landing-nav" class="landing-nav fixed top-0 left-0 right-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
       <a href="/" class="flex items-center gap-3">
-        <div class="w-9 h-9 bg-accent-500 rounded-lg flex items-center justify-center">
-          <i class="fas fa-home text-white"></i>
+        <div class="w-9 h-9 bg-gradient-to-br from-cyan-500 to-blue-500 rounded-lg flex items-center justify-center shadow-lg">
+          <i class="fas fa-home text-white text-sm"></i>
         </div>
         <div class="leading-tight">
-          <span class="text-white font-bold text-lg">RoofReporterAI</span>
-          <span class="hidden sm:block text-brand-200 text-[10px] -mt-0.5">Roof Measurement Reports & Business Management CRM</span>
+          <span class="text-white font-bold text-lg tracking-tight">RoofReporterAI</span>
+          <span class="hidden sm:block text-gray-400 text-[10px] -mt-0.5">Measurement Reports & Business CRM</span>
         </div>
       </a>
 
       <!-- Desktop nav -->
       <div class="hidden md:flex items-center gap-6">
-        <a href="#how-it-works" class="text-brand-200 hover:text-white text-sm transition-colors">How It Works</a>
-        <a href="#features" class="text-brand-200 hover:text-white text-sm transition-colors">Features</a>
-        <a href="/pricing" class="text-brand-200 hover:text-white text-sm transition-colors">Pricing</a>
-        <a href="/blog" class="text-brand-200 hover:text-white text-sm transition-colors">Blog</a>
-        <a href="#faq" class="text-brand-200 hover:text-white text-sm transition-colors">FAQ</a>
-        <a href="/customer/login" class="bg-accent-500 hover:bg-accent-600 text-white font-semibold py-2 px-5 rounded-lg text-sm transition-all hover:scale-105 shadow-lg shadow-accent-500/25">
-          <i class="fas fa-sign-in-alt mr-1"></i>Customer Login
+        <a href="#how-it-works" class="text-gray-300 hover:text-white text-sm font-medium transition-colors">How It Works</a>
+        <a href="#features" class="text-gray-300 hover:text-white text-sm font-medium transition-colors">Platform</a>
+        <a href="#pricing" class="text-gray-300 hover:text-white text-sm font-medium transition-colors">Pricing</a>
+        <a href="/blog" class="text-gray-300 hover:text-white text-sm font-medium transition-colors">Blog</a>
+        <a href="/lander" class="text-gray-300 hover:text-white text-sm font-medium transition-colors">Get Started</a>
+        <a href="#faq" class="text-gray-300 hover:text-white text-sm font-medium transition-colors">FAQ</a>
+        <a href="/customer/login" class="bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-semibold py-2 px-5 rounded-lg text-sm transition-all hover:scale-105 shadow-lg shadow-cyan-500/25">
+          <i class="fas fa-sign-in-alt mr-1"></i>Login
         </a>
       </div>
 
       <!-- Mobile menu button -->
-      <button id="mobile-menu-btn" class="md:hidden text-white text-xl" onclick="document.getElementById('mobile-menu').classList.toggle('hidden')">
+      <button id="mobile-menu-btn" class="md:hidden text-white text-xl p-2" onclick="document.getElementById('mobile-menu').classList.toggle('hidden')">
         <i class="fas fa-bars"></i>
       </button>
     </div>
 
     <!-- Mobile menu -->
-    <div id="mobile-menu" class="hidden md:hidden bg-sky-600/95 backdrop-blur-md border-t border-sky-400">
-      <div class="max-w-7xl mx-auto px-4 py-4 flex flex-col gap-3">
-        <a href="#how-it-works" class="text-brand-200 hover:text-white text-sm py-2" onclick="document.getElementById('mobile-menu').classList.add('hidden')">How It Works</a>
-        <a href="#features" class="text-brand-200 hover:text-white text-sm py-2" onclick="document.getElementById('mobile-menu').classList.add('hidden')">Features</a>
-        <a href="/pricing" class="text-brand-200 hover:text-white text-sm py-2" onclick="document.getElementById('mobile-menu').classList.add('hidden')">Pricing</a>
-        <a href="/blog" class="text-brand-200 hover:text-white text-sm py-2" onclick="document.getElementById('mobile-menu').classList.add('hidden')">Blog</a>
-        <a href="#faq" class="text-brand-200 hover:text-white text-sm py-2" onclick="document.getElementById('mobile-menu').classList.add('hidden')">FAQ</a>
-        <a href="/customer/login" class="bg-accent-500 text-white font-semibold py-2.5 px-5 rounded-lg text-sm text-center mt-2"><i class="fas fa-sign-in-alt mr-1"></i>Customer Login</a>
+    <div id="mobile-menu" class="hidden md:hidden bg-slate-900/98 backdrop-blur-xl border-t border-white/10">
+      <div class="max-w-7xl mx-auto px-4 py-4 flex flex-col gap-1">
+        <a href="#how-it-works" class="text-gray-300 hover:text-white text-sm py-2.5 px-3 rounded-lg hover:bg-white/5 transition-all" onclick="document.getElementById('mobile-menu').classList.add('hidden')">How It Works</a>
+        <a href="#features" class="text-gray-300 hover:text-white text-sm py-2.5 px-3 rounded-lg hover:bg-white/5 transition-all" onclick="document.getElementById('mobile-menu').classList.add('hidden')">Platform</a>
+        <a href="#pricing" class="text-gray-300 hover:text-white text-sm py-2.5 px-3 rounded-lg hover:bg-white/5 transition-all" onclick="document.getElementById('mobile-menu').classList.add('hidden')">Pricing</a>
+        <a href="/blog" class="text-gray-300 hover:text-white text-sm py-2.5 px-3 rounded-lg hover:bg-white/5 transition-all" onclick="document.getElementById('mobile-menu').classList.add('hidden')">Blog</a>
+        <a href="/lander" class="text-gray-300 hover:text-white text-sm py-2.5 px-3 rounded-lg hover:bg-white/5 transition-all" onclick="document.getElementById('mobile-menu').classList.add('hidden')">Get Started</a>
+        <a href="#faq" class="text-gray-300 hover:text-white text-sm py-2.5 px-3 rounded-lg hover:bg-white/5 transition-all" onclick="document.getElementById('mobile-menu').classList.add('hidden')">FAQ</a>
+        <a href="/customer/login" class="bg-gradient-to-r from-cyan-500 to-blue-500 text-white font-semibold py-2.5 px-5 rounded-lg text-sm text-center mt-2"><i class="fas fa-sign-in-alt mr-1"></i>Login / Sign Up</a>
       </div>
     </div>
   </nav>
@@ -1349,50 +1362,57 @@ function getLandingPageHTML() {
   <!-- Landing page content -->
   <div id="landing-root"></div>
 
-  <!-- Footer -->
-  <footer class="bg-slate-100 text-gray-600 border-t border-slate-200">
-    <div class="max-w-7xl mx-auto px-4 py-16">
+  <!-- Footer — Dark premium style -->
+  <footer class="bg-slate-900 text-gray-400">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 py-16">
       <div class="grid md:grid-cols-4 gap-8">
         <div>
           <div class="flex items-center gap-3 mb-4">
-            <div class="w-9 h-9 bg-accent-500 rounded-lg flex items-center justify-center">
-              <i class="fas fa-home text-white"></i>
+            <div class="w-9 h-9 bg-gradient-to-br from-cyan-500 to-blue-500 rounded-lg flex items-center justify-center">
+              <i class="fas fa-home text-white text-sm"></i>
             </div>
-            <span class="text-gray-800 font-bold text-lg">RoofReporterAI</span>
+            <span class="text-white font-bold text-lg tracking-tight">RoofReporterAI</span>
           </div>
-          <p class="text-sm leading-relaxed">Professional AI-powered roof measurement reports for contractors, estimators, and roofing professionals across Canada.</p>
+          <p class="text-sm leading-relaxed text-gray-500">Professional AI-powered roof measurement reports, CRM, and business management for roofing companies across Canada.</p>
+          <div class="flex items-center gap-4 mt-6">
+            <a href="#" class="text-gray-500 hover:text-cyan-400 transition-colors"><i class="fab fa-facebook text-lg"></i></a>
+            <a href="#" class="text-gray-500 hover:text-cyan-400 transition-colors"><i class="fab fa-instagram text-lg"></i></a>
+            <a href="#" class="text-gray-500 hover:text-cyan-400 transition-colors"><i class="fab fa-linkedin text-lg"></i></a>
+          </div>
         </div>
         <div>
-          <h4 class="text-gray-800 font-semibold mb-4 text-sm uppercase tracking-wider">Product</h4>
-          <ul class="space-y-2 text-sm">
-            <li><a href="#features" class="hover:text-sky-600 transition-colors">Features</a></li>
-            <li><a href="#pricing" class="hover:text-sky-600 transition-colors">Pricing</a></li>
-            <li><a href="#how-it-works" class="hover:text-sky-600 transition-colors">How It Works</a></li>
-            <li><a href="/blog" class="hover:text-sky-600 transition-colors">Blog</a></li>
-            <li><a href="/customer/login" class="hover:text-sky-600 transition-colors">Customer Login</a></li>
+          <h4 class="text-white font-semibold mb-4 text-sm uppercase tracking-wider">Product</h4>
+          <ul class="space-y-2.5 text-sm">
+            <li><a href="#features" class="hover:text-cyan-400 transition-colors">Measurement Reports</a></li>
+            <li><a href="#features" class="hover:text-cyan-400 transition-colors">AI Roofer Secretary</a></li>
+            <li><a href="#features" class="hover:text-cyan-400 transition-colors">CRM & Invoicing</a></li>
+            <li><a href="#features" class="hover:text-cyan-400 transition-colors">Virtual Roof Try-On</a></li>
+            <li><a href="#pricing" class="hover:text-cyan-400 transition-colors">Pricing</a></li>
           </ul>
         </div>
         <div>
-          <h4 class="text-gray-800 font-semibold mb-4 text-sm uppercase tracking-wider">Company</h4>
-          <ul class="space-y-2 text-sm">
-            <li><a href="https://reusecanada.ca" class="hover:text-sky-600 transition-colors">RoofReporterAI</a></li>
-            <li><a href="#faq" class="hover:text-sky-600 transition-colors">FAQ</a></li>
-            <li><a href="mailto:reports@reusecanada.ca" class="hover:text-sky-600 transition-colors">Contact</a></li>
+          <h4 class="text-white font-semibold mb-4 text-sm uppercase tracking-wider">Resources</h4>
+          <ul class="space-y-2.5 text-sm">
+            <li><a href="/blog" class="hover:text-cyan-400 transition-colors">Blog</a></li>
+            <li><a href="#how-it-works" class="hover:text-cyan-400 transition-colors">How It Works</a></li>
+            <li><a href="#faq" class="hover:text-cyan-400 transition-colors">FAQ</a></li>
+            <li><a href="/lander" class="hover:text-cyan-400 transition-colors">Get Started Guide</a></li>
+            <li><a href="mailto:reports@reusecanada.ca" class="hover:text-cyan-400 transition-colors">Contact</a></li>
           </ul>
         </div>
         <div>
-          <h4 class="text-gray-800 font-semibold mb-4 text-sm uppercase tracking-wider">Get Started</h4>
-          <p class="text-sm mb-4">Ready to save hours on every estimate?</p>
-          <a href="/customer/login" class="inline-block bg-accent-500 hover:bg-accent-600 text-white font-semibold py-2.5 px-6 rounded-lg text-sm transition-all">
-            Customer Login
+          <h4 class="text-white font-semibold mb-4 text-sm uppercase tracking-wider">Get Started</h4>
+          <p class="text-sm text-gray-500 mb-4">Start with 3 free reports. No credit card required.</p>
+          <a href="/customer/login" class="inline-block bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-semibold py-2.5 px-6 rounded-lg text-sm transition-all shadow-lg">
+            Sign Up Free
           </a>
         </div>
       </div>
-      <div class="border-t border-slate-300 mt-12 pt-8 flex flex-col md:flex-row items-center justify-between gap-4">
-        <p class="text-sm">&copy; 2026 RoofReporterAI. All rights reserved.</p>
-        <div class="flex items-center gap-6 text-sm">
-          <span class="flex items-center gap-1.5"><i class="fas fa-map-marker-alt text-sky-500"></i> Alberta, Canada</span>
-          <span class="flex items-center gap-1.5"><i class="fas fa-envelope text-sky-500"></i> reports@reusecanada.ca</span>
+      <div class="border-t border-gray-800 mt-12 pt-8 flex flex-col md:flex-row items-center justify-between gap-4">
+        <p class="text-sm text-gray-500">&copy; 2026 RoofReporterAI. All rights reserved.</p>
+        <div class="flex items-center gap-6 text-sm text-gray-500">
+          <span class="flex items-center gap-1.5"><i class="fas fa-map-marker-alt text-cyan-500"></i> Alberta, Canada</span>
+          <a href="mailto:reports@reusecanada.ca" class="flex items-center gap-1.5 hover:text-cyan-400 transition-colors"><i class="fas fa-envelope text-cyan-500"></i> reports@reusecanada.ca</a>
         </div>
       </div>
     </div>
@@ -1916,36 +1936,42 @@ function getBlogListingHTML() {
   <link rel="canonical" href="/blog">
 </head>
 <body class="bg-gray-50 min-h-screen">
-  <!-- Navigation -->
-  <nav class="bg-gradient-to-r from-sky-500 to-blue-600 text-white shadow-lg sticky top-0 z-50">
-    <div class="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+  <!-- Navigation — Matches new homepage style -->
+  <nav class="bg-slate-900 text-white sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
       <a href="/" class="flex items-center gap-3">
-        <div class="w-9 h-9 bg-accent-500 rounded-lg flex items-center justify-center"><i class="fas fa-home text-white"></i></div>
-        <span class="text-white font-bold text-lg">RoofReporterAI</span>
+        <div class="w-9 h-9 bg-gradient-to-br from-cyan-500 to-blue-500 rounded-lg flex items-center justify-center"><i class="fas fa-home text-white text-sm"></i></div>
+        <span class="text-white font-bold text-lg tracking-tight">RoofReporterAI</span>
       </a>
       <div class="hidden md:flex items-center gap-5">
-        <a href="/" class="text-brand-200 hover:text-white text-sm">Home</a>
-        <a href="/pricing" class="text-brand-200 hover:text-white text-sm">Pricing</a>
-        <a href="/blog" class="text-white font-semibold text-sm border-b-2 border-white pb-0.5">Blog</a>
-        <a href="/customer/login" class="bg-accent-500 hover:bg-accent-600 text-white font-semibold py-2 px-5 rounded-lg text-sm"><i class="fas fa-sign-in-alt mr-1"></i>Get Started</a>
+        <a href="/" class="text-gray-400 hover:text-white text-sm font-medium">Home</a>
+        <a href="/#pricing" class="text-gray-400 hover:text-white text-sm font-medium">Pricing</a>
+        <a href="/blog" class="text-white font-semibold text-sm border-b-2 border-cyan-400 pb-0.5">Blog</a>
+        <a href="/lander" class="text-gray-400 hover:text-white text-sm font-medium">Get Started</a>
+        <a href="/customer/login" class="bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-semibold py-2 px-5 rounded-lg text-sm"><i class="fas fa-sign-in-alt mr-1"></i>Login</a>
       </div>
       <button class="md:hidden text-white text-xl" onclick="document.getElementById('blog-mobile-menu').classList.toggle('hidden')"><i class="fas fa-bars"></i></button>
     </div>
-    <div id="blog-mobile-menu" class="hidden md:hidden bg-sky-600/95 backdrop-blur-md border-t border-sky-400">
-      <div class="max-w-7xl mx-auto px-4 py-4 flex flex-col gap-3">
-        <a href="/" class="text-brand-200 hover:text-white text-sm py-2">Home</a>
-        <a href="/pricing" class="text-brand-200 hover:text-white text-sm py-2">Pricing</a>
-        <a href="/blog" class="text-white font-semibold text-sm py-2">Blog</a>
-        <a href="/customer/login" class="bg-accent-500 text-white font-semibold py-2.5 px-5 rounded-lg text-sm text-center mt-2"><i class="fas fa-sign-in-alt mr-1"></i>Get Started</a>
+    <div id="blog-mobile-menu" class="hidden md:hidden bg-slate-800/98 backdrop-blur-xl border-t border-white/10">
+      <div class="max-w-7xl mx-auto px-4 py-4 flex flex-col gap-1">
+        <a href="/" class="text-gray-300 hover:text-white text-sm py-2.5 px-3 rounded-lg hover:bg-white/5">Home</a>
+        <a href="/#pricing" class="text-gray-300 hover:text-white text-sm py-2.5 px-3 rounded-lg hover:bg-white/5">Pricing</a>
+        <a href="/blog" class="text-white font-semibold text-sm py-2.5 px-3 rounded-lg bg-white/5">Blog</a>
+        <a href="/lander" class="text-gray-300 hover:text-white text-sm py-2.5 px-3 rounded-lg hover:bg-white/5">Get Started</a>
+        <a href="/customer/login" class="bg-gradient-to-r from-cyan-500 to-blue-500 text-white font-semibold py-2.5 px-5 rounded-lg text-sm text-center mt-2"><i class="fas fa-sign-in-alt mr-1"></i>Login</a>
       </div>
     </div>
   </nav>
 
-  <!-- Hero Section -->
-  <div class="bg-gradient-to-br from-sky-500 via-blue-600 to-blue-700 text-white py-16 md:py-20">
+  <!-- Hero Section — Dark theme matching new brand -->
+  <div class="bg-gradient-to-br from-slate-900 via-cyan-900 to-slate-900 text-white py-16 md:py-20">
     <div class="max-w-4xl mx-auto px-4 text-center">
-      <h1 class="text-4xl md:text-5xl font-extrabold mb-4 tracking-tight">The RoofReporterAI Blog</h1>
-      <p class="text-lg md:text-xl text-sky-100 max-w-2xl mx-auto leading-relaxed">Roofing industry insights, AI measurement technology, contractor business tips, and everything you need to grow your roofing business.</p>
+      <div class="inline-flex items-center gap-2 bg-cyan-500/10 border border-cyan-400/30 rounded-full px-4 py-1.5 mb-6">
+        <i class="fas fa-newspaper text-cyan-400 text-sm"></i>
+        <span class="text-sm font-medium text-cyan-200">Industry Insights</span>
+      </div>
+      <h1 class="text-4xl md:text-5xl font-black mb-4 tracking-tight">The RoofReporterAI Blog</h1>
+      <p class="text-lg md:text-xl text-gray-300 max-w-2xl mx-auto leading-relaxed">Roofing industry insights, AI measurement technology, contractor business tips, and everything you need to grow your roofing business.</p>
       <div class="mt-8 flex flex-wrap justify-center gap-3" id="blog-categories-hero"></div>
     </div>
   </div>
@@ -1955,7 +1981,7 @@ function getBlogListingHTML() {
     <div class="bg-white rounded-xl shadow-lg p-4 flex flex-col md:flex-row items-center gap-4">
       <div class="flex-1 relative w-full">
         <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
-        <input type="text" id="blog-search" placeholder="Search articles..." class="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-sky-400 focus:border-sky-400 outline-none">
+        <input type="text" id="blog-search" placeholder="Search articles..." class="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 outline-none">
       </div>
       <div class="flex items-center gap-2 flex-wrap" id="blog-category-filters"></div>
     </div>
@@ -1975,7 +2001,7 @@ function getBlogListingHTML() {
     
     <!-- Load More -->
     <div id="blog-load-more" class="text-center mt-12 hidden">
-      <button onclick="loadMorePosts()" class="bg-white border-2 border-sky-500 text-sky-600 hover:bg-sky-50 font-semibold py-3 px-8 rounded-lg text-sm transition-all">
+      <button onclick="loadMorePosts()" class="bg-white border-2 border-cyan-500 text-cyan-600 hover:bg-cyan-50 font-semibold py-3 px-8 rounded-lg text-sm transition-all">
         Load More Articles
       </button>
     </div>
@@ -1986,23 +2012,35 @@ function getBlogListingHTML() {
       <h3 class="text-xl font-bold text-gray-600 mb-2">No articles yet</h3>
       <p class="text-gray-400 text-sm">Check back soon — we're writing great content for roofing professionals!</p>
     </div>
+
+    <!-- Funnel CTA — Every blog reader gets pushed to lander -->
+    <div class="mt-16 bg-gradient-to-r from-slate-900 via-cyan-900 to-slate-900 rounded-2xl p-8 md:p-12 text-center text-white">
+      <h3 class="text-2xl md:text-3xl font-black mb-3 tracking-tight">Ready to Try It Yourself?</h3>
+      <p class="text-gray-300 mb-6 max-w-xl mx-auto">Get 3 free professional roof measurement reports. No credit card required. Full CRM included.</p>
+      <a href="/lander" class="inline-flex items-center gap-2 bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-400 hover:to-emerald-400 text-white font-bold py-3 px-8 rounded-xl shadow-lg transition-all hover:scale-[1.02]">
+        <i class="fas fa-gift"></i>
+        Claim Your 3 Free Reports
+        <i class="fas fa-arrow-right text-sm ml-1"></i>
+      </a>
+    </div>
   </main>
 
-  <!-- Footer -->
-  <footer class="bg-slate-100 text-gray-600 border-t border-slate-200">
+  <!-- Footer — Dark style matching new brand -->
+  <footer class="bg-slate-900 text-gray-500 border-t border-gray-800">
     <div class="max-w-7xl mx-auto px-4 py-12">
       <div class="flex flex-col md:flex-row items-center justify-between gap-4">
         <div class="flex items-center gap-3">
-          <div class="w-8 h-8 bg-accent-500 rounded-lg flex items-center justify-center"><i class="fas fa-home text-white text-sm"></i></div>
-          <span class="text-gray-800 font-bold">RoofReporterAI</span>
+          <div class="w-8 h-8 bg-gradient-to-br from-cyan-500 to-blue-500 rounded-lg flex items-center justify-center"><i class="fas fa-home text-white text-xs"></i></div>
+          <span class="text-gray-300 font-bold">RoofReporterAI</span>
         </div>
         <div class="flex items-center gap-6 text-sm">
-          <a href="/" class="hover:text-sky-600">Home</a>
-          <a href="/pricing" class="hover:text-sky-600">Pricing</a>
-          <a href="/blog" class="hover:text-sky-600 font-semibold text-sky-600">Blog</a>
-          <a href="/customer/login" class="hover:text-sky-600">Login</a>
+          <a href="/" class="hover:text-cyan-400 transition-colors">Home</a>
+          <a href="/#pricing" class="hover:text-cyan-400 transition-colors">Pricing</a>
+          <a href="/blog" class="text-cyan-400 font-semibold">Blog</a>
+          <a href="/lander" class="hover:text-cyan-400 transition-colors">Get Started</a>
+          <a href="/customer/login" class="hover:text-cyan-400 transition-colors">Login</a>
         </div>
-        <p class="text-xs text-gray-400">&copy; 2026 RoofReporterAI. All rights reserved.</p>
+        <p class="text-xs text-gray-600">&copy; 2026 RoofReporterAI. All rights reserved.</p>
       </div>
     </div>
   </footer>
@@ -2104,6 +2142,230 @@ function getBlogPostHTML() {
   </footer>
 
   <script src="/static/blog.js"></script>
+  ${getRoverWidget()}
+</body>
+</html>`
+}
+
+// ============================================================
+// LANDING FUNNEL — Social media, blog, FB/IG traffic
+// All social posts and blog links redirect here
+// ============================================================
+function getLanderFunnelHTML() {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  ${getHeadTags()}
+  <title>Get Your Free Roof Measurement Report - RoofReporterAI</title>
+  <meta name="description" content="Professional satellite-powered roof measurement reports in under 60 seconds. Start with 3 FREE reports. No credit card required. Used by roofing contractors across Canada.">
+  <meta property="og:title" content="Free Roof Measurement Reports - RoofReporterAI">
+  <meta property="og:description" content="Get accurate roof area, pitch, material BOM, and more in 60 seconds. 3 free reports. No credit card.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://roofreporterai.com/lander">
+  <style>
+    html { scroll-behavior: smooth; }
+    .scroll-animate { opacity: 0; transform: translateY(20px); transition: all 0.7s cubic-bezier(0.4, 0, 0.2, 1); }
+    .scroll-animate.animate-in { opacity: 1 !important; transform: translateY(0) !important; }
+    @keyframes float { 0%, 100% { transform: translateY(0px); } 50% { transform: translateY(-10px); } }
+    .float-anim { animation: float 3s ease-in-out infinite; }
+  </style>
+</head>
+<body class="bg-white min-h-screen">
+  <!-- Minimal top bar -->
+  <nav class="bg-slate-900 text-white">
+    <div class="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between">
+      <a href="/" class="flex items-center gap-2">
+        <div class="w-7 h-7 bg-gradient-to-br from-cyan-500 to-blue-500 rounded-md flex items-center justify-center">
+          <i class="fas fa-home text-white text-xs"></i>
+        </div>
+        <span class="text-white font-bold text-sm">RoofReporterAI</span>
+      </a>
+      <a href="/customer/login" class="bg-gradient-to-r from-cyan-500 to-blue-500 text-white text-sm font-semibold py-1.5 px-4 rounded-lg hover:opacity-90 transition-opacity">Sign Up Free</a>
+    </div>
+  </nav>
+
+  <!-- HERO — High-impact conversion section -->
+  <section class="relative overflow-hidden bg-gradient-to-br from-slate-900 via-cyan-900 to-slate-900 text-white py-20 lg:py-28">
+    <div class="absolute inset-0 opacity-10">
+      <div class="absolute inset-0" style="background-image: radial-gradient(circle, rgba(34,211,238,0.3) 1px, transparent 1px); background-size: 30px 30px;"></div>
+    </div>
+
+    <div class="relative max-w-6xl mx-auto px-4">
+      <div class="grid lg:grid-cols-2 gap-12 items-center">
+        <div>
+          <div class="inline-flex items-center gap-2 bg-green-500/10 border border-green-400/30 rounded-full px-4 py-1.5 mb-6">
+            <i class="fas fa-gift text-green-400 text-sm"></i>
+            <span class="text-sm font-medium text-green-300">3 FREE Reports on Signup — No Credit Card</span>
+          </div>
+
+          <h1 class="text-4xl lg:text-6xl font-black leading-tight mb-6 tracking-tight">
+            Stop Climbing Roofs.<br/>
+            <span class="bg-clip-text text-transparent bg-gradient-to-r from-cyan-300 to-blue-300">Start Measuring Smarter.</span>
+          </h1>
+
+          <p class="text-lg text-gray-300 mb-8 leading-relaxed max-w-xl">
+            Get a <strong class="text-white">professional roof measurement report</strong> from satellite imagery in under 60 seconds. Accurate area, pitch, edge breakdowns, and a full material BOM — everything you need to quote a job.
+          </p>
+
+          <a href="/customer/login" class="group inline-flex items-center gap-3 bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-400 hover:to-emerald-400 text-white font-bold py-4 px-10 rounded-xl text-lg shadow-2xl shadow-green-500/25 transition-all hover:scale-[1.02] mb-6">
+            <i class="fas fa-rocket"></i>
+            Claim Your 3 Free Reports
+            <i class="fas fa-arrow-right text-sm group-hover:translate-x-1 transition-transform"></i>
+          </a>
+
+          <div class="flex items-center gap-6 text-sm text-gray-400">
+            <span class="flex items-center gap-1.5"><i class="fas fa-check text-green-400"></i> No credit card</span>
+            <span class="flex items-center gap-1.5"><i class="fas fa-check text-green-400"></i> 60-second delivery</span>
+            <span class="flex items-center gap-1.5"><i class="fas fa-check text-green-400"></i> Full CRM free</span>
+          </div>
+        </div>
+
+        <!-- Floating report preview -->
+        <div class="hidden lg:block">
+          <div class="bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-6 float-anim">
+            <div class="flex items-center gap-3 mb-4">
+              <div class="w-10 h-10 bg-cyan-500/20 rounded-lg flex items-center justify-center">
+                <i class="fas fa-file-alt text-cyan-400"></i>
+              </div>
+              <div>
+                <p class="font-bold text-white text-sm">Roof Measurement Report</p>
+                <p class="text-xs text-gray-400">Generated in 42 seconds</p>
+              </div>
+              <span class="ml-auto bg-green-500/20 text-green-300 text-xs px-2.5 py-1 rounded-full font-medium">HIGH Quality</span>
+            </div>
+            <div class="grid grid-cols-3 gap-3 mb-4">
+              <div class="bg-white/5 rounded-lg p-3 text-center">
+                <p class="text-xl font-bold text-cyan-300">3,826</p>
+                <p class="text-[10px] text-gray-500 uppercase">Area (ft²)</p>
+              </div>
+              <div class="bg-white/5 rounded-lg p-3 text-center">
+                <p class="text-xl font-bold text-blue-300">12</p>
+                <p class="text-[10px] text-gray-500 uppercase">Segments</p>
+              </div>
+              <div class="bg-white/5 rounded-lg p-3 text-center">
+                <p class="text-xl font-bold text-amber-300">21.6°</p>
+                <p class="text-[10px] text-gray-500 uppercase">Avg Pitch</p>
+              </div>
+            </div>
+            <div class="bg-white/5 rounded-lg p-3">
+              <div class="flex justify-between text-sm">
+                <span class="text-gray-400">Material Estimate</span>
+                <span class="font-bold text-white">$8,427 CAD</span>
+              </div>
+              <div class="flex justify-between text-xs text-gray-500 mt-1">
+                <span>132 bundles | 44 squares | 15% waste</span>
+                <span class="text-amber-400">Very Complex</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- WHAT YOU GET — Quick feature list -->
+  <section class="py-16 bg-gray-50">
+    <div class="max-w-6xl mx-auto px-4">
+      <div class="text-center mb-12 scroll-animate">
+        <h2 class="text-3xl font-black text-gray-900 mb-3 tracking-tight">What's in Every $8 Report</h2>
+        <p class="text-gray-500">Your first 3 are FREE. Full professional report, no restrictions.</p>
+      </div>
+      <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        ${[
+          { icon: 'fas fa-ruler-combined', title: 'True 3D Area', desc: 'Pitch-adjusted surface area, not footprint' },
+          { icon: 'fas fa-draw-polygon', title: 'Edge Breakdown', desc: 'Ridge, hip, valley, eave — plan & 3D' },
+          { icon: 'fas fa-boxes-stacked', title: 'Full Material BOM', desc: 'Shingles, underlayment, flashing, nails' },
+          { icon: 'fas fa-layer-group', title: 'Segment Analysis', desc: 'Pitch, azimuth, direction per plane' },
+          { icon: 'fas fa-solar-panel', title: 'Solar Potential', desc: 'Panel count & yearly energy — free' },
+          { icon: 'fas fa-chart-pie', title: 'Complexity Rating', desc: 'Waste factor & difficulty score' },
+        ].map(f => '<div class="scroll-animate bg-white rounded-xl p-5 border border-gray-200 hover:border-cyan-200 hover:shadow-lg transition-all"><div class="flex items-start gap-4"><div class="w-10 h-10 bg-cyan-50 rounded-lg flex items-center justify-center flex-shrink-0"><i class="' + f.icon + ' text-cyan-600"></i></div><div><h3 class="font-bold text-gray-900 text-sm mb-1">' + f.title + '</h3><p class="text-xs text-gray-500">' + f.desc + '</p></div></div></div>').join('')}
+      </div>
+    </div>
+  </section>
+
+  <!-- SOCIAL PROOF — Quick testimonials -->
+  <section class="py-16 bg-white">
+    <div class="max-w-4xl mx-auto px-4">
+      <div class="text-center mb-10 scroll-animate">
+        <h2 class="text-2xl font-black text-gray-900 tracking-tight">Trusted by Roofers Across Canada</h2>
+      </div>
+      <div class="grid md:grid-cols-3 gap-6">
+        ${[
+          { quote: 'Saves me 2 hours per estimate. I quote jobs from my truck now.', name: 'Mike D.', title: 'Calgary', avatar: 'MD' },
+          { quote: 'The BOM alone is worth $8. Supplier orders are dead accurate.', name: 'Sarah K.', title: 'Edmonton', avatar: 'SK' },
+          { quote: '15-20 estimates a week at $8 each. Way cheaper than drones.', name: 'James R.', title: 'Prairie Roofing', avatar: 'JR' }
+        ].map(t => '<div class="scroll-animate bg-gray-50 rounded-xl p-5 border border-gray-100"><div class="flex gap-1 mb-3">' + [1,2,3,4,5].map(() => '<i class="fas fa-star text-amber-400 text-xs"></i>').join('') + '</div><p class="text-sm text-gray-600 mb-4">"' + t.quote + '"</p><div class="flex items-center gap-2"><div class="w-8 h-8 bg-cyan-500 rounded-full flex items-center justify-center text-white text-xs font-bold">' + t.avatar + '</div><div><p class="text-sm font-semibold text-gray-800">' + t.name + '</p><p class="text-xs text-gray-400">' + t.title + '</p></div></div></div>').join('')}
+      </div>
+    </div>
+  </section>
+
+  <!-- PLATFORM PREVIEW — More than reports -->
+  <section class="py-16 bg-gradient-to-b from-gray-50 to-white">
+    <div class="max-w-6xl mx-auto px-4">
+      <div class="text-center mb-12 scroll-animate">
+        <h2 class="text-3xl font-black text-gray-900 mb-3 tracking-tight">More Than Just Reports</h2>
+        <p class="text-gray-500">A full business management platform for roofing companies.</p>
+      </div>
+      <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        ${[
+          { icon: 'fas fa-phone-alt', title: 'AI Phone Secretary', desc: '24/7 AI answers calls, books leads. $149/mo.', color: 'from-indigo-500 to-purple-500' },
+          { icon: 'fas fa-th-large', title: 'Full CRM', desc: 'Customers, invoices, proposals, jobs. FREE.', color: 'from-cyan-500 to-blue-500' },
+          { icon: 'fas fa-palette', title: 'Virtual Try-On', desc: 'AI roof visualization for homeowners.', color: 'from-pink-500 to-rose-500' },
+          { icon: 'fas fa-door-open', title: 'D2D Manager', desc: 'Door-to-door sales tracking & maps.', color: 'from-emerald-500 to-teal-500' },
+        ].map(f => '<div class="scroll-animate bg-white rounded-xl p-6 border border-gray-200 hover:shadow-xl transition-all text-center"><div class="w-12 h-12 mx-auto mb-3 rounded-xl bg-gradient-to-br ' + f.color + ' flex items-center justify-center"><i class="' + f.icon + ' text-white"></i></div><h3 class="font-bold text-gray-900 text-sm mb-1">' + f.title + '</h3><p class="text-xs text-gray-500">' + f.desc + '</p></div>').join('')}
+      </div>
+    </div>
+  </section>
+
+  <!-- FINAL CTA — Strong conversion -->
+  <section class="py-20 bg-gradient-to-br from-slate-900 via-cyan-900 to-slate-900 text-white relative overflow-hidden">
+    <div class="absolute inset-0 opacity-5">
+      <div class="absolute inset-0" style="background-image: radial-gradient(circle, white 1px, transparent 1px); background-size: 24px 24px;"></div>
+    </div>
+    <div class="relative max-w-3xl mx-auto px-4 text-center scroll-animate">
+      <h2 class="text-3xl lg:text-5xl font-black mb-6 tracking-tight leading-tight">
+        Your Next 3 Reports<br/>Are On Us
+      </h2>
+      <p class="text-lg text-gray-300 mb-10 max-w-xl mx-auto">
+        Sign up in 30 seconds, get 3 free professional roof measurement reports, and access the full CRM — no credit card required.
+      </p>
+      <a href="/customer/login" class="group inline-flex items-center gap-3 bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-400 hover:to-emerald-400 text-white font-bold py-4 px-12 rounded-xl text-lg shadow-2xl shadow-green-500/25 transition-all hover:scale-[1.02]">
+        <i class="fas fa-rocket"></i>
+        Start Free Now
+        <i class="fas fa-arrow-right text-sm group-hover:translate-x-1 transition-transform"></i>
+      </a>
+      <p class="text-sm text-gray-400 mt-6">Then $8 CAD per report. No subscriptions. Cancel anytime.</p>
+    </div>
+  </section>
+
+  <!-- Mini footer -->
+  <footer class="bg-slate-900 text-gray-500 py-8 border-t border-gray-800">
+    <div class="max-w-4xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div class="flex items-center gap-2">
+        <div class="w-6 h-6 bg-gradient-to-br from-cyan-500 to-blue-500 rounded flex items-center justify-center">
+          <i class="fas fa-home text-white text-[10px]"></i>
+        </div>
+        <span class="text-sm font-semibold text-gray-400">RoofReporterAI</span>
+      </div>
+      <div class="flex items-center gap-6 text-sm">
+        <a href="/" class="hover:text-cyan-400 transition-colors">Home</a>
+        <a href="/blog" class="hover:text-cyan-400 transition-colors">Blog</a>
+        <a href="/customer/login" class="hover:text-cyan-400 transition-colors">Login</a>
+        <a href="mailto:reports@reusecanada.ca" class="hover:text-cyan-400 transition-colors">Contact</a>
+      </div>
+      <p class="text-xs">&copy; 2026 RoofReporterAI</p>
+    </div>
+  </footer>
+
+  <script>
+    // Scroll animation
+    const obs = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) { entry.target.classList.add('animate-in'); obs.unobserve(entry.target); }
+      });
+    }, { threshold: 0.1 });
+    document.querySelectorAll('.scroll-animate').forEach(el => obs.observe(el));
+  </script>
   ${getRoverWidget()}
 </body>
 </html>`
