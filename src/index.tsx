@@ -22,6 +22,7 @@ import { analyticsRoutes } from './routes/analytics'
 import { virtualTryonRoutes } from './routes/virtual-tryon'
 import { teamRoutes } from './routes/team'
 import { agentsRoutes } from './routes/agents'
+import { workersAiRoutes } from './routes/workers-ai'
 import type { Bindings } from './types'
 
 const app = new Hono<{ Bindings: Bindings }>()
@@ -87,6 +88,7 @@ app.route('/api/analytics', analyticsRoutes)
 app.route('/api/virtual-tryon', virtualTryonRoutes)
 app.route('/api/team', teamRoutes)
 app.route('/api/agents', agentsRoutes)
+app.route('/api/workers-ai', workersAiRoutes)
 
 // Health check
 app.get('/api/health', (c) => {
@@ -128,7 +130,12 @@ app.get('/api/health', (c) => {
       GA4_MEASUREMENT_ID: (c.env as any).GA4_MEASUREMENT_ID || false,
       GA4_API_SECRET: !!(c.env as any).GA4_API_SECRET,
       GA4_PROPERTY_ID: (c.env as any).GA4_PROPERTY_ID || false,
-      DB: !!c.env.DB
+      DB: !!c.env.DB,
+      AI: !!(c.env as any).AI
+    },
+    workers_ai: {
+      available: !!(c.env as any).AI,
+      endpoints: ['/api/workers-ai/classify-roof', '/api/workers-ai/analyze-image', '/api/workers-ai/verify-measurements', '/api/workers-ai/enhance-report-text', '/api/workers-ai/assess-condition']
     },
     vertex_ai: {
       mode: c.env.GCP_SERVICE_ACCOUNT_KEY ? 'service_account_auto' :

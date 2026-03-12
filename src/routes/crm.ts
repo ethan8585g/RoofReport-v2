@@ -756,10 +756,29 @@ crmRoutes.get('/gmail/callback', async (c) => {
   }
 
   const clientId = (c.env as any).GMAIL_CLIENT_ID
-  const clientSecret = (c.env as any).GMAIL_CLIENT_SECRET
+  // BUG FIX: Read client_secret from DB if not in env (admin may have stored it via /api/auth/gmail/setup)
+  let clientSecret = (c.env as any).GMAIL_CLIENT_SECRET || ''
+  if (!clientSecret) {
+    try {
+      const csRow = await c.env.DB.prepare(
+        "SELECT setting_value FROM settings WHERE setting_key = 'gmail_client_secret' AND master_company_id = 1"
+      ).first<any>()
+      if (csRow?.setting_value) clientSecret = csRow.setting_value
+    } catch (e) { /* ignore */ }
+  }
 
   const url = new URL(c.req.url)
   const redirectUri = `${url.protocol}//${url.host}/api/crm/gmail/callback`
+
+  if (!clientId || !clientSecret) {
+    return c.html(`<!DOCTYPE html><html><head><title>Gmail Connection</title><script src="https://cdn.tailwindcss.com"></script></head>
+<body class="bg-gray-50 min-h-screen flex items-center justify-center"><div class="bg-white rounded-2xl shadow-xl p-8 max-w-md text-center">
+<div class="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4"><i class="fas fa-exclamation-triangle text-red-500 text-2xl"></i></div>
+<h2 class="text-xl font-bold text-gray-800 mb-2">Configuration Error</h2>
+<p class="text-gray-600 mb-4">Gmail OAuth credentials are not configured. Ask your admin to set up GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET.</p>
+<button onclick="window.close()" class="bg-sky-600 text-white px-6 py-2 rounded-lg font-semibold">Close</button>
+</div></body></html>`)
+  }
 
   // Exchange code for tokens
   const tokenResp = await fetch('https://oauth2.googleapis.com/token', {
@@ -883,7 +902,16 @@ crmRoutes.post('/proposals/:id/send', async (c) => {
 
   if (customer?.gmail_refresh_token && proposal.customer_email) {
     const clientId = (c.env as any).GMAIL_CLIENT_ID
-    const clientSecret = (c.env as any).GMAIL_CLIENT_SECRET
+    // Read client_secret from env or DB
+    let clientSecret = (c.env as any).GMAIL_CLIENT_SECRET || ''
+    if (!clientSecret) {
+      try {
+        const csRow = await c.env.DB.prepare(
+          "SELECT setting_value FROM settings WHERE setting_key = 'gmail_client_secret' AND master_company_id = 1"
+        ).first<any>()
+        if (csRow?.setting_value) clientSecret = csRow.setting_value
+      } catch (e) { /* ignore */ }
+    }
 
     if (clientId && clientSecret) {
       try {

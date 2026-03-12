@@ -1181,15 +1181,43 @@ reportsRoutes.post('/:orderId/generate-enhanced', async (c) => {
         console.log(`[Enhanced-Inline] Order ${orderId}: ✅ Polished (v${enhVer})`)
         trackReportEnhanced(c.env, String(orderId), { version: enhVer, enhanced: true }).catch(() => {})
 
-        // Send email with polished report
+        // Send email with polished report — try customer Gmail first, then platform
         if (email_report || autoEmailEnabled) {
           const recipient = to_email || (autoEmailEnabled ? autoEmailRecipient : '') || order.homeowner_email || order.requester_email
           if (recipient) {
             try {
               const emailHtml = buildEmailWrapper(enhHtml, order.property_address, `RM-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${String(orderId).padStart(4,'0')}`, recipient)
-              const rt = (c.env as any).GMAIL_REFRESH_TOKEN, ci = (c.env as any).GMAIL_CLIENT_ID, cs = (c.env as any).GMAIL_CLIENT_SECRET
-              if (rt && ci && cs) await sendGmailOAuth2(ci, cs, rt, recipient, `Roof Report - ${order.property_address}`, emailHtml, c.env.GMAIL_SENDER_EMAIL)
-              if (autoEmailEnabled) console.log(`[AutoEmail] Enhanced report ${orderId} auto-sent to ${recipient}`)
+              const ci = (c.env as any).GMAIL_CLIENT_ID
+              let cs = (c.env as any).GMAIL_CLIENT_SECRET
+              if (!cs) try { cs = (await repo.getSettingValue(c.env.DB, 'gmail_client_secret')) || '' } catch {}
+              let sent = false
+
+              // Try customer's connected Gmail first
+              if (!sent && ci && cs) {
+                try {
+                  const custGmail = await c.env.DB.prepare(
+                    'SELECT gmail_refresh_token, gmail_connected_email FROM customers c JOIN orders o ON o.customer_id=c.id WHERE o.id=?'
+                  ).bind(orderId).first<any>()
+                  if (custGmail?.gmail_refresh_token) {
+                    await sendGmailOAuth2(ci, cs, custGmail.gmail_refresh_token, recipient, `Roof Report - ${order.property_address}`, emailHtml, custGmail.gmail_connected_email)
+                    sent = true
+                    console.log(`[AutoEmail] Report ${orderId} sent via customer Gmail: ${custGmail.gmail_connected_email}`)
+                  }
+                } catch (custErr: any) {
+                  console.warn(`[AutoEmail] Customer Gmail failed: ${custErr.message}`)
+                }
+              }
+
+              // Fallback to platform Gmail
+              if (!sent) {
+                const rt = (c.env as any).GMAIL_REFRESH_TOKEN || await repo.getSettingValue(c.env.DB, 'gmail_refresh_token')
+                if (rt && ci && cs) {
+                  await sendGmailOAuth2(ci, cs, rt, recipient, `Roof Report - ${order.property_address}`, emailHtml, c.env.GMAIL_SENDER_EMAIL)
+                  sent = true
+                }
+              }
+
+              if (sent && autoEmailEnabled) console.log(`[AutoEmail] Enhanced report ${orderId} auto-sent to ${recipient}`)
             } catch {}
           }
         }
@@ -1337,6 +1365,7 @@ reportsRoutes.get('/cloud-ai/health', async (c) => {
 
 // ============================================================
 // POST /:orderId/email — Send report via email
+// Priority: 1) Customer's connected Gmail  2) Platform Gmail OAuth2  3) Resend API
 // ============================================================
 reportsRoutes.post('/:orderId/email', async (c) => {
   const orderId = c.req.param('orderId')
@@ -1352,21 +1381,62 @@ reportsRoutes.post('/:orderId/email', async (c) => {
   const subject = body?.subject_override || `Roof Measurement Report - ${order.property_address} [${reportNum}]`
   const emailHtml = buildEmailWrapper(reportHtml, order.property_address || 'Property', reportNum, recipient)
 
-  let rt = (c.env as any).GMAIL_REFRESH_TOKEN || await repo.getSettingValue(c.env.DB, 'gmail_refresh_token')
-  const ci = (c.env as any).GMAIL_CLIENT_ID
-  let cs = (c.env as any).GMAIL_CLIENT_SECRET || await repo.getSettingValue(c.env.DB, 'gmail_client_secret')
-  const resendKey = (c.env as any).RESEND_API_KEY
-  const sender = body?.from_email || c.env.GMAIL_SENDER_EMAIL || null
-
   let method = 'none'
-  if (rt && ci && cs) { await sendGmailOAuth2(ci, cs, rt, recipient, subject, emailHtml, sender); method = 'gmail_oauth2' }
-  else if (resendKey) { await sendViaResend(resendKey, recipient, subject, emailHtml, sender); method = 'resend' }
-  else return c.json({ error: 'No email provider configured', fallback_url: `/api/reports/${orderId}/html` }, 400)
+  let senderEmail = ''
 
-  await repo.logApiRequest(c.env.DB, orderId, 'email_sent', method, 200, 0, JSON.stringify({ to: recipient }))
+  // Priority 1: Try customer's own connected Gmail (roofer sends from their own email)
+  try {
+    const custGmail = await c.env.DB.prepare(
+      `SELECT c.gmail_refresh_token, c.gmail_connected_email, c.brand_business_name, c.name
+       FROM customers c JOIN orders o ON o.customer_id = c.id WHERE o.id = ?`
+    ).bind(orderId).first<any>()
+
+    if (custGmail?.gmail_refresh_token && custGmail?.gmail_connected_email) {
+      const ci = (c.env as any).GMAIL_CLIENT_ID
+      let cs = (c.env as any).GMAIL_CLIENT_SECRET || await repo.getSettingValue(c.env.DB, 'gmail_client_secret')
+      if (ci && cs) {
+        await sendGmailOAuth2(ci, cs, custGmail.gmail_refresh_token, recipient, subject, emailHtml, custGmail.gmail_connected_email)
+        method = 'customer_gmail'
+        senderEmail = custGmail.gmail_connected_email
+        console.log(`[Email] Report ${orderId} sent via customer Gmail: ${senderEmail}`)
+      }
+    }
+  } catch (e: any) {
+    console.warn(`[Email] Customer Gmail failed for order ${orderId}: ${e.message}`)
+  }
+
+  // Priority 2: Platform Gmail OAuth2 (admin configured)
+  if (method === 'none') {
+    let rt = (c.env as any).GMAIL_REFRESH_TOKEN || await repo.getSettingValue(c.env.DB, 'gmail_refresh_token')
+    const ci = (c.env as any).GMAIL_CLIENT_ID
+    let cs = (c.env as any).GMAIL_CLIENT_SECRET || await repo.getSettingValue(c.env.DB, 'gmail_client_secret')
+    const sender = body?.from_email || c.env.GMAIL_SENDER_EMAIL || null
+    if (rt && ci && cs) {
+      await sendGmailOAuth2(ci, cs, rt, recipient, subject, emailHtml, sender)
+      method = 'gmail_oauth2'
+      senderEmail = sender || 'platform'
+    }
+  }
+
+  // Priority 3: Resend API
+  if (method === 'none') {
+    const resendKey = (c.env as any).RESEND_API_KEY
+    const sender = body?.from_email || c.env.GMAIL_SENDER_EMAIL || null
+    if (resendKey) {
+      await sendViaResend(resendKey, recipient, subject, emailHtml, sender)
+      method = 'resend'
+      senderEmail = sender || 'resend'
+    }
+  }
+
+  if (method === 'none') {
+    return c.json({ error: 'No email provider configured. Connect your Gmail at Dashboard → Settings, or ask admin to configure email.', fallback_url: `/api/reports/${orderId}/html` }, 400)
+  }
+
+  await repo.logApiRequest(c.env.DB, orderId, 'email_sent', method, 200, 0, JSON.stringify({ to: recipient, from: senderEmail, method }))
   // Track email event in GA4 (non-blocking)
   trackEmailSent(c.env as any, 'report_email', recipient, { order_id: orderId, method }).catch(() => {})
-  return c.json({ success: true, to: recipient, method })
+  return c.json({ success: true, to: recipient, method, from: senderEmail })
 })
 
 // ============================================================
