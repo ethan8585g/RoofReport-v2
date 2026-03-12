@@ -33,7 +33,7 @@ const SQ_PER_UNDERLAY   = 4
 const LF_PER_RIDGE_BUNDLE = 35
 const ICE_SHIELD_WIDTH_FT = 3.0
 const NAIL_LBS_PER_SQ   = 2.5
-const SNAP_THRESHOLD_M   = 0.3
+const SNAP_THRESHOLD_M   = 0.15  // ~6 inches — lowered from 0.3 to avoid collapsing short dormers/returns
 const DEG_TO_RAD = Math.PI / 180
 
 // ═══════════════════════════════════════════════════════════════
@@ -251,6 +251,12 @@ function _parsePitchRise(s: string): number {
 // COORDINATE PROJECTION: WGS84 → Local Cartesian (metres)
 // ═══════════════════════════════════════════════════════════════
 
+// Elevation unit constant: set to 1.0 if elevation is already in metres,
+// set to 0.3048 if elevation arrives in feet.
+// Our trace UI sends NO elevation (null), and DSM data is in metres,
+// so this is 1.0 by default. Override in payload if needed.
+const ELEVATION_TO_METRES = 1.0
+
 function projectToCartesian(pts: TracePt[]): { origin: { lat: number; lng: number }; projected: CartesianPt[] } {
   if (pts.length === 0) return { origin: { lat: 0, lng: 0 }, projected: [] }
 
@@ -266,7 +272,7 @@ function projectToCartesian(pts: TracePt[]): { origin: { lat: number; lng: numbe
   const projected: CartesianPt[] = pts.map(p => ({
     x: (p.lng - originLng) * mPerDegLng,
     y: (p.lat - originLat) * mPerDegLat,
-    z: (p.elevation != null ? p.elevation : 0),
+    z: (p.elevation != null ? p.elevation * ELEVATION_TO_METRES : 0),
     lat: p.lat,
     lng: p.lng,
   }))
@@ -281,7 +287,7 @@ function projectPoint(p: TracePt, originLat: number, originLng: number): Cartesi
   return {
     x: (p.lng - originLng) * mPerDegLng,
     y: (p.lat - originLat) * mPerDegLat,
-    z: (p.elevation != null ? p.elevation : 0),
+    z: (p.elevation != null ? p.elevation * ELEVATION_TO_METRES : 0),
     lat: p.lat,
     lng: p.lng,
   }
@@ -721,7 +727,7 @@ export class RoofMeasurementEngine {
   private parseLines(raw: any[]): TraceLine[] {
     return raw.map(seg => ({
       id:    seg.id || '',
-      pitch: seg.pitch != null ? Number(seg.pitch) : null,
+      pitch: seg.pitch != null ? this.safeParsePitch(seg.pitch) : null,
       pts:   (seg.pts || []).map((p: any) => ({
         lat: Number(p.lat), lng: Number(p.lng),
         elevation: p.elevation != null ? Number(p.elevation) : null
@@ -736,15 +742,43 @@ export class RoofMeasurementEngine {
         lat: Number(p.lat), lng: Number(p.lng),
         elevation: p.elevation != null ? Number(p.elevation) : null
       })),
-      pitch: Number(f.pitch ?? this.defPitch),
+      pitch: this.safeParsePitch(f.pitch ?? this.defPitch),
       label: f.label || 'face'
     }))
+  }
+
+  /**
+   * Safely parse a pitch value that may be:
+   *   - A number (6.0)       → returned as-is
+   *   - A string "6:12"      → parsed to rise (6.0)
+   *   - A string "6/12"      → parsed to rise (6.0)
+   *   - A string "6"         → parsed to float (6.0)
+   *   - NaN / invalid        → falls back to this.defPitch
+   */
+  private safeParsePitch(value: any): number {
+    if (value == null) return this.defPitch
+
+    // Already a valid number
+    if (typeof value === 'number' && !isNaN(value)) return value
+
+    // String: try "rise:12" or "rise/12" format first
+    const s = String(value).trim()
+    const ratioMatch = s.match(/^(\d+(?:\.\d+)?)\s*[:/]\s*12$/)
+    if (ratioMatch) return parseFloat(ratioMatch[1])
+
+    // String: try plain numeric
+    const num = parseFloat(s)
+    if (!isNaN(num)) return num
+
+    // Unparseable — fall back to default pitch
+    console.warn(`[Engine] Cannot parse pitch value "${value}" — using default ${this.defPitch}`)
+    return this.defPitch
   }
 
   private projectLines(lines: TraceLine[], prefix: string): { id: string; pts: CartesianPt[]; pitch: number | null; slope_ref: string }[] {
     return lines.map((seg, i) => ({
       id: seg.id || `${prefix}_${i + 1}`,
-      pitch: seg.pitch != null ? Number(seg.pitch) : null,
+      pitch: seg.pitch != null ? this.safeParsePitch(seg.pitch) : null,
       slope_ref: (seg as any).slope_ref || 'default',
       pts: seg.pts.map((p, j) => {
         const cp = projectPoint(p, this.origin.lat, this.origin.lng)
@@ -768,7 +802,7 @@ export class RoofMeasurementEngine {
     }
 
     // Use explicit pitch override if set on the line
-    if (seg.pitch != null) {
+    if (seg.pitch != null && !isNaN(seg.pitch)) {
       return { theta: pitchAngleRad(seg.pitch), isBiSlope: false }
     }
 
@@ -894,8 +928,10 @@ export class RoofMeasurementEngine {
       const horizM = polyline2DLengthM(seg.pts)
       const { theta, isBiSlope } = this.resolveTheta(seg)
 
+      // Only use 3D distance if BOTH endpoints have meaningful elevation data
+      // (z > 0.001 to avoid floating-point noise from zero-elevation)
       const hasZ = seg.pts.length >= 2 &&
-        seg.pts[0].z !== 0 && seg.pts[seg.pts.length - 1].z !== 0
+        Math.abs(seg.pts[0].z) > 0.001 && Math.abs(seg.pts[seg.pts.length - 1].z) > 0.001
 
       const { sloped, commonRunFt, deltaZFt } = this.computeTrueLength(
         horizM, theta, kind, seg.pts, hasZ
