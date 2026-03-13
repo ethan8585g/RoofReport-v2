@@ -6,22 +6,18 @@
 
 import { Hono } from 'hono'
 import type { Bindings } from '../types'
+import { validateAdminSession, requireSuperadmin } from './auth'
 
 export const metaConnectRoutes = new Hono<{ Bindings: Bindings }>()
 
 const META_GRAPH_API = 'https://graph.facebook.com/v21.0'
 
 // ── Superadmin auth guard ──
+// Uses admin_sessions + admin_users.role (NOT customer_sessions)
+// The customers table does not have a 'role' column — admin_users does.
 async function requireSuperAdmin(c: any): Promise<boolean> {
-  const auth = c.req.header('Authorization')
-  if (!auth?.startsWith('Bearer ')) return false
-  const token = auth.slice(7)
-  const session = await c.env.DB.prepare(
-    `SELECT cs.customer_id, cu.email, cu.role FROM customer_sessions cs 
-     JOIN customers cu ON cu.id = cs.customer_id 
-     WHERE cs.session_token = ? AND cs.expires_at > datetime('now')`
-  ).bind(token).first<any>()
-  return session?.role === 'superadmin'
+  const admin = await validateAdminSession(c.env.DB, c.req.header('Authorization'))
+  return requireSuperadmin(admin)
 }
 
 metaConnectRoutes.use('/*', async (c, next) => {
