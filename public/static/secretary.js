@@ -24,6 +24,17 @@
     calls: [],
     activeTab: 'setup',
     saving: false,
+    // Mode
+    secretaryMode: 'directory',
+    // Messages (answering mode)
+    messages: [],
+    unreadCount: 0,
+    // Appointments (full mode)
+    appointments: [],
+    pendingAppts: 0,
+    // Callbacks (full mode)
+    callbacks: [],
+    pendingCallbacks: 0,
     // Phone connection state
     phoneSetup: null,
     carriers: [],
@@ -62,6 +73,7 @@
         state.totalCalls = data.total_calls;
         state.isConfigured = data.is_configured;
         state.isActive = data.is_active;
+        state.secretaryMode = data.secretary_mode || (data.config && data.config.secretary_mode) || 'directory';
       }
     } catch(e) { console.error('Failed to load status', e); }
 
@@ -109,12 +121,18 @@
       '<div class="flex flex-wrap gap-2 mb-6">' +
         tabBtn('setup', 'fa-cog', 'Setup & Config') +
         tabBtn('connect', 'fa-phone-alt', 'Connect Phone') +
-        tabBtn('calls', 'fa-phone-volume', 'Call Log' + (state.totalCalls > 0 ? ' (' + state.totalCalls + ')' : '')) +
+        (state.secretaryMode === 'answering' ? tabBtn('messages', 'fa-envelope', 'Messages' + (state.unreadCount > 0 ? ' (' + state.unreadCount + ')' : '')) : '') +
+        (state.secretaryMode === 'full' ? tabBtn('appointments', 'fa-calendar-check', 'Appointments' + (state.pendingAppts > 0 ? ' (' + state.pendingAppts + ')' : '')) : '') +
+        (state.secretaryMode === 'full' ? tabBtn('callbacks', 'fa-phone-volume', 'Callbacks' + (state.pendingCallbacks > 0 ? ' (' + state.pendingCallbacks + ')' : '')) : '') +
+        tabBtn('calls', 'fa-history', 'Call Log' + (state.totalCalls > 0 ? ' (' + state.totalCalls + ')' : '')) +
       '</div>' +
       '<div id="secContent"></div>';
 
     if (state.activeTab === 'setup') renderSetupTab();
     else if (state.activeTab === 'connect') renderConnectTab();
+    else if (state.activeTab === 'messages') loadAndRenderMessages();
+    else if (state.activeTab === 'appointments') loadAndRenderAppointments();
+    else if (state.activeTab === 'callbacks') loadAndRenderCallbacks();
     else if (state.activeTab === 'calls') renderCallsTab();
   }
 
@@ -130,7 +148,7 @@
       (needsAttention ? ' <span class="w-2 h-2 bg-amber-500 rounded-full"></span>' : '') +
       '</button>';
   }
-  window.secSetTab = function(t) { state.activeTab = t; render(); if (t === 'calls') loadCalls(); };
+  window.secSetTab = function(t) { state.activeTab = t; render(); if (t === 'calls') loadCalls(); if (t === 'messages') loadAndRenderMessages(); if (t === 'appointments') loadAndRenderAppointments(); if (t === 'callbacks') loadAndRenderCallbacks(); };
 
   // ============================================================
   // SUBSCRIPTION PAGE
@@ -240,6 +258,23 @@
 
     content.innerHTML = statusHtml +
 
+      // MODE SELECTOR — 3 Secretary Modes
+      '<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-6">' +
+        '<h3 class="font-bold text-gray-800 text-lg mb-1"><i class="fas fa-sliders-h text-sky-500 mr-2"></i>Secretary Mode</h3>' +
+        '<p class="text-gray-500 text-sm mb-4">Choose how your AI secretary operates</p>' +
+        '<div class="grid grid-cols-1 md:grid-cols-3 gap-4">' +
+          modeCard('directory', 'fa-sitemap', 'Directory Service',
+            'Routes callers to departments. "Press 1 for Sales, 2 for Service…" Clean, professional call routing.',
+            '#0ea5e9', '#f0f9ff') +
+          modeCard('answering', 'fa-phone-volume', 'Never-Voicemail Answering',
+            'Every call gets a live response. Takes messages, flags urgents, forwards emergencies. No voicemail ever.',
+            '#8b5cf6', '#f5f3ff') +
+          modeCard('full', 'fa-user-tie', 'Full AI Secretary',
+            'Your main office line. Books appointments, answers FAQs, schedules callbacks, sends emails. Does it all.',
+            '#059669', '#ecfdf5') +
+        '</div>' +
+      '</div>' +
+
       // STEP 1: Phone & Greeting
       '<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-6">' +
         '<h3 class="font-bold text-gray-800 text-lg mb-1"><span class="inline-flex items-center justify-center w-7 h-7 bg-sky-500 text-white rounded-full text-sm font-bold mr-2">1</span>Phone & Greeting Setup</h3>' +
@@ -271,7 +306,126 @@
         '<div class="ml-9 mt-4 flex gap-3">' +
           '<button onclick="secAddDir()" id="addDirBtn" class="px-4 py-2 bg-gray-100 text-gray-600 rounded-xl text-sm font-medium hover:bg-gray-200 transition-all ' + (dirs.length >= 4 ? 'opacity-50 cursor-not-allowed' : '') + '" ' + (dirs.length >= 4 ? 'disabled' : '') + '><i class="fas fa-plus mr-1"></i>Add Directory</button>' +
           '<button onclick="secSaveDirs()" id="saveDirsBtn" class="px-6 py-2 bg-sky-500 text-white rounded-xl text-sm font-semibold hover:bg-sky-600 transition-all shadow"><i class="fas fa-save mr-2"></i>Save Directories</button>' +
-        '</div></div>';
+        '</div></div>' +
+
+      // MODE-SPECIFIC CONFIG
+      renderModeSpecificConfig(c);
+  }
+
+  // ── Mode-specific config sections ──
+  function renderModeSpecificConfig(c) {
+    var mode = state.secretaryMode;
+    var el = document.getElementById('secContent');
+    if (!el) return;
+
+    if (mode === 'answering') {
+      el.innerHTML += renderAnsweringConfig(c);
+    } else if (mode === 'full') {
+      el.innerHTML += renderFullSecretaryConfig(c);
+    }
+  }
+
+  function renderAnsweringConfig(c) {
+    var fallback = c.answering_fallback_action || 'take_message';
+    var fwdNum = c.answering_forward_number || '';
+    var notifyEmail = c.answering_notify_email || '';
+    return '<div class="bg-white rounded-2xl border-2 border-purple-200 shadow-sm p-6 mb-6">' +
+      '<h3 class="font-bold text-gray-800 text-lg mb-1"><span class="inline-flex items-center justify-center w-7 h-7 bg-purple-500 text-white rounded-full text-sm font-bold mr-2"><i class="fas fa-phone-volume text-xs"></i></span>Never-Voicemail Answering Settings</h3>' +
+      '<p class="text-gray-500 text-sm mb-4 ml-9">Configure how the AI handles calls when you can\'t answer</p>' +
+      '<div class="space-y-4 ml-9">' +
+        '<div>' +
+          '<label class="block text-sm font-semibold text-gray-700 mb-2"><i class="fas fa-route mr-1 text-purple-500"></i>When a caller reaches the AI:</label>' +
+          '<div class="space-y-2">' +
+            radioOpt('answering_fallback', 'take_message', 'Take a detailed message', fallback) +
+            radioOpt('answering_fallback', 'forward_urgent', 'Take message — forward URGENT calls to a number', fallback) +
+            radioOpt('answering_fallback', 'always_forward', 'Take message then offer to transfer caller', fallback) +
+          '</div>' +
+        '</div>' +
+        '<div id="answeringFwdWrap" class="' + (fallback === 'take_message' ? 'hidden' : '') + '">' +
+          '<label class="block text-sm font-semibold text-gray-700 mb-1"><i class="fas fa-phone mr-1 text-purple-500"></i>Forward-to Number</label>' +
+          '<input type="tel" id="answeringFwdNum" value="' + esc(fwdNum) + '" placeholder="(780) 555-0199" class="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-purple-400 focus:border-purple-400">' +
+          '<p class="text-xs text-gray-400 mt-1">For urgent/emergency calls that need to be forwarded immediately</p>' +
+        '</div>' +
+        '<div class="grid grid-cols-1 md:grid-cols-2 gap-4">' +
+          '<label class="flex items-center gap-3 p-3 bg-purple-50 rounded-xl cursor-pointer"><input type="checkbox" id="answeringSms" ' + (c.answering_sms_notify !== 0 ? 'checked' : '') + ' class="w-4 h-4 text-purple-500 rounded"><span class="text-sm text-gray-700"><i class="fas fa-sms text-purple-400 mr-1"></i>SMS notify after each call</span></label>' +
+          '<label class="flex items-center gap-3 p-3 bg-purple-50 rounded-xl cursor-pointer"><input type="checkbox" id="answeringEmail" ' + (c.answering_email_notify !== 0 ? 'checked' : '') + ' class="w-4 h-4 text-purple-500 rounded"><span class="text-sm text-gray-700"><i class="fas fa-envelope text-purple-400 mr-1"></i>Email notify after each call</span></label>' +
+        '</div>' +
+        '<div>' +
+          '<label class="block text-sm font-semibold text-gray-700 mb-1"><i class="fas fa-at mr-1 text-purple-500"></i>Notification Email</label>' +
+          '<input type="email" id="answeringNotifyEmail" value="' + esc(notifyEmail) + '" placeholder="owner@yourroofing.ca" class="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-purple-400 focus:border-purple-400">' +
+        '</div>' +
+        '<button onclick="secSaveConfig()" class="px-6 py-3 bg-purple-500 text-white rounded-xl font-semibold text-sm hover:bg-purple-600 transition-all shadow"><i class="fas fa-save mr-2"></i>Save Answering Settings</button>' +
+      '</div></div>';
+  }
+
+  function renderFullSecretaryConfig(c) {
+    var hrs = {};
+    try { hrs = JSON.parse(c.full_business_hours || '{}'); } catch(e) {}
+    var days = [['mon','Monday'],['tue','Tuesday'],['wed','Wednesday'],['thu','Thursday'],['fri','Friday'],['sat','Saturday'],['sun','Sunday']];
+
+    return '<div class="bg-white rounded-2xl border-2 border-emerald-200 shadow-sm p-6 mb-6">' +
+      '<h3 class="font-bold text-gray-800 text-lg mb-1"><span class="inline-flex items-center justify-center w-7 h-7 bg-emerald-500 text-white rounded-full text-sm font-bold mr-2"><i class="fas fa-user-tie text-xs"></i></span>Full AI Secretary Settings</h3>' +
+      '<p class="text-gray-500 text-sm mb-4 ml-9">Your AI secretary\'s full capabilities — it can do everything a real secretary does</p>' +
+      '<div class="space-y-4 ml-9">' +
+
+        // Capabilities toggles
+        '<div><label class="block text-sm font-semibold text-gray-700 mb-2"><i class="fas fa-tasks mr-1 text-emerald-500"></i>Capabilities</label>' +
+        '<div class="grid grid-cols-1 md:grid-cols-2 gap-2">' +
+          capToggle('fullBookAppts', 'fa-calendar-check', 'Book appointments & estimates', c.full_can_book_appointments !== 0) +
+          capToggle('fullAnswerFaq', 'fa-question-circle', 'Answer FAQs about your business', c.full_can_answer_faq !== 0) +
+          capToggle('fullScheduleCallback', 'fa-phone-volume', 'Schedule callback requests', c.full_can_schedule_callback !== 0) +
+          capToggle('fullSendEmail', 'fa-envelope', 'Send follow-up emails', c.full_can_send_email !== 0) +
+          capToggle('fullTakePayment', 'fa-credit-card', 'Collect payment/deposit info', c.full_can_take_payment_info === 1) +
+        '</div></div>' +
+
+        // Business hours
+        '<div><label class="block text-sm font-semibold text-gray-700 mb-2"><i class="fas fa-clock mr-1 text-emerald-500"></i>Business Hours</label>' +
+        '<div class="grid grid-cols-2 md:grid-cols-4 gap-2">' +
+          days.map(function(d) {
+            return '<div class="bg-gray-50 rounded-lg p-2">' +
+              '<label class="block text-xs font-medium text-gray-600 mb-1">' + d[1] + '</label>' +
+              '<input type="text" id="fullHrs_' + d[0] + '" value="' + esc(hrs[d[0]] || (d[0] === 'sat' || d[0] === 'sun' ? 'closed' : '9:00-17:00')) + '" placeholder="9:00-17:00 or closed" class="w-full border border-gray-300 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-emerald-400">' +
+            '</div>';
+          }).join('') +
+        '</div></div>' +
+
+        // Services & info
+        '<div class="grid grid-cols-1 md:grid-cols-2 gap-4">' +
+          '<div><label class="block text-sm font-semibold text-gray-700 mb-1"><i class="fas fa-tools mr-1 text-emerald-500"></i>Services Offered</label>' +
+            '<textarea id="fullServices" rows="4" placeholder="Free roof estimates and inspections\nShingle repair and replacement\nFlat roof systems (TPO, EPDM)\nMetal roofing installation\nEmergency leak repairs (same-day)\nGutter installation and repair\nStorm damage assessment\nInsurance claim assistance" class="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-emerald-400 resize-none">' + esc(c.full_services_offered || '') + '</textarea></div>' +
+          '<div><label class="block text-sm font-semibold text-gray-700 mb-1"><i class="fas fa-dollar-sign mr-1 text-emerald-500"></i>Pricing Info (what AI can share)</label>' +
+            '<textarea id="fullPricing" rows="4" placeholder="Free estimates — we come to you\nRoof inspections: Free\nMinor repairs: Starting from $250\nFull replacements: Starting from $5,000\nWe match any written quote\nFinancing available OAC" class="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-emerald-400 resize-none">' + esc(c.full_pricing_info || '') + '</textarea></div>' +
+        '</div>' +
+
+        '<div class="grid grid-cols-1 md:grid-cols-2 gap-4">' +
+          '<div><label class="block text-sm font-semibold text-gray-700 mb-1"><i class="fas fa-map-marker-alt mr-1 text-emerald-500"></i>Service Area</label>' +
+            '<input type="text" id="fullServiceArea" value="' + esc(c.full_service_area || '') + '" placeholder="Edmonton, Sherwood Park, St. Albert, Spruce Grove, Leduc + 100km" class="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-emerald-400"></div>' +
+          '<div><label class="block text-sm font-semibold text-gray-700 mb-1"><i class="fas fa-link mr-1 text-emerald-500"></i>Online Booking Link (optional)</label>' +
+            '<input type="text" id="fullBookingLink" value="' + esc(c.full_booking_link || '') + '" placeholder="https://calendly.com/yourbusiness" class="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-emerald-400"></div>' +
+        '</div>' +
+
+        // Email settings
+        '<div class="grid grid-cols-1 md:grid-cols-2 gap-4">' +
+          '<div><label class="block text-sm font-semibold text-gray-700 mb-1"><i class="fas fa-signature mr-1 text-emerald-500"></i>Email From Name</label>' +
+            '<input type="text" id="fullEmailFromName" value="' + esc(c.full_email_from_name || '') + '" placeholder="Reuse Canada Roofing" class="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-emerald-400"></div>' +
+          '<div><label class="block text-sm font-semibold text-gray-700 mb-1"><i class="fas fa-file-signature mr-1 text-emerald-500"></i>Email Signature</label>' +
+            '<input type="text" id="fullEmailSig" value="' + esc(c.full_email_signature || '') + '" placeholder="Best regards, The Reuse Canada Roofing Team" class="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-emerald-400"></div>' +
+        '</div>' +
+
+        '<button onclick="secSaveConfig()" class="px-6 py-3 bg-emerald-500 text-white rounded-xl font-semibold text-sm hover:bg-emerald-600 transition-all shadow"><i class="fas fa-save mr-2"></i>Save Full Secretary Settings</button>' +
+      '</div></div>';
+  }
+
+  function radioOpt(name, value, label, current) {
+    return '<label class="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 cursor-pointer">' +
+      '<input type="radio" name="' + name + '" value="' + value + '" ' + (current === value ? 'checked' : '') + ' onchange="document.getElementById(\'answeringFwdWrap\').classList.toggle(\'hidden\', this.value===\'take_message\')" class="w-4 h-4 text-purple-500">' +
+      '<span class="text-sm text-gray-700">' + label + '</span></label>';
+  }
+
+  function capToggle(id, icon, label, checked) {
+    return '<label class="flex items-center gap-3 p-3 bg-emerald-50 rounded-xl cursor-pointer">' +
+      '<input type="checkbox" id="' + id + '" ' + (checked ? 'checked' : '') + ' class="w-4 h-4 text-emerald-500 rounded">' +
+      '<span class="text-sm text-gray-700"><i class="fas ' + icon + ' text-emerald-400 mr-1"></i>' + label + '</span></label>';
   }
 
   function dirCard(d, i) {
@@ -289,6 +443,25 @@
           '<input type="text" id="dirNotes' + i + '" value="' + esc(d.special_notes || '') + '" placeholder="Hours, key info, special instructions..." class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-sky-400"></div>' +
       '</div></div>';
   }
+
+  function modeCard(mode, icon, title, desc, color, bg) {
+    var selected = state.secretaryMode === mode;
+    return '<div onclick="secSetMode(\'' + mode + '\')" class="cursor-pointer border-2 rounded-xl p-4 transition-all hover:shadow-md ' +
+      (selected ? 'border-[' + color + '] shadow-lg ring-2 ring-[' + color + ']/30' : 'border-gray-200 hover:border-gray-300') + '" ' +
+      'style="' + (selected ? 'border-color:' + color + ';background:' + bg : '') + '">' +
+      '<div class="flex items-center gap-3 mb-2">' +
+        '<div class="w-10 h-10 rounded-xl flex items-center justify-center" style="background:' + color + '20"><i class="fas ' + icon + '" style="color:' + color + ';font-size:16px"></i></div>' +
+        '<div class="flex-1"><p class="font-bold text-gray-800 text-sm">' + title + '</p></div>' +
+        (selected ? '<span class="w-5 h-5 bg-green-500 rounded-full flex items-center justify-center"><i class="fas fa-check text-white text-[10px]"></i></span>' : '<span class="w-5 h-5 border-2 border-gray-300 rounded-full"></span>') +
+      '</div>' +
+      '<p class="text-xs text-gray-500 leading-relaxed">' + desc + '</p>' +
+    '</div>';
+  }
+
+  window.secSetMode = function(mode) {
+    state.secretaryMode = mode;
+    render();
+  };
 
   // ============================================================
   // CONNECT PHONE TAB — The big new feature
@@ -758,6 +931,17 @@
   window.secSaveConfig = async function() {
     var btn = document.getElementById('saveConfigBtn');
     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Saving...'; }
+
+    // Build business hours object for full mode
+    var businessHours = {};
+    ['mon','tue','wed','thu','fri','sat','sun'].forEach(function(d) {
+      var el = document.getElementById('fullHrs_' + d);
+      if (el) businessHours[d] = el.value || 'closed';
+    });
+
+    // Gather answering fallback radio
+    var fallbackRadio = document.querySelector('input[name="answering_fallback"]:checked');
+
     try {
       var res = await fetch('/api/secretary/config', {
         method: 'POST', headers: authHeaders(),
@@ -766,10 +950,30 @@
           greeting_script: document.getElementById('secGreeting')?.value || '',
           common_qa: document.getElementById('secQA')?.value || '',
           general_notes: document.getElementById('secNotes')?.value || '',
+          secretary_mode: state.secretaryMode,
+          // Answering mode
+          answering_fallback_action: fallbackRadio ? fallbackRadio.value : 'take_message',
+          answering_forward_number: document.getElementById('answeringFwdNum')?.value || '',
+          answering_sms_notify: document.getElementById('answeringSms')?.checked ? 1 : 0,
+          answering_email_notify: document.getElementById('answeringEmail')?.checked ? 1 : 0,
+          answering_notify_email: document.getElementById('answeringNotifyEmail')?.value || '',
+          // Full mode
+          full_can_book_appointments: document.getElementById('fullBookAppts')?.checked ? 1 : 0,
+          full_can_send_email: document.getElementById('fullSendEmail')?.checked ? 1 : 0,
+          full_can_schedule_callback: document.getElementById('fullScheduleCallback')?.checked ? 1 : 0,
+          full_can_answer_faq: document.getElementById('fullAnswerFaq')?.checked ? 1 : 0,
+          full_can_take_payment_info: document.getElementById('fullTakePayment')?.checked ? 1 : 0,
+          full_business_hours: JSON.stringify(businessHours),
+          full_booking_link: document.getElementById('fullBookingLink')?.value || '',
+          full_services_offered: document.getElementById('fullServices')?.value || '',
+          full_pricing_info: document.getElementById('fullPricing')?.value || '',
+          full_service_area: document.getElementById('fullServiceArea')?.value || '',
+          full_email_from_name: document.getElementById('fullEmailFromName')?.value || '',
+          full_email_signature: document.getElementById('fullEmailSig')?.value || '',
         })
       });
       var data = await res.json();
-      if (data.success) { showToast('Configuration saved!', 'success'); await loadStatus(); }
+      if (data.success) { showToast('Configuration saved! Mode: ' + state.secretaryMode, 'success'); await loadStatus(); }
       else alert(data.error || 'Save failed');
     } catch(e) { alert('Network error'); }
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-save mr-2"></i>Save Configuration'; }
@@ -842,6 +1046,178 @@
     document.body.appendChild(toast);
     setTimeout(function() { toast.remove(); }, 3000);
   }
+
+  // ============================================================
+  // MESSAGES TAB (Answering Mode)
+  // ============================================================
+  async function loadAndRenderMessages() {
+    var content = document.getElementById('secContent');
+    if (!content) return;
+    content.innerHTML = '<div class="flex items-center justify-center py-12"><i class="fas fa-spinner fa-spin text-2xl text-purple-500"></i></div>';
+    try {
+      var res = await fetch('/api/secretary/messages?limit=50', { headers: authOnly() });
+      var data = await res.json();
+      state.messages = data.messages || [];
+      state.unreadCount = data.unread_count || 0;
+    } catch(e) {}
+    renderMessagesTab();
+  }
+
+  function renderMessagesTab() {
+    var content = document.getElementById('secContent');
+    if (!content) return;
+    var msgs = state.messages;
+
+    content.innerHTML =
+      '<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">' +
+        '<div class="flex items-center justify-between mb-4">' +
+          '<h3 class="font-bold text-gray-800 text-lg"><i class="fas fa-envelope text-purple-500 mr-2"></i>Messages' +
+            (state.unreadCount > 0 ? ' <span class="px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full text-xs font-bold">' + state.unreadCount + ' unread</span>' : '') + '</h3>' +
+          (state.unreadCount > 0 ? '<button onclick="secMarkAllRead()" class="text-xs text-purple-600 hover:text-purple-800 font-semibold"><i class="fas fa-check-double mr-1"></i>Mark All Read</button>' : '') +
+        '</div>' +
+        (msgs.length === 0 ? '<p class="text-gray-400 text-center py-8"><i class="fas fa-inbox text-3xl block mb-2"></i>No messages yet. When callers leave messages, they\'ll appear here.</p>' :
+          '<div class="space-y-3">' +
+            msgs.map(function(m) {
+              var unread = !m.is_read;
+              var urgentBadge = m.urgency === 'urgent' ? '<span class="px-2 py-0.5 bg-red-100 text-red-700 rounded-full text-[10px] font-bold">URGENT</span>' :
+                m.urgency === 'emergency' ? '<span class="px-2 py-0.5 bg-red-600 text-white rounded-full text-[10px] font-bold">EMERGENCY</span>' : '';
+              return '<div class="border ' + (unread ? 'border-purple-200 bg-purple-50' : 'border-gray-200 bg-gray-50') + ' rounded-xl p-4 ' + (unread ? 'ring-1 ring-purple-300' : '') + '">' +
+                '<div class="flex items-start justify-between mb-2">' +
+                  '<div class="flex items-center gap-2">' +
+                    (unread ? '<span class="w-2 h-2 bg-purple-500 rounded-full"></span>' : '') +
+                    '<span class="font-semibold text-gray-800 text-sm">' + esc(m.caller_name || 'Unknown Caller') + '</span>' +
+                    '<span class="text-gray-400 text-xs">' + esc(m.caller_phone || '') + '</span>' +
+                    urgentBadge +
+                  '</div>' +
+                  '<span class="text-gray-400 text-xs">' + new Date(m.created_at).toLocaleString() + '</span>' +
+                '</div>' +
+                '<p class="text-sm text-gray-700 leading-relaxed">' + esc(m.message_text) + '</p>' +
+                (unread ? '<button onclick="secMarkRead(' + m.id + ')" class="mt-2 text-xs text-purple-600 hover:text-purple-800 font-semibold"><i class="fas fa-check mr-1"></i>Mark Read</button>' : '') +
+              '</div>';
+            }).join('') +
+          '</div>') +
+      '</div>';
+  }
+
+  window.secMarkRead = async function(id) {
+    await fetch('/api/secretary/messages/' + id + '/read', { method: 'POST', headers: authHeaders() });
+    loadAndRenderMessages();
+  };
+  window.secMarkAllRead = async function() {
+    await fetch('/api/secretary/messages/read-all', { method: 'POST', headers: authHeaders() });
+    loadAndRenderMessages();
+  };
+
+  // ============================================================
+  // APPOINTMENTS TAB (Full Mode)
+  // ============================================================
+  async function loadAndRenderAppointments() {
+    var content = document.getElementById('secContent');
+    if (!content) return;
+    content.innerHTML = '<div class="flex items-center justify-center py-12"><i class="fas fa-spinner fa-spin text-2xl text-emerald-500"></i></div>';
+    try {
+      var res = await fetch('/api/secretary/appointments?limit=50', { headers: authOnly() });
+      var data = await res.json();
+      state.appointments = data.appointments || [];
+      state.pendingAppts = data.pending_count || 0;
+    } catch(e) {}
+    renderAppointmentsTab();
+  }
+
+  function renderAppointmentsTab() {
+    var content = document.getElementById('secContent');
+    if (!content) return;
+    var appts = state.appointments;
+
+    var statusColors = {
+      pending: 'bg-amber-100 text-amber-700',
+      confirmed: 'bg-green-100 text-green-700',
+      cancelled: 'bg-red-100 text-red-700',
+      completed: 'bg-blue-100 text-blue-700'
+    };
+
+    content.innerHTML =
+      '<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">' +
+        '<div class="flex items-center justify-between mb-4">' +
+          '<h3 class="font-bold text-gray-800 text-lg"><i class="fas fa-calendar-check text-emerald-500 mr-2"></i>Appointments' +
+            (state.pendingAppts > 0 ? ' <span class="px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full text-xs font-bold">' + state.pendingAppts + ' pending</span>' : '') + '</h3>' +
+        '</div>' +
+        (appts.length === 0 ? '<p class="text-gray-400 text-center py-8"><i class="fas fa-calendar text-3xl block mb-2"></i>No appointments yet. When the AI books appointments, they\'ll appear here.</p>' :
+          '<div class="overflow-x-auto"><table class="w-full text-sm">' +
+            '<thead><tr class="border-b border-gray-200"><th class="text-left py-2 px-3 text-xs font-semibold text-gray-500 uppercase">Caller</th><th class="text-left py-2 px-3 text-xs font-semibold text-gray-500 uppercase">Date/Time</th><th class="text-left py-2 px-3 text-xs font-semibold text-gray-500 uppercase">Type</th><th class="text-left py-2 px-3 text-xs font-semibold text-gray-500 uppercase">Address</th><th class="text-left py-2 px-3 text-xs font-semibold text-gray-500 uppercase">Status</th><th class="text-left py-2 px-3 text-xs font-semibold text-gray-500 uppercase">Actions</th></tr></thead>' +
+            '<tbody>' + appts.map(function(a) {
+              return '<tr class="border-b border-gray-100 hover:bg-gray-50">' +
+                '<td class="py-3 px-3"><div class="font-semibold text-gray-800">' + esc(a.caller_name || 'Unknown') + '</div><div class="text-xs text-gray-400">' + esc(a.caller_phone || '') + '</div></td>' +
+                '<td class="py-3 px-3 text-gray-700">' + esc(a.appointment_date || '—') + ' ' + esc(a.appointment_time || '') + '</td>' +
+                '<td class="py-3 px-3"><span class="px-2 py-0.5 bg-sky-100 text-sky-700 rounded text-xs">' + esc(a.appointment_type || 'estimate') + '</span></td>' +
+                '<td class="py-3 px-3 text-gray-600 text-xs">' + esc(a.property_address || '—') + '</td>' +
+                '<td class="py-3 px-3"><span class="px-2 py-0.5 rounded text-xs font-semibold ' + (statusColors[a.status] || 'bg-gray-100 text-gray-600') + '">' + esc(a.status) + '</span></td>' +
+                '<td class="py-3 px-3">' +
+                  (a.status === 'pending' ? '<button onclick="secUpdateAppt(' + a.id + ',\'confirmed\')" class="text-xs text-green-600 hover:text-green-800 font-semibold mr-2"><i class="fas fa-check mr-1"></i>Confirm</button>' +
+                    '<button onclick="secUpdateAppt(' + a.id + ',\'cancelled\')" class="text-xs text-red-500 hover:text-red-700 font-semibold"><i class="fas fa-times mr-1"></i>Cancel</button>' :
+                   a.status === 'confirmed' ? '<button onclick="secUpdateAppt(' + a.id + ',\'completed\')" class="text-xs text-blue-600 hover:text-blue-800 font-semibold"><i class="fas fa-check-double mr-1"></i>Complete</button>' : '—') +
+                '</td></tr>';
+            }).join('') + '</tbody></table></div>') +
+      '</div>';
+  }
+
+  window.secUpdateAppt = async function(id, status) {
+    await fetch('/api/secretary/appointments/' + id, { method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ status: status }) });
+    loadAndRenderAppointments();
+  };
+
+  // ============================================================
+  // CALLBACKS TAB (Full Mode)
+  // ============================================================
+  async function loadAndRenderCallbacks() {
+    var content = document.getElementById('secContent');
+    if (!content) return;
+    content.innerHTML = '<div class="flex items-center justify-center py-12"><i class="fas fa-spinner fa-spin text-2xl text-sky-500"></i></div>';
+    try {
+      var res = await fetch('/api/secretary/callbacks?limit=50', { headers: authOnly() });
+      var data = await res.json();
+      state.callbacks = data.callbacks || [];
+      state.pendingCallbacks = data.pending_count || 0;
+    } catch(e) {}
+    renderCallbacksTab();
+  }
+
+  function renderCallbacksTab() {
+    var content = document.getElementById('secContent');
+    if (!content) return;
+    var cbs = state.callbacks;
+
+    content.innerHTML =
+      '<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">' +
+        '<div class="flex items-center justify-between mb-4">' +
+          '<h3 class="font-bold text-gray-800 text-lg"><i class="fas fa-phone-volume text-sky-500 mr-2"></i>Scheduled Callbacks' +
+            (state.pendingCallbacks > 0 ? ' <span class="px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full text-xs font-bold">' + state.pendingCallbacks + ' pending</span>' : '') + '</h3>' +
+        '</div>' +
+        (cbs.length === 0 ? '<p class="text-gray-400 text-center py-8"><i class="fas fa-phone text-3xl block mb-2"></i>No callbacks yet. When the AI schedules callbacks, they\'ll appear here.</p>' :
+          '<div class="space-y-3">' + cbs.map(function(cb) {
+            var isPending = cb.status === 'pending';
+            return '<div class="border ' + (isPending ? 'border-amber-200 bg-amber-50' : 'border-gray-200 bg-gray-50') + ' rounded-xl p-4">' +
+              '<div class="flex items-start justify-between">' +
+                '<div>' +
+                  '<div class="font-semibold text-gray-800 text-sm">' + esc(cb.caller_name || 'Unknown') + ' — <a href="tel:' + esc(cb.caller_phone) + '" class="text-sky-600 hover:underline">' + formatPhone(cb.caller_phone) + '</a></div>' +
+                  (cb.preferred_time ? '<div class="text-xs text-gray-500 mt-1"><i class="fas fa-clock mr-1"></i>Preferred: ' + esc(cb.preferred_time) + '</div>' : '') +
+                  (cb.reason ? '<div class="text-sm text-gray-600 mt-1">' + esc(cb.reason) + '</div>' : '') +
+                  '<div class="text-xs text-gray-400 mt-1">' + new Date(cb.created_at).toLocaleString() + '</div>' +
+                '</div>' +
+                '<div class="flex items-center gap-2">' +
+                  '<span class="px-2 py-0.5 rounded text-xs font-semibold ' + (isPending ? 'bg-amber-100 text-amber-700' : cb.status === 'completed' ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-600') + '">' + esc(cb.status) + '</span>' +
+                  (isPending ? '<button onclick="secUpdateCallback(' + cb.id + ',\'completed\')" class="text-xs text-green-600 hover:text-green-800 font-semibold px-2 py-1 bg-green-50 rounded"><i class="fas fa-check mr-1"></i>Done</button>' : '') +
+                '</div>' +
+              '</div>' +
+            '</div>';
+          }).join('') + '</div>') +
+      '</div>';
+  }
+
+  window.secUpdateCallback = async function(id, status) {
+    await fetch('/api/secretary/callbacks/' + id, { method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ status: status }) });
+    loadAndRenderCallbacks();
+  };
 
   init();
 })();

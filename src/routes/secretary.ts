@@ -259,19 +259,36 @@ secretaryRoutes.get('/status', async (c) => {
     is_configured: !!(config?.business_phone && config?.greeting_script),
     is_active: config?.is_active === 1,
     is_dev: isDev,
+    secretary_mode: config?.secretary_mode || 'directory',
   })
 })
 
 // ============================================================
 // POST /config — Save/update phone answering configuration
+// Supports 3 modes: directory | answering | full
 // ============================================================
 secretaryRoutes.post('/config', async (c) => {
   const customerId = c.get('customerId' as any) as number
-  const { business_phone, greeting_script, common_qa, general_notes } = await c.req.json()
+  const body = await c.req.json()
+  const {
+    business_phone, greeting_script, common_qa, general_notes,
+    // Mode
+    secretary_mode = 'directory',
+    // Answering-mode fields
+    answering_fallback_action, answering_forward_number, answering_sms_notify,
+    answering_email_notify, answering_notify_email,
+    // Full-secretary-mode fields
+    full_can_book_appointments, full_can_send_email, full_can_schedule_callback,
+    full_can_answer_faq, full_can_take_payment_info, full_business_hours,
+    full_booking_link, full_services_offered, full_pricing_info,
+    full_service_area, full_email_from_name, full_email_signature,
+  } = body
 
   if (!business_phone) return c.json({ error: 'Business phone number is required' }, 400)
   if (!greeting_script) return c.json({ error: 'Greeting script is required' }, 400)
   if (general_notes && general_notes.length > 3000) return c.json({ error: 'General notes must be 3000 characters or less' }, 400)
+  const validModes = ['directory', 'answering', 'full']
+  if (!validModes.includes(secretary_mode)) return c.json({ error: 'secretary_mode must be directory, answering, or full' }, 400)
 
   try {
     const existing = await c.env.DB.prepare(
@@ -280,15 +297,55 @@ secretaryRoutes.post('/config', async (c) => {
 
     if (existing) {
       await c.env.DB.prepare(
-        `UPDATE secretary_config SET business_phone = ?, greeting_script = ?, common_qa = ?, general_notes = ?, updated_at = datetime('now') WHERE customer_id = ?`
-      ).bind(business_phone, greeting_script, common_qa || '', general_notes || '', customerId).run()
+        `UPDATE secretary_config SET
+          business_phone = ?, greeting_script = ?, common_qa = ?, general_notes = ?,
+          secretary_mode = ?,
+          answering_fallback_action = ?, answering_forward_number = ?,
+          answering_sms_notify = ?, answering_email_notify = ?, answering_notify_email = ?,
+          full_can_book_appointments = ?, full_can_send_email = ?, full_can_schedule_callback = ?,
+          full_can_answer_faq = ?, full_can_take_payment_info = ?, full_business_hours = ?,
+          full_booking_link = ?, full_services_offered = ?, full_pricing_info = ?,
+          full_service_area = ?, full_email_from_name = ?, full_email_signature = ?,
+          updated_at = datetime('now')
+        WHERE customer_id = ?`
+      ).bind(
+        business_phone, greeting_script, common_qa || '', general_notes || '',
+        secretary_mode,
+        answering_fallback_action || 'take_message', answering_forward_number || '',
+        answering_sms_notify ?? 1, answering_email_notify ?? 1, answering_notify_email || '',
+        full_can_book_appointments ?? 1, full_can_send_email ?? 1, full_can_schedule_callback ?? 1,
+        full_can_answer_faq ?? 1, full_can_take_payment_info ?? 0,
+        typeof full_business_hours === 'string' ? full_business_hours : JSON.stringify(full_business_hours || {}),
+        full_booking_link || '', full_services_offered || '', full_pricing_info || '',
+        full_service_area || '', full_email_from_name || '', full_email_signature || '',
+        customerId
+      ).run()
     } else {
       await c.env.DB.prepare(
-        `INSERT INTO secretary_config (customer_id, business_phone, greeting_script, common_qa, general_notes) VALUES (?, ?, ?, ?, ?)`
-      ).bind(customerId, business_phone, greeting_script, common_qa || '', general_notes || '').run()
+        `INSERT INTO secretary_config (
+          customer_id, business_phone, greeting_script, common_qa, general_notes,
+          secretary_mode,
+          answering_fallback_action, answering_forward_number,
+          answering_sms_notify, answering_email_notify, answering_notify_email,
+          full_can_book_appointments, full_can_send_email, full_can_schedule_callback,
+          full_can_answer_faq, full_can_take_payment_info, full_business_hours,
+          full_booking_link, full_services_offered, full_pricing_info,
+          full_service_area, full_email_from_name, full_email_signature
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+      ).bind(
+        customerId, business_phone, greeting_script, common_qa || '', general_notes || '',
+        secretary_mode,
+        answering_fallback_action || 'take_message', answering_forward_number || '',
+        answering_sms_notify ?? 1, answering_email_notify ?? 1, answering_notify_email || '',
+        full_can_book_appointments ?? 1, full_can_send_email ?? 1, full_can_schedule_callback ?? 1,
+        full_can_answer_faq ?? 1, full_can_take_payment_info ?? 0,
+        typeof full_business_hours === 'string' ? full_business_hours : JSON.stringify(full_business_hours || {}),
+        full_booking_link || '', full_services_offered || '', full_pricing_info || '',
+        full_service_area || '', full_email_from_name || '', full_email_signature || ''
+      ).run()
     }
 
-    return c.json({ success: true, message: 'Configuration saved' })
+    return c.json({ success: true, message: `Configuration saved (mode: ${secretary_mode})` })
   } catch (err: any) {
     return c.json({ error: 'Failed to save config', details: err.message }, 500)
   }
@@ -442,15 +499,53 @@ secretaryRoutes.post('/livekit-token', async (c) => {
     `SELECT name, phone_or_action, special_notes FROM secretary_directories WHERE config_id = ? ORDER BY sort_order`
   ).bind(config.id).all<any>()
 
-  // Build agent metadata with all config
-  const metadata = JSON.stringify({
+  // Build agent metadata with all config — mode-aware
+  const mode = config.secretary_mode || 'directory'
+  const baseMetadata: any = {
     customer_id: customerId,
     business_phone: config.business_phone,
     greeting_script: config.greeting_script,
     common_qa: config.common_qa,
     general_notes: config.general_notes,
     directories: dirs.results || [],
-  })
+    secretary_mode: mode,
+    agent_name: config.agent_name || 'Sarah',
+    agent_voice: config.agent_voice || 'alloy',
+  }
+
+  // Add mode-specific data
+  if (mode === 'answering') {
+    baseMetadata.answering = {
+      fallback_action: config.answering_fallback_action || 'take_message',
+      forward_number: config.answering_forward_number || '',
+      sms_notify: config.answering_sms_notify,
+      email_notify: config.answering_email_notify,
+      notify_email: config.answering_notify_email || '',
+    }
+    baseMetadata.system_prompt = buildAnsweringPrompt(config, dirs.results || [])
+  } else if (mode === 'full') {
+    let businessHours = {}
+    try { businessHours = JSON.parse(config.full_business_hours || '{}') } catch {}
+    baseMetadata.full = {
+      can_book_appointments: config.full_can_book_appointments,
+      can_send_email: config.full_can_send_email,
+      can_schedule_callback: config.full_can_schedule_callback,
+      can_answer_faq: config.full_can_answer_faq,
+      can_take_payment_info: config.full_can_take_payment_info,
+      business_hours: businessHours,
+      booking_link: config.full_booking_link || '',
+      services_offered: config.full_services_offered || '',
+      pricing_info: config.full_pricing_info || '',
+      service_area: config.full_service_area || '',
+      email_from_name: config.full_email_from_name || '',
+    }
+    baseMetadata.system_prompt = buildFullSecretaryPrompt(config, dirs.results || [])
+  } else {
+    // directory mode
+    baseMetadata.system_prompt = buildDirectoryPrompt(config, dirs.results || [])
+  }
+
+  const metadata = JSON.stringify(baseMetadata)
 
   const roomName = `secretary-${customerId}`
   const identity = `agent-${customerId}`
@@ -462,6 +557,250 @@ secretaryRoutes.post('/livekit-token', async (c) => {
     room: roomName,
     identity,
   })
+})
+
+// ============================================================
+// SYSTEM PROMPT BUILDERS — Per-mode AI agent instructions
+// ============================================================
+
+function buildDirectoryPrompt(config: any, dirs: any[]): string {
+  const dirList = dirs.map((d: any, i: number) => `${i + 1}. ${d.name}${d.phone_or_action ? ` → transfer to ${d.phone_or_action}` : ''}${d.special_notes ? ` (Notes: ${d.special_notes})` : ''}`).join('\n')
+  return `You are an AI phone directory service for a roofing company. Your name is ${config.agent_name || 'Sarah'}.
+
+GREETING: "${config.greeting_script}"
+
+YOUR ROLE: You are a professional phone directory assistant. Your ONLY job is to greet callers, determine which department they need, and route them accordingly.
+
+AVAILABLE DEPARTMENTS:
+${dirList}
+
+INSTRUCTIONS:
+- Answer with the greeting script above
+- Ask the caller which department they need
+- If they're unsure, briefly describe each department
+- Once they choose, transfer them to the correct number
+- Be polite, professional, and brief
+- Do NOT take messages, book appointments, or answer detailed questions
+- If someone asks a question, direct them to the appropriate department
+
+${config.common_qa ? `COMMON Q&A:\n${config.common_qa}` : ''}
+${config.general_notes ? `BUSINESS NOTES:\n${config.general_notes}` : ''}`
+}
+
+function buildAnsweringPrompt(config: any, dirs: any[]): string {
+  const fallback = config.answering_fallback_action || 'take_message'
+  const forwardNum = config.answering_forward_number || ''
+  return `You are an AI answering service for a roofing company. Your name is ${config.agent_name || 'Sarah'}. You NEVER let a call go to voicemail — every caller gets a live response.
+
+GREETING: "${config.greeting_script}"
+
+YOUR ROLE: Professional answering service. You answer every single call with warmth and professionalism. No caller should ever hear a voicemail tone or feel like they reached a machine.
+
+CORE BEHAVIOR:
+- ALWAYS answer calls — this is a "never go to voicemail" service
+- Be warm, friendly, and reassuring
+- Collect the caller's name, phone number, and reason for calling
+- Take a detailed message including any urgency level
+- Let the caller know their message will be passed along promptly
+${fallback === 'forward_urgent' ? `- If the caller says it's URGENT or an EMERGENCY, transfer them immediately to ${forwardNum}` : ''}
+${fallback === 'always_forward' ? `- After taking the message, offer to transfer the caller to ${forwardNum}` : ''}
+
+MESSAGE TAKING:
+- Always get: caller name, phone number, brief description of why they're calling
+- Ask if it's urgent or can wait for a callback
+- Reassure them that the business owner will get back to them promptly
+- For emergencies (active roof leak, storm damage), flag as URGENT
+
+${config.common_qa ? `COMMON Q&A (you can answer these):\n${config.common_qa}` : ''}
+${config.general_notes ? `BUSINESS NOTES:\n${config.general_notes}` : ''}`
+}
+
+function buildFullSecretaryPrompt(config: any, dirs: any[]): string {
+  let businessHours = ''
+  try {
+    const hrs = JSON.parse(config.full_business_hours || '{}')
+    const dayNames: Record<string, string> = { mon: 'Monday', tue: 'Tuesday', wed: 'Wednesday', thu: 'Thursday', fri: 'Friday', sat: 'Saturday', sun: 'Sunday' }
+    businessHours = Object.entries(hrs).map(([k, v]) => `${dayNames[k] || k}: ${v}`).join('\n')
+  } catch { businessHours = 'Monday-Friday 9am-5pm' }
+
+  const capabilities = []
+  if (config.full_can_book_appointments) capabilities.push('Book appointments and estimates')
+  if (config.full_can_answer_faq) capabilities.push('Answer frequently asked questions')
+  if (config.full_can_schedule_callback) capabilities.push('Schedule callback requests')
+  if (config.full_can_send_email) capabilities.push('Send follow-up emails to callers')
+  if (config.full_can_take_payment_info) capabilities.push('Collect payment information for deposits')
+
+  const dirList = dirs.map((d: any, i: number) => `${i + 1}. ${d.name}${d.phone_or_action ? ` → ${d.phone_or_action}` : ''}${d.special_notes ? ` (${d.special_notes})` : ''}`).join('\n')
+
+  return `You are a full AI secretary for a roofing company. Your name is ${config.agent_name || 'Sarah'}. You are the main answering line — professional, knowledgeable, and capable of handling almost anything a caller needs.
+
+GREETING: "${config.greeting_script}"
+
+YOUR ROLE: You are the primary secretary for this roofing business. You handle all incoming calls with the authority and capability of a real office secretary.
+
+YOUR CAPABILITIES:
+${capabilities.map(c => `• ${c}`).join('\n')}
+
+${dirList ? `DEPARTMENTS (for transfers):\n${dirList}` : ''}
+
+BUSINESS HOURS:
+${businessHours}
+
+${config.full_services_offered ? `SERVICES OFFERED:\n${config.full_services_offered}` : ''}
+${config.full_pricing_info ? `PRICING INFO:\n${config.full_pricing_info}` : ''}
+${config.full_service_area ? `SERVICE AREA:\n${config.full_service_area}` : ''}
+${config.full_booking_link ? `ONLINE BOOKING: ${config.full_booking_link}` : ''}
+
+APPOINTMENT BOOKING:
+${config.full_can_book_appointments ? `- You CAN book appointments. Collect: caller name, phone, email (optional), property address, preferred date/time, type of service needed (estimate, repair, inspection, etc.)
+- Confirm the appointment details before finalizing
+- Let them know someone will confirm within 24 hours` : '- Appointment booking is not enabled. Take their info and schedule a callback instead.'}
+
+CALLBACK SCHEDULING:
+${config.full_can_schedule_callback ? `- You CAN schedule callbacks. Ask for: name, phone, preferred callback time, and reason for call
+- Assure them someone will call back at their preferred time` : ''}
+
+EMAIL FOLLOW-UP:
+${config.full_can_send_email ? `- After calls, you can send a follow-up email summarizing the conversation
+- Use "${config.full_email_from_name || 'the business'}" as the sender name` : ''}
+
+FAQ & QUESTIONS:
+${config.full_can_answer_faq ? `- Answer questions about services, pricing, business hours, service area confidently
+- If you don't know something specific, offer to have someone call them back with details` : '- Direct detailed questions to the appropriate department or schedule a callback'}
+
+${config.common_qa ? `COMMON Q&A:\n${config.common_qa}` : ''}
+${config.general_notes ? `BUSINESS NOTES:\n${config.general_notes}` : ''}`
+}
+
+// ============================================================
+// MODE-SPECIFIC ENDPOINTS: Messages, Appointments, Callbacks
+// ============================================================
+
+// ── GET /messages — List messages (answering mode) ──
+secretaryRoutes.get('/messages', async (c) => {
+  const customerId = c.get('customerId' as any) as number
+  const status = c.req.query('status') || ''
+  const limit = parseInt(c.req.query('limit') || '50')
+  let sql = 'SELECT * FROM secretary_messages WHERE customer_id = ?'
+  const params: any[] = [customerId]
+  if (status === 'unread') { sql += ' AND is_read = 0' }
+  sql += ' ORDER BY created_at DESC LIMIT ?'
+  params.push(limit)
+  const msgs = await c.env.DB.prepare(sql).bind(...params).all()
+  const unread = await c.env.DB.prepare('SELECT COUNT(*) as cnt FROM secretary_messages WHERE customer_id = ? AND is_read = 0').bind(customerId).first<any>()
+  return c.json({ messages: msgs?.results || [], unread_count: unread?.cnt || 0 })
+})
+
+// ── POST /messages/:id/read — Mark message as read ──
+secretaryRoutes.post('/messages/:id/read', async (c) => {
+  const customerId = c.get('customerId' as any) as number
+  const id = c.req.param('id')
+  await c.env.DB.prepare('UPDATE secretary_messages SET is_read = 1 WHERE id = ? AND customer_id = ?').bind(id, customerId).run()
+  return c.json({ success: true })
+})
+
+// ── POST /messages/read-all — Mark all messages as read ──
+secretaryRoutes.post('/messages/read-all', async (c) => {
+  const customerId = c.get('customerId' as any) as number
+  await c.env.DB.prepare('UPDATE secretary_messages SET is_read = 1 WHERE customer_id = ? AND is_read = 0').bind(customerId).run()
+  return c.json({ success: true })
+})
+
+// ── GET /appointments — List appointments (full mode) ──
+secretaryRoutes.get('/appointments', async (c) => {
+  const customerId = c.get('customerId' as any) as number
+  const status = c.req.query('status') || ''
+  const limit = parseInt(c.req.query('limit') || '50')
+  let sql = 'SELECT * FROM secretary_appointments WHERE customer_id = ?'
+  const params: any[] = [customerId]
+  if (status) { sql += ' AND status = ?'; params.push(status) }
+  sql += ' ORDER BY appointment_date DESC, appointment_time DESC LIMIT ?'
+  params.push(limit)
+  const appts = await c.env.DB.prepare(sql).bind(...params).all()
+  const pending = await c.env.DB.prepare("SELECT COUNT(*) as cnt FROM secretary_appointments WHERE customer_id = ? AND status = 'pending'").bind(customerId).first<any>()
+  return c.json({ appointments: appts?.results || [], pending_count: pending?.cnt || 0 })
+})
+
+// ── PATCH /appointments/:id — Update appointment status ──
+secretaryRoutes.patch('/appointments/:id', async (c) => {
+  const customerId = c.get('customerId' as any) as number
+  const id = c.req.param('id')
+  const { status, notes } = await c.req.json()
+  const validStatuses = ['pending', 'confirmed', 'cancelled', 'completed']
+  if (status && !validStatuses.includes(status)) return c.json({ error: 'Invalid status' }, 400)
+  let sql = 'UPDATE secretary_appointments SET updated_at = datetime(\'now\')'
+  const params: any[] = []
+  if (status) { sql += ', status = ?'; params.push(status) }
+  if (notes !== undefined) { sql += ', notes = ?'; params.push(notes) }
+  sql += ' WHERE id = ? AND customer_id = ?'
+  params.push(id, customerId)
+  await c.env.DB.prepare(sql).bind(...params).run()
+  return c.json({ success: true })
+})
+
+// ── GET /callbacks — List scheduled callbacks (full mode) ──
+secretaryRoutes.get('/callbacks', async (c) => {
+  const customerId = c.get('customerId' as any) as number
+  const status = c.req.query('status') || ''
+  const limit = parseInt(c.req.query('limit') || '50')
+  let sql = 'SELECT * FROM secretary_callbacks WHERE customer_id = ?'
+  const params: any[] = [customerId]
+  if (status) { sql += ' AND status = ?'; params.push(status) }
+  sql += ' ORDER BY created_at DESC LIMIT ?'
+  params.push(limit)
+  const cbs = await c.env.DB.prepare(sql).bind(...params).all()
+  const pending = await c.env.DB.prepare("SELECT COUNT(*) as cnt FROM secretary_callbacks WHERE customer_id = ? AND status = 'pending'").bind(customerId).first<any>()
+  return c.json({ callbacks: cbs?.results || [], pending_count: pending?.cnt || 0 })
+})
+
+// ── PATCH /callbacks/:id — Update callback status ──
+secretaryRoutes.patch('/callbacks/:id', async (c) => {
+  const customerId = c.get('customerId' as any) as number
+  const id = c.req.param('id')
+  const { status } = await c.req.json()
+  if (status) {
+    await c.env.DB.prepare('UPDATE secretary_callbacks SET status = ? WHERE id = ? AND customer_id = ?').bind(status, id, customerId).run()
+  }
+  return c.json({ success: true })
+})
+
+// ── POST /webhook/message — LiveKit agent posts a new message (answering mode) ──
+secretaryRoutes.post('/webhook/message', async (c) => {
+  try {
+    const body = await c.req.json()
+    const { customer_id, caller_phone, caller_name, message_text, urgency, call_log_id } = body
+    if (!customer_id || !message_text) return c.json({ error: 'customer_id and message_text required' }, 400)
+    await c.env.DB.prepare(
+      `INSERT INTO secretary_messages (customer_id, caller_phone, caller_name, message_text, urgency, call_log_id) VALUES (?,?,?,?,?,?)`
+    ).bind(customer_id, caller_phone || '', caller_name || '', message_text, urgency || 'normal', call_log_id || null).run()
+    return c.json({ success: true })
+  } catch (err: any) { return c.json({ error: err.message }, 500) }
+})
+
+// ── POST /webhook/appointment — LiveKit agent creates an appointment (full mode) ──
+secretaryRoutes.post('/webhook/appointment', async (c) => {
+  try {
+    const body = await c.req.json()
+    const { customer_id, caller_phone, caller_name, caller_email, appointment_date, appointment_time, appointment_type, property_address, notes, call_log_id } = body
+    if (!customer_id) return c.json({ error: 'customer_id required' }, 400)
+    await c.env.DB.prepare(
+      `INSERT INTO secretary_appointments (customer_id, caller_phone, caller_name, caller_email, appointment_date, appointment_time, appointment_type, property_address, notes, call_log_id) VALUES (?,?,?,?,?,?,?,?,?,?)`
+    ).bind(customer_id, caller_phone || '', caller_name || '', caller_email || '', appointment_date || '', appointment_time || '', appointment_type || 'estimate', property_address || '', notes || '', call_log_id || null).run()
+    return c.json({ success: true })
+  } catch (err: any) { return c.json({ error: err.message }, 500) }
+})
+
+// ── POST /webhook/callback — LiveKit agent schedules a callback (full mode) ──
+secretaryRoutes.post('/webhook/callback', async (c) => {
+  try {
+    const body = await c.req.json()
+    const { customer_id, caller_phone, caller_name, preferred_time, reason, call_log_id } = body
+    if (!customer_id || !caller_phone) return c.json({ error: 'customer_id and caller_phone required' }, 400)
+    await c.env.DB.prepare(
+      `INSERT INTO secretary_callbacks (customer_id, caller_phone, caller_name, preferred_time, reason, call_log_id) VALUES (?,?,?,?,?,?)`
+    ).bind(customer_id, caller_phone, caller_name || '', preferred_time || '', reason || '', call_log_id || null).run()
+    return c.json({ success: true })
+  } catch (err: any) { return c.json({ error: err.message }, 500) }
 })
 
 // ============================================================
