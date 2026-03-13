@@ -518,7 +518,7 @@ function renderPricing() {
                   <p class="text-sm text-gray-500">24/7 AI phone answering</p>
                 </div>
                 <div class="ml-auto text-right">
-                  <span class="text-2xl font-black text-gray-900">$149</span>
+                  <span class="text-2xl font-black text-gray-900">$249</span>
                   <span class="text-sm text-gray-400">/mo</span>
                 </div>
               </div>
@@ -670,7 +670,7 @@ function renderFAQ() {
     { q: 'How accurate are the measurements?', a: 'For buildings with HIGH quality imagery (most urban Canadian addresses), accuracy is typically within 2-5% of manual measurements. We display confidence scores and imagery quality on every report so you know exactly what you are getting.' },
     { q: 'What areas do you cover?', a: "Most Canadian addresses where Google has Solar API coverage. Urban areas in Alberta, BC, Ontario, and Quebec have the best coverage. If Solar API data isn't available, our AI vision engine provides a fallback analysis." },
     { q: 'How fast do I get my report?', a: 'Most reports are generated in under 60 seconds. You receive an email with a download link and can also access all reports from your dashboard. Reports are professional-grade PDFs ready to share with clients.' },
-    { q: 'What is the AI Roofer Secretary?', a: 'It is a 24/7 AI-powered phone answering service for your roofing business. It answers calls in a natural human voice, books appointments, qualifies leads, and sends you summaries. $149/month subscription through Square.' },
+    { q: 'What is the AI Roofer Secretary?', a: 'It is a 24/7 AI-powered phone answering service for your roofing business. It answers calls in a natural human voice, books appointments, qualifies leads, and sends you summaries. $249/month — same price in CAD for Canadians and USD for Americans.' },
     { q: 'Can I add team members?', a: 'Yes! For $50/user/month, you can invite salespeople and other team members. They get full access to order reports, use the CRM, AI Secretary, Virtual Try-On, and Door-to-Door manager under your account.' },
     { q: 'What payment methods do you accept?', a: 'All major credit cards (Visa, Mastercard, Amex), debit cards, Apple Pay, Google Pay, and Cash App through our secure Square payment processor. All transactions are encrypted and PCI-compliant.' },
     { q: 'Do you offer volume discounts?', a: 'Yes! B2B customer companies get priority processing and volume pricing. Contact us to set up a business account with custom rates and monthly invoicing.' },

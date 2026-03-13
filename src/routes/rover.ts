@@ -68,7 +68,7 @@ AFTER FREE TRIAL:
 - All payments processed via Square (Visa, Mastercard, Amex, Apple Pay, Google Pay, Cash App)
 
 ROOFER SECRETARY (AI Phone Answering Service):
-- $149 CAD/month
+- $249/month (CAD for Canadians, USD for Americans)
 - AI answers your business calls 24/7
 - Routes calls to the right department
 - Provides call transcripts and summaries
@@ -144,7 +144,7 @@ ROOFER SECRETARY (AI Phone Service):
 - Automated call transcripts and summaries
 - Scheduling assistance
 - Never miss a potential customer call
-- $149/month
+- $249/month
 
 BLOG (/blog):
 - Roofing industry insights and best practices
@@ -496,7 +496,7 @@ function getFallbackResponse(message: string): string {
   }
 
   if (msg.includes('phone') || msg.includes('secretary') || msg.includes('call') || msg.includes('answer')) {
-    return "Our Roofer Secretary is an AI-powered phone answering service for $149/month! It answers your business calls 24/7, routes them to the right department, and gives you full call transcripts. Never miss a lead again! Email reports@reusecanada.ca to learn more. 📞"
+    return "Our Roofer Secretary is an AI-powered phone answering service for $249/month! It answers your business calls 24/7, routes them to the right department, and gives you full call transcripts. Never miss a lead again! Email reports@reusecanada.ca to learn more. 📞"
   }
 
   if (msg.includes('d2d') || msg.includes('door') || msg.includes('canvass') || msg.includes('territory')) {

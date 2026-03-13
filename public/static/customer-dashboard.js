@@ -117,7 +117,7 @@ function renderDashboard() {
     { id: 'pipeline', href: '/customer/pipeline', icon: 'fa-funnel-dollar', label: 'Sales Pipeline', desc: 'Leads & to-do\'s', color: 'from-cyan-500 to-cyan-600', badge: 'Coming Soon', badgeColor: 'bg-gray-400' },
     { id: 'd2d', href: '/customer/d2d', icon: 'fa-door-open', label: 'D2D Manager', desc: 'Door-to-door teams', color: 'from-orange-500 to-orange-600', badge: '', badgeColor: '' },
     { id: 'team', href: '/customer/team', icon: 'fa-users-cog', label: 'Sales Team', desc: 'Add team members', color: 'from-teal-500 to-emerald-600', badge: custState.teamMembers > 0 ? custState.teamMembers + ' members' : '$50/user/mo', badgeColor: custState.teamMembers > 0 ? 'bg-teal-500' : 'bg-gray-400' },
-    { id: 'secretary', href: '/customer/secretary', icon: 'fa-headset', label: 'Roofer Secretary', desc: 'AI phone answering service', color: 'from-violet-500 to-purple-700', badge: custState.secretaryActive ? (custState.secretaryCalls > 0 ? custState.secretaryCalls + ' calls' : 'Active') : '$149/mo', badgeColor: custState.secretaryActive ? 'bg-green-500' : 'bg-violet-500' }
+    { id: 'secretary', href: '/customer/secretary', icon: 'fa-headset', label: 'Roofer Secretary', desc: 'AI phone answering service', color: 'from-violet-500 to-purple-700', badge: custState.secretaryActive ? (custState.secretaryCalls > 0 ? custState.secretaryCalls + ' calls' : 'Active') : '$249/mo', badgeColor: custState.secretaryActive ? 'bg-green-500' : 'bg-violet-500' }
   ];
 
   // DEV-ONLY: Add Property Imagery tile for dev account

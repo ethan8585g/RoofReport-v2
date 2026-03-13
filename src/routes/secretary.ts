@@ -2,7 +2,7 @@
 // RoofReporterAI — Roofer Secretary AI Phone Answering Service
 // Powered by LiveKit.io
 // ============================================================
-// POST /api/secretary/subscribe        — Create $149/mo Square subscription
+// POST /api/secretary/subscribe        — Create $249/mo Square subscription
 // GET  /api/secretary/status           — Get subscription + config status
 // POST /api/secretary/config           — Save/update phone config
 // GET  /api/secretary/config           — Get current config
@@ -122,9 +122,10 @@ async function generateLiveKitToken(apiKey: string, apiSecret: string, identity:
 }
 
 // ============================================================
-// POST /subscribe — Create Square Checkout for $149/mo subscription
+// POST /subscribe — Create Square Checkout for $249/mo subscription
 // Square doesn't have native recurring billing via payment links,
-// so we create a one-time $149 payment and manage renewal internally
+// so we create a one-time $249 payment and manage renewal internally
+// Currency: CAD for Canadian visitors, USD for American visitors (same $249 amount)
 // ============================================================
 secretaryRoutes.post('/subscribe', async (c) => {
   const customerId = c.get('customerId' as any) as number
@@ -151,15 +152,21 @@ secretaryRoutes.post('/subscribe', async (c) => {
     // Get the origin for success/cancel URLs
     const origin = new URL(c.req.url).origin
 
-    // Create Square Payment Link for secretary subscription ($149/mo)
+    // Detect country from Cloudflare headers for currency selection
+    // Same $249 price — CAD for Canadians, USD for Americans
+    const cfCountry = (c.req.header('cf-ipcountry') || 'CA').toUpperCase()
+    const currency = cfCountry === 'US' ? 'USD' : 'CAD'
+    const currencyLabel = currency === 'USD' ? 'USD' : 'CAD'
+
+    // Create Square Payment Link for secretary subscription ($249/mo)
     const idempotencyKey = `secretary-${customerId}-${Date.now()}`
     const paymentLink = await squareAPI(accessToken, 'POST', '/online-checkout/payment-links', {
       idempotency_key: idempotencyKey,
       quick_pay: {
-        name: 'Roofer Secretary — AI Phone Answering Service (Monthly)',
+        name: `Roofer Secretary — AI Phone Answering Service (Monthly, ${currencyLabel})`,
         price_money: {
-          amount: 14900, // $149.00 CAD
-          currency: 'CAD',
+          amount: 24900, // $249.00
+          currency: currency,
         },
         location_id: locationId,
       },
@@ -167,7 +174,7 @@ secretaryRoutes.post('/subscribe', async (c) => {
         redirect_url: `${origin}/customer/secretary?setup=true&session_id=square`,
         ask_for_shipping_address: false,
       },
-      payment_note: `Roofer Secretary subscription for ${customer.email} (Customer #${customerId})`,
+      payment_note: `Roofer Secretary subscription for ${customer.email} (Customer #${customerId}) — $249/${currencyLabel}`,
     })
 
     if (paymentLink.errors) {

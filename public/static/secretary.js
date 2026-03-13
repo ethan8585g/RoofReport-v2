@@ -188,13 +188,13 @@
         '<div class="bg-white rounded-2xl border-2 border-sky-500 shadow-lg p-6 mb-6">' +
           '<div class="flex items-center justify-between mb-4">' +
             '<div><h3 class="font-bold text-gray-800 text-xl">Monthly Subscription</h3><p class="text-gray-500 text-sm">Cancel anytime. No contracts.</p></div>' +
-            '<div class="text-right"><div class="text-4xl font-extrabold text-gray-900">$149<span class="text-lg font-normal text-gray-500">/mo</span></div><p class="text-xs text-gray-400">CAD + applicable taxes</p></div>' +
+            '<div class="text-right"><div class="text-4xl font-extrabold text-gray-900">$249<span class="text-lg font-normal text-gray-500">/mo</span></div><p class="text-xs text-gray-400">CAD or USD + applicable taxes</p></div>' +
           '</div>' +
           '<div class="bg-sky-50 border border-sky-100 rounded-xl p-4 mb-4">' +
             '<p class="text-sm text-sky-700"><i class="fas fa-info-circle mr-1"></i>Includes unlimited AI-answered calls, SMS transcript summaries after every call, smart routing, and no-answer coverage. Works with any Canadian carrier.</p>' +
           '</div>' +
           '<button onclick="secSubscribe()" id="subscribeBtn" class="w-full py-4 bg-gradient-to-r from-sky-500 to-blue-600 text-white rounded-xl font-bold text-lg hover:from-sky-600 hover:to-blue-700 transition-all shadow-lg hover:shadow-xl">' +
-            '<i class="fas fa-lock mr-2"></i>Subscribe & Setup — $149/month</button>' +
+            '<i class="fas fa-lock mr-2"></i>Subscribe & Setup — $249/month</button>' +
         '</div>' +
         '<p class="text-center text-xs text-gray-400 mb-8"><i class="fas fa-shield-alt mr-1"></i>Secure payment via Square &bull; Powered by LiveKit AI</p>' +
       '</div>';
@@ -219,8 +219,8 @@
       var res = await fetch('/api/secretary/subscribe', { method: 'POST', headers: authHeaders() });
       var data = await res.json();
       if (data.checkout_url) { window.location.href = data.checkout_url; }
-      else { alert(data.error || 'Failed to create subscription'); if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-lock mr-2"></i>Subscribe & Setup — $149/month'; } }
-    } catch(e) { alert('Network error. Please try again.'); if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-lock mr-2"></i>Subscribe & Setup — $149/month'; } }
+      else { alert(data.error || 'Failed to create subscription'); if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-lock mr-2"></i>Subscribe & Setup — $249/month'; } }
+    } catch(e) { alert('Network error. Please try again.'); if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-lock mr-2"></i>Subscribe & Setup — $249/month'; } }
   };
 
   // ============================================================
