@@ -330,7 +330,7 @@ export function generateArchitecturalDiagramSVG(
   }
 
   // EDGE-TYPE LEGEND (top-left corner)
-  const legendTypes = ['EAVE', 'HIP', 'RIDGE', 'VALLEY', 'RAKE'].filter(t => presentEdgeTypes.has(t))
+  const legendTypes = ['RIDGE', 'EAVE', 'VALLEY', 'HIP', 'RAKE'].filter(t => presentEdgeTypes.has(t))
   const legendNames: Record<string, string> = { 'EAVE': 'Eave', 'HIP': 'Hip', 'RIDGE': 'Ridge', 'VALLEY': 'Valley', 'RAKE': 'Rake' }
   if (legendTypes.length > 0) {
     const lx = 12, ly = LEGEND_Y
@@ -406,8 +406,8 @@ export function generateFallbackArchitecturalSVG(
   const FONT = `font-family="Inter,system-ui,-apple-system,sans-serif"`
 
   const EDGE_COLOR: Record<string, string> = {
-    'EAVE': '#0d9668', 'HIP': '#d97706', 'RAKE': '#7c3aed',
-    'RIDGE': '#dc2626', 'VALLEY': '#2563eb',
+    'RIDGE': '#DC2626', 'HIP': '#EA580C', 'VALLEY': '#2563EB',
+    'EAVE': '#16A34A', 'RAKE': '#7C3AED',
   }
 
   const fmtFt = (ft: number): string => ft < 0.3 ? '' : `${ft.toFixed(1)} ft`
@@ -2363,8 +2363,8 @@ export function generateTraceBasedDiagramSVG(
   }
 
   const EDGE_COLOR: Record<string, string> = {
-    'EAVE': '#0d9668', 'HIP': '#d97706', 'RAKE': '#7c3aed',
-    'RIDGE': '#dc2626', 'VALLEY': '#2563eb',
+    'RIDGE': '#DC2626', 'HIP': '#EA580C', 'VALLEY': '#2563EB',
+    'EAVE': '#16A34A', 'RAKE': '#7C3AED',
   }
 
   const fmtFt = (ft: number): string => ft < 0.3 ? '' : `${ft.toFixed(1)} ft`

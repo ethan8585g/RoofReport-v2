@@ -170,15 +170,27 @@ export function smartEdgeFootage(
   return result
 }
 
-/** Edge type color map for SVG diagrams */
+/**
+ * Edge type color map for SVG diagrams — Industry Standard
+ * Red = Ridge, Green = Eave, Blue = Valley, Orange = Hip, Purple = Rake
+ * Matches EagleView / RoofScope / GAF conventions
+ */
 export const EDGE_COLORS: Record<string, string> = {
-  'RIDGE': '#C62828', 'HIP': '#C62828', 'VALLEY': '#1565C0',
-  'EAVE': '#1B2838', 'RAKE': '#E91E63',
+  'RIDGE': '#DC2626',   // Red — ridge lines
+  'HIP':   '#EA580C',   // Orange — hip edges
+  'VALLEY':'#2563EB',   // Blue — valley lines
+  'EAVE':  '#16A34A',   // Green — eave / gutterline / drip edge
+  'RAKE':  '#7C3AED',   // Purple — rake / gable edges
+  'STEP_FLASHING': '#F59E0B', // Amber — step flashing
+  'WALL_FLASHING': '#8B5CF6', // Violet — wall flashing
+  'TRANSITION': '#0891B2',    // Cyan — slope change
+  'PARAPET': '#78716C',       // Stone — parapet
 }
 
 /** Edge type stroke widths */
 export const EDGE_WIDTHS: Record<string, number> = {
   'RIDGE': 3.5, 'HIP': 3, 'VALLEY': 3, 'EAVE': 2.5, 'RAKE': 2.5,
+  'STEP_FLASHING': 2, 'WALL_FLASHING': 2, 'TRANSITION': 2.5, 'PARAPET': 2,
 }
 
 /** Standard segment colors palette */

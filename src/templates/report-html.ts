@@ -120,17 +120,18 @@ export function generateProfessionalReportHTML(report: RoofReport): string {
     edgesByType[e.edge_type].totalFt += e.true_length_ft
   })
 
-  // Edge type display config
+  // Edge type display config — Industry Standard Color Coding
+  // Red = Ridge, Green = Eave, Blue = Valley, Orange = Hip, Purple = Rake
   const edgeTypeConfig: Record<string, { label: string; color: string }> = {
-    eave: { label: 'Eaves', color: '#C62828' },
-    ridge: { label: 'Ridges', color: '#F9A825' },
-    hip: { label: 'Hips', color: '#00BCD4' },
-    valley: { label: 'Valleys', color: '#2E7D32' },
-    rake: { label: 'Rake Edges', color: '#E040FB' },
-    step_flashing: { label: 'Step Flashing', color: '#FF6F00' },
-    wall_flashing: { label: 'Wall Flashing', color: '#6A1B9A' },
-    transition: { label: 'Slope Change', color: '#00838F' },
-    parapet: { label: 'Parapet', color: '#4E342E' }
+    eave: { label: 'Eaves', color: '#16A34A' },
+    ridge: { label: 'Ridges', color: '#DC2626' },
+    hip: { label: 'Hips', color: '#EA580C' },
+    valley: { label: 'Valleys', color: '#2563EB' },
+    rake: { label: 'Rake Edges', color: '#7C3AED' },
+    step_flashing: { label: 'Step Flashing', color: '#F59E0B' },
+    wall_flashing: { label: 'Wall Flashing', color: '#8B5CF6' },
+    transition: { label: 'Slope Change', color: '#0891B2' },
+    parapet: { label: 'Parapet', color: '#78716C' }
   }
 
   // ── TEAL accent color (from template Page 1) ──
@@ -322,29 +323,28 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
     <div style="text-align:center;font-size:6.5px;color:#999;margin-top:2px">AI-Generated Roof Diagram — All dimensions in feet. Pitch multiplier applied for true 3D area.</div>
   </div>
 
-  <!-- Drawing Key / Legend -->
+  <!-- Drawing Key / Legend — Industry Standard Color Coding -->
   <div style="padding:0 28px;margin-bottom:8px">
     <div style="display:flex;flex-wrap:wrap;gap:12px;padding:5px 10px;background:#f5f5f5;border:1px solid #ddd;border-radius:4px;font-size:8px;font-weight:600">
-      <div style="display:flex;align-items:center;gap:4px"><span style="width:18px;height:3px;background:#C62828;display:inline-block;border-radius:1px"></span>Eave</div>
-      <div style="display:flex;align-items:center;gap:4px"><span style="width:18px;height:3px;background:#00BCD4;display:inline-block;border-radius:1px"></span>Hip</div>
-      <div style="display:flex;align-items:center;gap:4px"><span style="width:18px;height:3px;background:#F9A825;display:inline-block;border-radius:1px"></span>Ridge</div>
-      <div style="display:flex;align-items:center;gap:4px"><span style="width:18px;height:3px;background:#2E7D32;display:inline-block;border-radius:1px"></span>Rake Edge</div>
-      <div style="display:flex;align-items:center;gap:4px"><span style="width:18px;height:3px;background:#1565C0;display:inline-block;border-radius:1px"></span>Valley</div>
-      <div style="display:flex;align-items:center;gap:4px"><span style="width:18px;height:3px;background:#7E57C2;display:inline-block;border-radius:1px"></span>Flat/Drip Edge</div>
+      <div style="display:flex;align-items:center;gap:4px"><span style="width:18px;height:3px;background:#DC2626;display:inline-block;border-radius:1px"></span>Ridge</div>
+      <div style="display:flex;align-items:center;gap:4px"><span style="width:18px;height:3px;background:#16A34A;display:inline-block;border-radius:1px"></span>Eave</div>
+      <div style="display:flex;align-items:center;gap:4px"><span style="width:18px;height:3px;background:#2563EB;display:inline-block;border-radius:1px"></span>Valley</div>
+      <div style="display:flex;align-items:center;gap:4px"><span style="width:18px;height:3px;background:#EA580C;display:inline-block;border-radius:1px"></span>Hip</div>
+      <div style="display:flex;align-items:center;gap:4px"><span style="width:18px;height:3px;background:#7C3AED;display:inline-block;border-radius:1px"></span>Rake Edge</div>
+      <div style="display:flex;align-items:center;gap:4px"><span style="width:18px;height:3px;background:#0891B2;display:inline-block;border-radius:1px"></span>Drip Edge</div>
     </div>
   </div>
 
-  <!-- Two tables side by side -->
+  <!-- Two tables side by side: Length Summary + Area by Roof Plane -->
   <div style="display:flex;gap:12px;padding:0 28px;margin-bottom:6px">
-    <!-- LEFT TABLE: Estimated Roofer Measurements -->
+    <!-- LEFT TABLE: Length Summary (Standardized) -->
     <div style="flex:1">
-      <div style="font-size:9px;font-weight:800;color:#333;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Estimated Roofer Measurements</div>
-      <div style="font-size:7.5px;color:#888;margin-bottom:4px;font-weight:600">MEASUREMENT TOTALS BY MATERIAL &amp; SECTION</div>
+      <div style="font-size:9px;font-weight:800;color:#333;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Length Summary</div>
+      <div style="font-size:7.5px;color:#888;margin-bottom:4px;font-weight:600">MEASUREMENT TOTALS BY EDGE TYPE</div>
       <table style="width:100%;border-collapse:collapse;font-size:8px">
         <thead>
-          <tr style="background:#333;color:#fff">
-            <th style="padding:4px 6px;text-align:left;font-size:7px;font-weight:700">Section</th>
-            <th style="padding:4px 6px;text-align:left;font-size:7px;font-weight:700">Line Type</th>
+          <tr style="background:#1a1a2e;color:#fff">
+            <th style="padding:4px 6px;text-align:left;font-size:7px;font-weight:700">Edge Type</th>
             <th style="padding:4px 6px;text-align:center;font-size:7px;font-weight:700">Count</th>
             <th style="padding:4px 6px;text-align:right;font-size:7px;font-weight:700">Length (LF)</th>
           </tr>
@@ -353,62 +353,81 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
           ${Object.entries(edgesByType).map(([type, data], idx) => {
             const cfg = edgeTypeConfig[type] || { label: type, color: '#333' }
             return `<tr style="${idx % 2 === 0 ? 'background:#fafafa' : ''}">
-              <td style="padding:3px 6px;border-bottom:1px solid #eee;font-weight:600">${segFaceLetters[idx] || '-'}</td>
-              <td style="padding:3px 6px;border-bottom:1px solid #eee"><span style="display:inline-block;width:10px;height:3px;background:${cfg.color};border-radius:1px;margin-right:3px;vertical-align:middle"></span>${cfg.label}</td>
+              <td style="padding:3px 6px;border-bottom:1px solid #eee"><span style="display:inline-block;width:12px;height:3px;background:${cfg.color};border-radius:1px;margin-right:4px;vertical-align:middle"></span><span style="font-weight:600">${cfg.label}</span></td>
               <td style="padding:3px 6px;border-bottom:1px solid #eee;text-align:center">${data.count}</td>
               <td style="padding:3px 6px;border-bottom:1px solid #eee;text-align:right;font-weight:700">${Math.round(data.totalFt * 10) / 10}</td>
             </tr>`
           }).join('')}
           <tr style="background:#eee;font-weight:800">
-            <td colspan="2" style="padding:4px 6px;border-top:2px solid #333;font-size:8px">TOTAL</td>
+            <td style="padding:4px 6px;border-top:2px solid #333;font-size:8px">Total Linear</td>
             <td style="padding:4px 6px;border-top:2px solid #333;text-align:center">${report.edges.length}</td>
-            <td style="padding:4px 6px;border-top:2px solid #333;text-align:right">${Math.round(totalLinearFt * 10) / 10}</td>
+            <td style="padding:4px 6px;border-top:2px solid #333;text-align:right">${Math.round(totalLinearFt * 10) / 10} LF</td>
           </tr>
         </tbody>
       </table>
+
+      <!-- Total Area Summary (compact) -->
+      <div style="margin-top:6px;border:1px solid #ddd;border-radius:4px;overflow:hidden">
+        <div style="background:${TEAL};color:#fff;padding:4px 8px;font-size:7.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px">Total Area Summary</div>
+        <div style="display:flex;justify-content:space-between;padding:4px 8px;font-size:8px;border-bottom:1px solid #eee"><span>Total Roof Area</span><span style="font-weight:800">${netSquares} SQ</span></div>
+        <div style="display:flex;justify-content:space-between;padding:4px 8px;font-size:8px;border-bottom:1px solid #eee"><span>Total Perimeter</span><span style="font-weight:700">${totalPerimeter} LF</span></div>
+        <div style="display:flex;justify-content:space-between;padding:4px 8px;font-size:8px;border-bottom:1px solid #eee"><span>Predominant Pitch</span><span style="font-weight:700">${predominantPitch}</span></div>
+        <div style="display:flex;justify-content:space-between;padding:4px 8px;font-size:8px;background:${TEAL_LIGHT}"><span style="font-weight:700;color:${TEAL_DARK}">Gross Area (w/${mat.waste_pct || 15}% waste)</span><span style="font-weight:900;color:${TEAL_DARK}">${grossSquares} SQ</span></div>
+      </div>
     </div>
 
-    <!-- RIGHT TABLE: Area Calculation & Scope Data -->
+    <!-- RIGHT TABLE: Area by Roof Plane + Area by Pitch -->
     <div style="flex:1">
-      <div style="font-size:9px;font-weight:800;color:#333;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Area Calculation &amp; Scope Data</div>
-      <div style="font-size:7.5px;color:#888;margin-bottom:4px;font-weight:600">SURFACE AREA BY ROOF SECTION</div>
+      <div style="font-size:9px;font-weight:800;color:#333;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Area by Roof Plane</div>
+      <div style="font-size:7.5px;color:#888;margin-bottom:4px;font-weight:600">SURFACE AREA, PITCH &amp; DIRECTION BY FACET</div>
       <table style="width:100%;border-collapse:collapse;font-size:8px">
         <thead>
-          <tr style="background:#333;color:#fff">
-            <th style="padding:4px 6px;text-align:left;font-size:7px;font-weight:700">Section</th>
-            <th style="padding:4px 6px;text-align:right;font-size:7px;font-weight:700">Area (SF)</th>
-            <th style="padding:4px 6px;text-align:center;font-size:7px;font-weight:700">Pitch</th>
-            <th style="padding:4px 6px;text-align:right;font-size:7px;font-weight:700">Multiplier</th>
+          <tr style="background:#1a1a2e;color:#fff">
+            <th style="padding:4px 5px;text-align:left;font-size:7px;font-weight:700">Plane</th>
+            <th style="padding:4px 5px;text-align:right;font-size:7px;font-weight:700">Area (SF)</th>
+            <th style="padding:4px 5px;text-align:right;font-size:7px;font-weight:700">SQ</th>
+            <th style="padding:4px 5px;text-align:center;font-size:7px;font-weight:700">Pitch</th>
+            <th style="padding:4px 5px;text-align:right;font-size:7px;font-weight:700">% Total</th>
           </tr>
         </thead>
         <tbody>
-          ${report.segments.slice(0, 12).map((seg, idx) => {
-            const rise = 12 * Math.tan(seg.pitch_degrees * Math.PI / 180)
-            const multiplier = Math.sqrt(rise * rise + 144) / 12
+          ${report.segments.slice(0, 10).map((seg, idx) => {
+            const segSQ = Math.round(seg.true_area_sqft / 100 * 100) / 100
+            const pctOfTotal = Math.round(seg.true_area_sqft / report.total_true_area_sqft * 1000) / 10
             return `<tr style="${idx % 2 === 0 ? 'background:#fafafa' : ''}">
-              <td style="padding:3px 6px;border-bottom:1px solid #eee;font-weight:600">${segFaceLetters[idx] || '-'}</td>
-              <td style="padding:3px 6px;border-bottom:1px solid #eee;text-align:right">${Math.round(seg.true_area_sqft * 10) / 10}</td>
-              <td style="padding:3px 6px;border-bottom:1px solid #eee;text-align:center">${seg.pitch_ratio}</td>
-              <td style="padding:3px 6px;border-bottom:1px solid #eee;text-align:right;font-weight:600">${multiplier.toFixed(4)}</td>
+              <td style="padding:3px 5px;border-bottom:1px solid #eee;font-weight:600">${segFaceLetters[idx]} <span style="font-weight:400;font-size:6.5px;color:#888">${seg.azimuth_direction || ''}</span></td>
+              <td style="padding:3px 5px;border-bottom:1px solid #eee;text-align:right">${Math.round(seg.true_area_sqft).toLocaleString()}</td>
+              <td style="padding:3px 5px;border-bottom:1px solid #eee;text-align:right;font-weight:600">${segSQ}</td>
+              <td style="padding:3px 5px;border-bottom:1px solid #eee;text-align:center">${seg.pitch_ratio}</td>
+              <td style="padding:3px 5px;border-bottom:1px solid #eee;text-align:right;color:#555">${pctOfTotal}%</td>
             </tr>`
           }).join('')}
-          ${report.segments.length > 12 ? `<tr><td colspan="4" style="padding:3px 6px;font-size:7px;color:#888;text-align:center">+ ${report.segments.length - 12} more sections</td></tr>` : ''}
-          <!-- Totals -->
+          ${report.segments.length > 10 ? `<tr><td colspan="5" style="padding:3px 5px;font-size:7px;color:#888;text-align:center">+ ${report.segments.length - 10} more planes</td></tr>` : ''}
           <tr style="background:#eee;font-weight:800">
-            <td style="padding:4px 6px;border-top:2px solid #333;font-size:8px">Total Field Area</td>
-            <td style="padding:4px 6px;border-top:2px solid #333;text-align:right;font-size:9px">${report.total_true_area_sqft.toLocaleString()}</td>
-            <td colspan="2" style="padding:4px 6px;border-top:2px solid #333;text-align:right;font-size:8px">SF</td>
+            <td style="padding:4px 5px;border-top:2px solid #333;font-size:8px">Total</td>
+            <td style="padding:4px 5px;border-top:2px solid #333;text-align:right;font-size:8px">${report.total_true_area_sqft.toLocaleString()}</td>
+            <td style="padding:4px 5px;border-top:2px solid #333;text-align:right;font-size:8px">${netSquares}</td>
+            <td style="padding:4px 5px;border-top:2px solid #333;text-align:center;font-size:8px">${predominantPitch}</td>
+            <td style="padding:4px 5px;border-top:2px solid #333;text-align:right;font-size:8px">100%</td>
           </tr>
-          <tr style="background:#f0f9f7">
-            <td style="padding:3px 6px;font-size:8px">Waste Factor</td>
-            <td style="padding:3px 6px;text-align:right;font-weight:700">${mat.waste_pct || 15}%</td>
-            <td colspan="2" style="padding:3px 6px;text-align:right;font-size:7px;color:#888">${mat.complexity_class || 'standard'}</td>
+        </tbody>
+      </table>
+
+      <!-- Area by Pitch Breakdown -->
+      <div style="margin-top:6px;font-size:8px;font-weight:800;color:#333;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px">Area by Pitch</div>
+      <table style="width:100%;border-collapse:collapse;font-size:7.5px">
+        <thead>
+          <tr style="background:#f1f5f9;border-bottom:1.5px solid #cbd5e1">
+            <th style="padding:3px 6px;text-align:left;font-weight:700;color:#475569">Pitch Range</th>
+            <th style="padding:3px 6px;text-align:right;font-weight:700;color:#475569">Roof Area (SQ)</th>
+            <th style="padding:3px 6px;text-align:right;font-weight:700;color:#475569">% of Total</th>
           </tr>
-          <tr style="background:${TEAL_LIGHT}">
-            <td style="padding:4px 6px;font-weight:900;font-size:9px;color:${TEAL_DARK}">Total Required</td>
-            <td style="padding:4px 6px;text-align:right;font-weight:900;font-size:10px;color:${TEAL_DARK}">${Math.round(report.total_true_area_sqft * (1 + (mat.waste_pct || 15) / 100)).toLocaleString()}</td>
-            <td colspan="2" style="padding:4px 6px;text-align:right;font-weight:800;font-size:9px;color:${TEAL_DARK}">SF (${grossSquares} SQ)</td>
-          </tr>
+        </thead>
+        <tbody>
+          ${slopeClasses.flat > 0 ? `<tr style="border-bottom:1px solid #eee"><td style="padding:3px 6px">Flat (0:12\u20132:12)</td><td style="padding:3px 6px;text-align:right;font-weight:600">${slopeClasses.flat} SQ</td><td style="padding:3px 6px;text-align:right;color:#555">${Math.round(slopeClasses.flat / netSquares * 1000) / 10}%</td></tr>` : ''}
+          ${slopeClasses.low > 0 ? `<tr style="border-bottom:1px solid #eee"><td style="padding:3px 6px">Low (2:12\u20134:12)</td><td style="padding:3px 6px;text-align:right;font-weight:600">${slopeClasses.low} SQ</td><td style="padding:3px 6px;text-align:right;color:#555">${Math.round(slopeClasses.low / netSquares * 1000) / 10}%</td></tr>` : ''}
+          ${slopeClasses.standard > 0 ? `<tr style="border-bottom:1px solid #eee;background:#f0fdf4"><td style="padding:3px 6px;font-weight:600;color:#166534">Standard (4:12\u20139:12)</td><td style="padding:3px 6px;text-align:right;font-weight:700;color:#166534">${slopeClasses.standard} SQ</td><td style="padding:3px 6px;text-align:right;color:#166534;font-weight:600">${Math.round(slopeClasses.standard / netSquares * 1000) / 10}%</td></tr>` : ''}
+          ${slopeClasses.steep > 0 ? `<tr style="border-bottom:1px solid #eee;background:#fef2f2"><td style="padding:3px 6px;font-weight:600;color:#991b1b">Steep (9:12+)</td><td style="padding:3px 6px;text-align:right;font-weight:700;color:#991b1b">${slopeClasses.steep} SQ</td><td style="padding:3px 6px;text-align:right;color:#991b1b;font-weight:600">${Math.round(slopeClasses.steep / netSquares * 1000) / 10}%</td></tr>` : ''}
         </tbody>
       </table>
     </div>
@@ -418,20 +437,20 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
   <div style="padding:0 28px;margin-top:4px">
     <div style="display:flex;gap:0;border:1px solid #ccc;border-radius:4px;overflow:hidden;font-size:8px">
       <div style="flex:1;text-align:center;padding:5px 4px;background:#f5f5f5;border-right:1px solid #ddd">
-        <div style="font-size:6.5px;color:#888;font-weight:700;text-transform:uppercase">Total Eave</div>
-        <div style="font-size:12px;font-weight:900;color:#333">${es.total_eave_ft} <span style="font-size:7px;font-weight:600">LF</span></div>
+        <div style="font-size:6.5px;color:#888;font-weight:700;text-transform:uppercase">Total Ridge</div>
+        <div style="font-size:12px;font-weight:900;color:#DC2626">${es.total_ridge_ft} <span style="font-size:7px;font-weight:600">LF</span></div>
       </div>
       <div style="flex:1;text-align:center;padding:5px 4px;background:#f5f5f5;border-right:1px solid #ddd">
-        <div style="font-size:6.5px;color:#888;font-weight:700;text-transform:uppercase">Total Ridge</div>
-        <div style="font-size:12px;font-weight:900;color:#333">${es.total_ridge_ft} <span style="font-size:7px;font-weight:600">LF</span></div>
+        <div style="font-size:6.5px;color:#888;font-weight:700;text-transform:uppercase">Total Eave</div>
+        <div style="font-size:12px;font-weight:900;color:#16A34A">${es.total_eave_ft} <span style="font-size:7px;font-weight:600">LF</span></div>
       </div>
       <div style="flex:1;text-align:center;padding:5px 4px;background:#f5f5f5;border-right:1px solid #ddd">
         <div style="font-size:6.5px;color:#888;font-weight:700;text-transform:uppercase">Total Valley</div>
-        <div style="font-size:12px;font-weight:900;color:#333">${es.total_valley_ft} <span style="font-size:7px;font-weight:600">LF</span></div>
+        <div style="font-size:12px;font-weight:900;color:#2563EB">${es.total_valley_ft} <span style="font-size:7px;font-weight:600">LF</span></div>
       </div>
       <div style="flex:1;text-align:center;padding:5px 4px;background:#f5f5f5;border-right:1px solid #ddd">
-        <div style="font-size:6.5px;color:#888;font-weight:700;text-transform:uppercase">Drip Edge</div>
-        <div style="font-size:12px;font-weight:900;color:#333">${totalPerimeter} <span style="font-size:7px;font-weight:600">LF</span></div>
+        <div style="font-size:6.5px;color:#888;font-weight:700;text-transform:uppercase">Total Hip</div>
+        <div style="font-size:12px;font-weight:900;color:#EA580C">${es.total_hip_ft} <span style="font-size:7px;font-weight:600">LF</span></div>
       </div>
       <div style="flex:1;text-align:center;padding:5px 4px;background:${TEAL_LIGHT}">
         <div style="font-size:6.5px;color:${TEAL_DARK};font-weight:700;text-transform:uppercase">Total SQ (w/waste)</div>
@@ -443,7 +462,7 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
   <!-- Methodology note -->
   <div style="padding:6px 28px 0">
     <div style="padding:4px 8px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:3px;font-size:6.5px;color:#0369a1;line-height:1.4">
-      <strong>Methodology:</strong> Measurements from ${(report as any).roof_trace ? 'user-traced GPS coordinates (UTM projection, Shoelace formula)' : 'AI vision analysis of satellite imagery'}. Pitch multiplier &radic;(rise&sup2;+12&sup2;)/12 applied for true 3D surface area. Engine v5.0 &mdash; Industry-standard multipliers per GAF/CertainTeed/IKO/EagleView.
+      <strong>Methodology:</strong> Measurements from ${(report as any).roof_trace ? 'user-traced GPS coordinates (UTM projection, Shoelace formula)' : 'AI vision analysis of satellite imagery'}. Pitch multiplier &radic;(rise&sup2;+12&sup2;)/12 applied for true 3D surface area. Engine v6.0 &mdash; Industry-standard multipliers per GAF/CertainTeed/IKO/EagleView.
     </div>
   </div>
 
@@ -513,6 +532,137 @@ ${squaresGridSVG ? `
     <span style="color:#a7f3d0;font-size:7.5px">roofreporterai.com &bull; Report: ${reportNum} &bull; ${reportDate} &bull; p.3</span>
   </div>
 </div>` : ''}
+
+<!-- ==================== PITCH DIAGRAM PAGE ==================== -->
+${report.segments.length >= 2 ? `
+<div class="page">
+  <!-- Top indigo accent bar -->
+  <div style="height:4px;background:linear-gradient(90deg,#4338ca,#6366f1)"></div>
+
+  <!-- Title -->
+  <div style="padding:12px 28px 6px">
+    <div style="font-size:14px;font-weight:800;color:#222">Pitch &amp; Slope Analysis<span style="font-weight:400;color:#555"> &mdash; Structure 1</span></div>
+    <div style="font-size:11px;color:#555">${fullAddress}</div>
+  </div>
+
+  <!-- Pitch Diagram SVG — Top-down wireframe of roof planes with pitch labels -->
+  <div style="padding:0 22px;margin-bottom:8px">
+    <div style="border:1px solid #d5dae3;border-radius:4px;overflow:hidden;background:#fff;text-align:center;max-height:340px">
+      ${architecturalDiagramSVG}
+    </div>
+    <div style="text-align:center;font-size:6.5px;color:#999;margin-top:2px">Roof plane wireframe with facet identification numbers. Pitch values mapped per plane below.</div>
+  </div>
+
+  <!-- Area by Pitch Table (Full Width) -->
+  <div style="padding:0 28px;margin-bottom:10px">
+    <div style="font-size:11px;font-weight:800;color:#333;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px;border-bottom:2px solid #4338ca;padding-bottom:4px">Area by Pitch</div>
+    <table style="width:100%;border-collapse:collapse;font-size:9px">
+      <thead>
+        <tr style="background:#1e1b4b;color:#fff">
+          <th style="padding:6px 10px;text-align:left;font-size:8px;font-weight:700">Pitch Range</th>
+          <th style="padding:6px 10px;text-align:left;font-size:8px;font-weight:700">Classification</th>
+          <th style="padding:6px 10px;text-align:right;font-size:8px;font-weight:700">Roof Area (SQ)</th>
+          <th style="padding:6px 10px;text-align:right;font-size:8px;font-weight:700">Area (SF)</th>
+          <th style="padding:6px 10px;text-align:right;font-size:8px;font-weight:700">% of Total</th>
+          <th style="padding:6px 10px;text-align:center;font-size:8px;font-weight:700">Multiplier</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${slopeClasses.flat > 0 ? `<tr style="border-bottom:1px solid #eee">
+          <td style="padding:5px 10px;font-weight:600">0:12 \u2013 2:12</td>
+          <td style="padding:5px 10px"><span style="padding:2px 8px;border-radius:3px;font-size:7.5px;font-weight:700;background:#dbeafe;color:#1d4ed8">FLAT</span></td>
+          <td style="padding:5px 10px;text-align:right;font-weight:700">${slopeClasses.flat} SQ</td>
+          <td style="padding:5px 10px;text-align:right">${Math.round(slopeClasses.flat * 100).toLocaleString()} SF</td>
+          <td style="padding:5px 10px;text-align:right;font-weight:600">${Math.round(slopeClasses.flat / netSquares * 1000) / 10}%</td>
+          <td style="padding:5px 10px;text-align:center;color:#555">1.0000\u20131.0154</td>
+        </tr>` : ''}
+        ${slopeClasses.low > 0 ? `<tr style="border-bottom:1px solid #eee;background:#fafafa">
+          <td style="padding:5px 10px;font-weight:600">2:12 \u2013 4:12</td>
+          <td style="padding:5px 10px"><span style="padding:2px 8px;border-radius:3px;font-size:7.5px;font-weight:700;background:#fef3c7;color:#92400e">LOW</span></td>
+          <td style="padding:5px 10px;text-align:right;font-weight:700">${slopeClasses.low} SQ</td>
+          <td style="padding:5px 10px;text-align:right">${Math.round(slopeClasses.low * 100).toLocaleString()} SF</td>
+          <td style="padding:5px 10px;text-align:right;font-weight:600">${Math.round(slopeClasses.low / netSquares * 1000) / 10}%</td>
+          <td style="padding:5px 10px;text-align:center;color:#555">1.0154\u20131.0541</td>
+        </tr>` : ''}
+        ${slopeClasses.standard > 0 ? `<tr style="border-bottom:1px solid #eee;background:#f0fdf4">
+          <td style="padding:5px 10px;font-weight:700;color:#166534">4:12 \u2013 9:12</td>
+          <td style="padding:5px 10px"><span style="padding:2px 8px;border-radius:3px;font-size:7.5px;font-weight:700;background:#dcfce7;color:#166534">STANDARD</span></td>
+          <td style="padding:5px 10px;text-align:right;font-weight:800;color:#166534">${slopeClasses.standard} SQ</td>
+          <td style="padding:5px 10px;text-align:right;color:#166534">${Math.round(slopeClasses.standard * 100).toLocaleString()} SF</td>
+          <td style="padding:5px 10px;text-align:right;font-weight:700;color:#166534">${Math.round(slopeClasses.standard / netSquares * 1000) / 10}%</td>
+          <td style="padding:5px 10px;text-align:center;color:#166534;font-weight:600">1.0541\u20131.2500</td>
+        </tr>` : ''}
+        ${slopeClasses.steep > 0 ? `<tr style="border-bottom:1px solid #eee;background:#fef2f2">
+          <td style="padding:5px 10px;font-weight:700;color:#991b1b">9:12+</td>
+          <td style="padding:5px 10px"><span style="padding:2px 8px;border-radius:3px;font-size:7.5px;font-weight:700;background:#fecaca;color:#991b1b">STEEP</span></td>
+          <td style="padding:5px 10px;text-align:right;font-weight:800;color:#991b1b">${slopeClasses.steep} SQ</td>
+          <td style="padding:5px 10px;text-align:right;color:#991b1b">${Math.round(slopeClasses.steep * 100).toLocaleString()} SF</td>
+          <td style="padding:5px 10px;text-align:right;font-weight:700;color:#991b1b">${Math.round(slopeClasses.steep / netSquares * 1000) / 10}%</td>
+          <td style="padding:5px 10px;text-align:center;color:#991b1b;font-weight:600">1.2500+</td>
+        </tr>` : ''}
+        <tr style="background:#eef2ff;font-weight:800;border-top:2px solid #4338ca">
+          <td colspan="2" style="padding:5px 10px;font-size:9px;color:#312e81">TOTAL</td>
+          <td style="padding:5px 10px;text-align:right;font-size:10px;color:#312e81">${netSquares} SQ</td>
+          <td style="padding:5px 10px;text-align:right;color:#312e81">${report.total_true_area_sqft.toLocaleString()} SF</td>
+          <td style="padding:5px 10px;text-align:right;color:#312e81">100%</td>
+          <td style="padding:5px 10px;text-align:center;color:#312e81">${report.area_multiplier.toFixed(4)}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Per-Facet Pitch Detail Table -->
+  <div style="padding:0 28px;margin-bottom:8px">
+    <div style="font-size:10px;font-weight:800;color:#333;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:5px">Facet-Level Pitch Detail</div>
+    <table style="width:100%;border-collapse:collapse;font-size:8px">
+      <thead>
+        <tr style="background:#f1f5f9;border-bottom:1.5px solid #94a3b8">
+          <th style="padding:4px 6px;text-align:left;font-weight:700;color:#475569">Facet</th>
+          <th style="padding:4px 6px;text-align:left;font-weight:700;color:#475569">Name</th>
+          <th style="padding:4px 6px;text-align:center;font-weight:700;color:#475569">Direction</th>
+          <th style="padding:4px 6px;text-align:center;font-weight:700;color:#475569">Pitch</th>
+          <th style="padding:4px 6px;text-align:center;font-weight:700;color:#475569">Degrees</th>
+          <th style="padding:4px 6px;text-align:right;font-weight:700;color:#475569">Area (SF)</th>
+          <th style="padding:4px 6px;text-align:right;font-weight:700;color:#475569">Area (SQ)</th>
+          <th style="padding:4px 6px;text-align:center;font-weight:700;color:#475569">Classification</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${report.segments.slice(0, 16).map((seg, idx) => {
+          const rise = 12 * Math.tan(seg.pitch_degrees * Math.PI / 180)
+          const classification = rise <= 2 ? 'Flat' : rise <= 4 ? 'Low' : rise <= 9 ? 'Standard' : 'Steep'
+          const classColor = rise <= 2 ? '#1d4ed8' : rise <= 4 ? '#92400e' : rise <= 9 ? '#166534' : '#991b1b'
+          const classBg = rise <= 2 ? '#dbeafe' : rise <= 4 ? '#fef3c7' : rise <= 9 ? '#dcfce7' : '#fecaca'
+          return `<tr style="${idx % 2 === 0 ? '' : 'background:#fafafa'};border-bottom:1px solid #eee">
+            <td style="padding:3px 6px;font-weight:700;font-size:9px">${segFaceLetters[idx]}</td>
+            <td style="padding:3px 6px;font-size:7.5px;color:#555">${seg.name || 'Facet ' + (idx + 1)}</td>
+            <td style="padding:3px 6px;text-align:center;font-weight:600">${seg.azimuth_direction || '\u2014'}</td>
+            <td style="padding:3px 6px;text-align:center;font-weight:700">${seg.pitch_ratio}</td>
+            <td style="padding:3px 6px;text-align:center;color:#555">${seg.pitch_degrees.toFixed(1)}\u00B0</td>
+            <td style="padding:3px 6px;text-align:right">${Math.round(seg.true_area_sqft).toLocaleString()}</td>
+            <td style="padding:3px 6px;text-align:right;font-weight:600">${(Math.round(seg.true_area_sqft / 100 * 100) / 100)}</td>
+            <td style="padding:3px 6px;text-align:center"><span style="padding:1px 6px;border-radius:2px;font-size:6.5px;font-weight:700;background:${classBg};color:${classColor}">${classification}</span></td>
+          </tr>`
+        }).join('')}
+        ${report.segments.length > 16 ? `<tr><td colspan="8" style="padding:4px 6px;font-size:7px;color:#888;text-align:center">+ ${report.segments.length - 16} more facets</td></tr>` : ''}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Pitch Reference Note -->
+  <div style="padding:0 28px">
+    <div style="padding:5px 10px;background:#eef2ff;border:1px solid #c7d2fe;border-radius:3px;font-size:6.5px;color:#4338ca;line-height:1.4">
+      <strong>Pitch Reference:</strong> Standard walkable slope = 4:12\u20139:12 (18.4\u00B0\u201336.9\u00B0). Multiplier = \u221A(rise\u00B2 + 12\u00B2) \u00F7 12. Steep slope (9:12+) may require additional safety equipment and labor. &mdash; GAF/CertainTeed/IKO guidelines.
+    </div>
+  </div>
+
+  <!-- Footer bar -->
+  <div style="position:absolute;bottom:0;left:0;right:0;height:28px;background:linear-gradient(90deg,#4338ca,#6366f1);display:flex;align-items:center;justify-content:space-between;padding:0 28px">
+    <span style="color:#fff;font-size:9px;font-weight:700">Roof Reporter AI</span>
+    <span style="color:#c7d2fe;font-size:7.5px">roofreporterai.com &bull; Report: ${reportNum} &bull; ${reportDate} &bull; Pitch Analysis</span>
+  </div>
+</div>
+` : ''}
 
 ${report.customer_price_per_bundle ? buildCustomerPricingHTML(report) : ''}
 
@@ -772,10 +922,11 @@ export function generateSimpleTwoPageReport(report: RoofReport): string {
     edgeTypeMap[key].count++
     edgeTypeMap[key].totalFt += e.true_length_ft
   })
+  // Edge color map — Industry Standard: Red=Ridge, Green=Eave, Blue=Valley, Orange=Hip, Purple=Rake
   const edgeColorMap: Record<string, string> = {
-    eave: '#D40000', ridge: '#FFB800', hip: '#00BCD4', valley: '#00CC00',
-    rake: '#7C3AED', step_flashing: '#E65100', wall_flashing: '#9C27B0',
-    transition: '#607D8B', parapet: '#795548', gable: '#7C3AED', flashing: '#E65100'
+    eave: '#16A34A', ridge: '#DC2626', hip: '#EA580C', valley: '#2563EB',
+    rake: '#7C3AED', step_flashing: '#F59E0B', wall_flashing: '#8B5CF6',
+    transition: '#0891B2', parapet: '#78716C', gable: '#7C3AED', flashing: '#F59E0B'
   }
   Object.entries(edgeTypeMap).forEach(([type, data]) => {
     edgeRows.push({ type, color: edgeColorMap[type] || '#555', count: data.count, totalFt: Math.round(data.totalFt * 10) / 10 })
@@ -836,18 +987,18 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
 
   <!-- ESTIMATED ROOFER MEASUREMENTS header -->
   <div style="text-align:center;padding:8px 28px 4px">
-    <div style="font-size:10px;font-weight:800;color:#1a1a1a;text-transform:uppercase;letter-spacing:1.5px;border-top:1.5px solid #ccc;border-bottom:1.5px solid #ccc;padding:5px 0">Estimated Roofer Measurements</div>
+    <div style="font-size:10px;font-weight:800;color:#1a1a1a;text-transform:uppercase;letter-spacing:1.5px;border-top:1.5px solid #ccc;border-bottom:1.5px solid #ccc;padding:5px 0">Roof Measurement Summary</div>
   </div>
 
-  <!-- Two-column tables -->
+  <!-- Two-column tables: Length Summary + Area by Roof Plane -->
   <div style="padding:0 22px;display:grid;grid-template-columns:1fr 1fr;gap:10px">
-    <!-- LEFT TABLE: Measurement Totals by Material & Section -->
+    <!-- LEFT TABLE: Length Summary -->
     <div>
+      <div style="font-size:7.5px;font-weight:700;color:#555;margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px">Length Summary</div>
       <table style="width:100%;border-collapse:collapse;font-size:7.5px">
         <thead>
           <tr style="background:#001a44;color:#fff">
-            <th style="padding:4px 6px;text-align:left;font-size:7px;font-weight:700">Section</th>
-            <th style="padding:4px 6px;text-align:left;font-size:7px;font-weight:700">Line Type</th>
+            <th style="padding:4px 6px;text-align:left;font-size:7px;font-weight:700">Edge Type</th>
             <th style="padding:4px 6px;text-align:center;font-size:7px;font-weight:700">Count</th>
             <th style="padding:4px 6px;text-align:right;font-size:7px;font-weight:700">Length (LF)</th>
           </tr>
@@ -855,77 +1006,97 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
         <tbody>
           ${edgeRows.map((r, i) => `
           <tr style="border-bottom:1px solid #eee;${i % 2 === 0 ? '' : 'background:#f9fafb'}">
-            <td style="padding:3px 6px;font-weight:600;font-size:7.5px">${String.fromCharCode(65 + i)}</td>
-            <td style="padding:3px 6px;font-size:7.5px"><span style="display:inline-block;width:10px;height:3px;background:${r.color};border-radius:1px;margin-right:4px;vertical-align:middle"></span><span style="text-transform:capitalize">${r.type.replace(/_/g, ' ')}</span></td>
+            <td style="padding:3px 6px;font-size:7.5px"><span style="display:inline-block;width:10px;height:3px;background:${r.color};border-radius:1px;margin-right:4px;vertical-align:middle"></span><span style="font-weight:600;text-transform:capitalize">${r.type.replace(/_/g, ' ')}</span></td>
             <td style="padding:3px 6px;text-align:center;font-size:7.5px">${r.count}</td>
             <td style="padding:3px 6px;text-align:right;font-weight:700;font-size:7.5px">${r.totalFt}</td>
           </tr>`).join('')}
           <tr style="border-top:2px solid #001a44;background:#f0f3f7">
-            <td colspan="3" style="padding:4px 6px;font-weight:800;font-size:7.5px">Total Linear</td>
-            <td style="padding:4px 6px;text-align:right;font-weight:900;font-size:8px;color:#001a44">${totalLinearFt} ft</td>
+            <td style="padding:4px 6px;font-weight:800;font-size:7.5px">Total Linear</td>
+            <td style="padding:4px 6px;text-align:center">${report.edges.length}</td>
+            <td style="padding:4px 6px;text-align:right;font-weight:900;font-size:8px;color:#001a44">${totalLinearFt} LF</td>
           </tr>
         </tbody>
       </table>
     </div>
 
-    <!-- RIGHT TABLE: Area Calculation & Scope Data -->
+    <!-- RIGHT TABLE: Area by Roof Plane -->
     <div>
+      <div style="font-size:7.5px;font-weight:700;color:#555;margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px">Area by Roof Plane</div>
       <table style="width:100%;border-collapse:collapse;font-size:7.5px">
         <thead>
           <tr style="background:#001a44;color:#fff">
-            <th style="padding:4px 6px;text-align:left;font-size:7px;font-weight:700">Section</th>
-            <th style="padding:4px 6px;text-align:right;font-size:7px;font-weight:700">Area (Sq Ft)</th>
+            <th style="padding:4px 6px;text-align:left;font-size:7px;font-weight:700">Plane</th>
+            <th style="padding:4px 6px;text-align:right;font-size:7px;font-weight:700">Area (SF)</th>
             <th style="padding:4px 6px;text-align:center;font-size:7px;font-weight:700">Pitch</th>
-            <th style="padding:4px 6px;text-align:right;font-size:7px;font-weight:700">Multiplier</th>
+            <th style="padding:4px 6px;text-align:right;font-size:7px;font-weight:700">% Total</th>
           </tr>
         </thead>
         <tbody>
-          ${segAreaRows.map((r, i) => `
+          ${segAreaRows.map((r, i) => {
+            const pctOfTotal = Math.round(r.area / report.total_true_area_sqft * 1000) / 10
+            return `
           <tr style="border-bottom:1px solid #eee;${i % 2 === 0 ? '' : 'background:#f9fafb'}">
-            <td style="padding:3px 6px;font-weight:600;font-size:7.5px">${r.label}</td>
+            <td style="padding:3px 6px;font-weight:600;font-size:7.5px">${r.label} <span style="font-size:6px;color:#999">${report.segments[i]?.azimuth_direction || ''}</span></td>
             <td style="padding:3px 6px;text-align:right;font-size:7.5px">${r.area.toLocaleString()}</td>
-            <td style="padding:3px 6px;text-align:center;font-size:7.5px">${r.pitch}</td>
-            <td style="padding:3px 6px;text-align:right;font-size:7.5px">${r.multiplier}</td>
-          </tr>`).join('')}
+            <td style="padding:3px 6px;text-align:center;font-size:7.5px;font-weight:600">${r.pitch}</td>
+            <td style="padding:3px 6px;text-align:right;font-size:7.5px;color:#555">${pctOfTotal}%</td>
+          </tr>`}).join('')}
           <tr style="border-top:1px solid #ccc;background:#f0f3f7">
-            <td style="padding:3px 6px;font-weight:700;font-size:7.5px">Total Field Surface Area</td>
-            <td colspan="3" style="padding:3px 6px;text-align:right;font-weight:800;font-size:8px;color:#001a44">${report.total_true_area_sqft.toLocaleString()} ft&sup2;</td>
-          </tr>
-          <tr style="background:#f0f3f7">
-            <td style="padding:3px 6px;font-size:7px;color:#666">Estimated Waste Factor (${mat.waste_pct || 15}%)</td>
-            <td colspan="3" style="padding:3px 6px;text-align:right;font-size:7.5px;color:#666">${mat.waste_pct || 15}%</td>
+            <td style="padding:3px 6px;font-weight:700;font-size:7.5px">Total Field Area</td>
+            <td style="padding:3px 6px;text-align:right;font-weight:800;font-size:8px;color:#001a44">${report.total_true_area_sqft.toLocaleString()} SF</td>
+            <td style="padding:3px 6px;text-align:center;font-size:7px;font-weight:600">${predominantPitch}</td>
+            <td style="padding:3px 6px;text-align:right;font-size:7px">100%</td>
           </tr>
           <tr style="border-top:2px solid #001a44;background:#e6edf5">
-            <td style="padding:4px 6px;font-weight:800;font-size:8px;color:#001a44">Total Sq Ft Required</td>
-            <td colspan="3" style="padding:4px 6px;text-align:right;font-weight:900;font-size:9px;color:#001a44">${Math.round(report.total_true_area_sqft * (1 + (mat.waste_pct || 15) / 100)).toLocaleString()} ft&sup2;</td>
+            <td style="padding:4px 6px;font-weight:800;font-size:8px;color:#001a44">Total (w/${mat.waste_pct || 15}% waste)</td>
+            <td colspan="3" style="padding:4px 6px;text-align:right;font-weight:900;font-size:9px;color:#001a44">${Math.round(report.total_true_area_sqft * (1 + (mat.waste_pct || 15) / 100)).toLocaleString()} SF (${grossSquares} SQ)</td>
           </tr>
         </tbody>
       </table>
     </div>
   </div>
 
-  <!-- All Project Totals row -->
-  <div style="padding:6px 22px">
-    <div style="display:flex;gap:12px;font-size:7px;color:#555;font-weight:600;justify-content:flex-end;flex-wrap:wrap">
-      <span>Total Eave Length = ${es.total_eave_ft} ft</span>
-      <span>Total Ridge Length = ${es.total_ridge_ft} ft</span>
-      ${es.total_valley_ft > 0 ? `<span>Total Valley Length = ${es.total_valley_ft} ft</span>` : ''}
-      ${es.total_hip_ft > 0 ? `<span>Total Hip Length = ${es.total_hip_ft} ft</span>` : ''}
-      <span style="font-weight:800;color:#001a44;font-size:7.5px">Total Sq Ft = ${report.total_true_area_sqft.toLocaleString()}</span>
+  <!-- Total Area Summary strip + Area by Pitch (compact row) -->
+  <div style="padding:6px 22px 0">
+    <div style="display:flex;gap:0;border:1px solid #ccc;border-radius:4px;overflow:hidden;font-size:7px">
+      <div style="flex:1;text-align:center;padding:4px;background:#f5f5f5;border-right:1px solid #ddd">
+        <div style="font-size:6px;color:#888;font-weight:700;text-transform:uppercase">Ridge</div>
+        <div style="font-size:10px;font-weight:900;color:#DC2626">${es.total_ridge_ft} <span style="font-size:6px">LF</span></div>
+      </div>
+      <div style="flex:1;text-align:center;padding:4px;background:#f5f5f5;border-right:1px solid #ddd">
+        <div style="font-size:6px;color:#888;font-weight:700;text-transform:uppercase">Eave</div>
+        <div style="font-size:10px;font-weight:900;color:#16A34A">${es.total_eave_ft} <span style="font-size:6px">LF</span></div>
+      </div>
+      <div style="flex:1;text-align:center;padding:4px;background:#f5f5f5;border-right:1px solid #ddd">
+        <div style="font-size:6px;color:#888;font-weight:700;text-transform:uppercase">Valley</div>
+        <div style="font-size:10px;font-weight:900;color:#2563EB">${es.total_valley_ft} <span style="font-size:6px">LF</span></div>
+      </div>
+      <div style="flex:1;text-align:center;padding:4px;background:#f5f5f5;border-right:1px solid #ddd">
+        <div style="font-size:6px;color:#888;font-weight:700;text-transform:uppercase">Hip</div>
+        <div style="font-size:10px;font-weight:900;color:#EA580C">${es.total_hip_ft} <span style="font-size:6px">LF</span></div>
+      </div>
+      <div style="flex:1;text-align:center;padding:4px;background:#f5f5f5;border-right:1px solid #ddd">
+        <div style="font-size:6px;color:#888;font-weight:700;text-transform:uppercase">Perimeter</div>
+        <div style="font-size:10px;font-weight:900;color:#001a44">${totalPerimeter} <span style="font-size:6px">LF</span></div>
+      </div>
+      <div style="flex:1;text-align:center;padding:4px;background:#e0f7fa">
+        <div style="font-size:6px;color:#00695C;font-weight:700;text-transform:uppercase">Total SQ</div>
+        <div style="font-size:10px;font-weight:900;color:#00695C">${grossSquares} <span style="font-size:6px">SQ</span></div>
+      </div>
     </div>
   </div>
 
   <!-- Drawing Key -->
   <div style="padding:4px 22px 6px">
-    <div style="font-size:8px;font-weight:700;color:#333;margin-bottom:3px">Drawing Key</div>
+    <div style="font-size:8px;font-weight:700;color:#333;margin-bottom:3px">Drawing Key &mdash; Industry Standard Color Coding</div>
     <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:7.5px;color:#444">
-      <div style="display:flex;align-items:center;gap:4px"><span style="width:16px;height:3px;background:#D40000;display:inline-block;border-radius:1px"></span>Eave</div>
-      <div style="display:flex;align-items:center;gap:4px"><span style="width:16px;height:3px;background:#FFB800;display:inline-block;border-radius:1px"></span>Hip</div>
-      <div style="display:flex;align-items:center;gap:4px"><span style="width:16px;height:3px;background:#dc2626;display:inline-block;border-radius:1px"></span>Ridge</div>
+      <div style="display:flex;align-items:center;gap:4px"><span style="width:16px;height:3px;background:#DC2626;display:inline-block;border-radius:1px"></span>Ridge</div>
+      <div style="display:flex;align-items:center;gap:4px"><span style="width:16px;height:3px;background:#16A34A;display:inline-block;border-radius:1px"></span>Eave</div>
+      <div style="display:flex;align-items:center;gap:4px"><span style="width:16px;height:3px;background:#2563EB;display:inline-block;border-radius:1px"></span>Valley</div>
+      <div style="display:flex;align-items:center;gap:4px"><span style="width:16px;height:3px;background:#EA580C;display:inline-block;border-radius:1px"></span>Hip</div>
       <div style="display:flex;align-items:center;gap:4px"><span style="width:16px;height:3px;background:#7C3AED;display:inline-block;border-radius:1px"></span>Rake Edge</div>
-      <div style="display:flex;align-items:center;gap:4px"><span style="width:16px;height:3px;background:#00BCD4;border-radius:1px;display:inline-block;border-bottom:1px dashed #00BCD4"></span>Valley</div>
-      ${es.total_parapet_ft ? `<div style="display:flex;align-items:center;gap:4px"><span style="width:16px;height:3px;background:#795548;display:inline-block;border-radius:1px"></span>Parapet</div>` : ''}
-      ${(es.total_step_flashing_ft || 0) > 0 ? `<div style="display:flex;align-items:center;gap:4px"><span style="width:16px;height:3px;background:#E65100;display:inline-block;border-radius:1px"></span>Step Flashing</div>` : ''}
+      ${es.total_parapet_ft ? `<div style="display:flex;align-items:center;gap:4px"><span style="width:16px;height:3px;background:#78716C;display:inline-block;border-radius:1px"></span>Parapet</div>` : ''}
+      ${(es.total_step_flashing_ft || 0) > 0 ? `<div style="display:flex;align-items:center;gap:4px"><span style="width:16px;height:3px;background:#F59E0B;display:inline-block;border-radius:1px"></span>Step Flashing</div>` : ''}
     </div>
   </div>
 
