@@ -116,6 +116,10 @@ export type Bindings = {
   META_APP_ID: string              // Facebook App ID (used for token exchange)
   META_APP_SECRET: string          // Facebook App Secret (used for long-lived token exchange)
   META_AD_ACCOUNT_ID: string       // Meta Ads Account ID (numeric, no 'act_' prefix)
+
+  // ── HeyGen AI Video Generation ─────────────────────────
+  // Get your API key at: https://app.heygen.com/settings?nav=API
+  HEYGEN_API_KEY: string           // e.g. "your-heygen-api-key" — for AI avatar video generation
 }
 
 // ============================================================

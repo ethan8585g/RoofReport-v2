@@ -124,6 +124,14 @@ async function loadView(view) {
         if (lkTrunksRes) SA.data.livekit_trunks = await lkTrunksRes.json();
         if (lkRulesRes) SA.data.livekit_rules = await lkRulesRes.json();
         break;
+      case 'heygen':
+        // Handled by heygen.js module
+        if (typeof window.loadHeyGen === 'function') {
+          SA.loading = false;
+          window.loadHeyGen();
+          return;
+        }
+        break;
     }
   } catch (e) {
     console.error('Load error:', e);
@@ -219,6 +227,7 @@ function renderContent() {
     case 'call-center': break; // Handled by call-center.js
     case 'meta-connect': break; // Handled by meta-connect.js
     case 'livekit': root.innerHTML = renderLiveKitView(); break;
+    case 'heygen': break; // Handled by heygen.js
     default: root.innerHTML = renderUsersView();
   }
 }
