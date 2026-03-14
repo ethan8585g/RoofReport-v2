@@ -62,10 +62,10 @@
 
       <!-- Tab Navigation -->
       <div class="flex gap-1 mb-6 bg-gray-100 rounded-xl p-1">
-        ${['overview','agents','campaigns','prospects','call-logs'].map(t => 
+        ${['overview','agents','contact-lists','campaigns','prospects','call-logs','deploy'].map(t => 
           `<button onclick="window.ccSetTab('${t}')" id="cc-tab-${t}" class="cc-tab px-4 py-2 rounded-lg text-sm font-medium transition-all ${CC.tab===t ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}">
-            <i class="fas fa-${t==='overview'?'chart-pie':t==='agents'?'robot':t==='campaigns'?'bullhorn':t==='prospects'?'building':t==='call-logs'?'list-alt':'circle'} mr-1.5"></i>
-            ${t==='overview'?'Overview':t==='agents'?'AI Agents':t==='campaigns'?'Campaigns':t==='prospects'?'Prospects':t==='call-logs'?'Call Logs':''}
+            <i class="fas fa-${t==='overview'?'chart-pie':t==='agents'?'robot':t==='contact-lists'?'address-book':t==='campaigns'?'bullhorn':t==='prospects'?'building':t==='call-logs'?'list-alt':t==='deploy'?'rocket':'circle'} mr-1.5"></i>
+            ${t==='overview'?'Overview':t==='agents'?'AI Agents':t==='contact-lists'?'Contact Lists':t==='campaigns'?'Campaigns':t==='prospects'?'Prospects':t==='call-logs'?'Call Logs':t==='deploy'?'Deploy':''}  
           </button>`
         ).join('')}
       </div>
@@ -110,6 +110,19 @@
       case 'call-logs':
         CC.data.callLogs = await ccFetch('/api/call-center/call-logs?page=' + CC.callLogPage + '&limit=50');
         break;
+      case 'contact-lists':
+        CC.data.contactLists = await ccFetch('/api/call-center/contact-lists');
+        break;
+      case 'deploy':
+        const [dAgents, dLists, dCamps] = await Promise.all([
+          ccFetch('/api/call-center/agents'),
+          ccFetch('/api/call-center/contact-lists'),
+          ccFetch('/api/call-center/campaigns'),
+        ]);
+        CC.data.agents = dAgents;
+        CC.data.contactLists = dLists;
+        CC.data.campaigns = dCamps;
+        break;
     }
     CC.loading = false;
     renderTab(tab);
@@ -124,6 +137,8 @@
       case 'campaigns': content.innerHTML = renderCampaigns(); break;
       case 'prospects': content.innerHTML = renderProspects(); break;
       case 'call-logs': content.innerHTML = renderCallLogs(); break;
+      case 'contact-lists': content.innerHTML = renderContactLists(); break;
+      case 'deploy': content.innerHTML = renderDeploy(); break;
     }
   }
 
@@ -300,7 +315,7 @@
         </div>
         <div class="p-6 space-y-4">
           <div>
-            <label class="block text-xs font-semibold text-gray-600 mb-1">Agent Name</label>
+            <label class="block text-xs font-semibold text-gray-600 mb-1">Agent Name *</label>
             <input id="cc-agent-name" type="text" placeholder="e.g. Alex" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 focus:border-orange-500" />
           </div>
           <div>
@@ -315,8 +330,9 @@
             </select>
           </div>
           <div>
-            <label class="block text-xs font-semibold text-gray-600 mb-1">Persona / Selling Style</label>
-            <textarea id="cc-agent-persona" rows="3" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500" placeholder="e.g. Friendly and consultative sales approach. Focus on showing ROI and time savings. Open with asking about their current estimating workflow."></textarea>
+            <label class="block text-xs font-semibold text-gray-600 mb-1">Persona / Full System Prompt</label>
+            <p class="text-xs text-gray-400 mb-1">Detailed instructions for how the agent should behave, respond, handle objections, and close</p>
+            <textarea id="cc-agent-persona" rows="5" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500" placeholder="e.g. You are Alex, a friendly and consultative sales representative for RoofReporterAI. Your goal is to connect with roofing company owners and estimators, understand their current estimating workflow, and show how our AI-powered instant roof measurement reports can save them time and money.&#10;&#10;Opening: Ask about their business and current estimating process.&#10;Value prop: Highlight 60-second reports, 95%+ accuracy, no ladders or drones needed.&#10;Objection handling: For price concerns, emphasize ROI — each $15-30 report replaces an hour of manual work.&#10;Close: Offer a free demo report on one of their recent job sites."></textarea>
           </div>
           <div>
             <label class="block text-xs font-semibold text-gray-600 mb-1">Room Prefix</label>
@@ -616,6 +632,217 @@
   }
 
   // ============================================================
+  // CONTACT LISTS TAB
+  // ============================================================
+  function renderContactLists() {
+    const lists = (CC.data.contactLists || {}).lists || [];
+    return `<div class="space-y-6">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-sm text-gray-500">${lists.length} contact list${lists.length!==1?'s':''}</p>
+          <p class="text-xs text-gray-400 mt-0.5">Organize prospects by area/region for targeted campaigns</p>
+        </div>
+        <button onclick="window.ccShowCreateList()" class="px-4 py-2 bg-orange-600 text-white rounded-lg text-sm font-semibold hover:bg-orange-700 transition-colors shadow-sm">
+          <i class="fas fa-plus mr-1"></i>New Contact List
+        </button>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        ${lists.length === 0 ? `
+          <div class="col-span-3 bg-white rounded-xl border-2 border-dashed border-gray-200 p-12 text-center">
+            <i class="fas fa-address-book text-5xl text-gray-300 mb-4"></i>
+            <p class="text-gray-500 font-medium">No contact lists yet</p>
+            <p class="text-gray-400 text-sm mt-1">Create a list for each area/region to organize your outbound prospects</p>
+            <button onclick="window.ccShowCreateList()" class="mt-4 px-5 py-2.5 bg-orange-600 text-white rounded-lg text-sm font-semibold hover:bg-orange-700">
+              <i class="fas fa-plus mr-1"></i>Create First List
+            </button>
+          </div>
+        ` : lists.map(l => `
+          <div class="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden hover:shadow-md transition-shadow">
+            <div class="p-5">
+              <div class="flex items-start justify-between">
+                <div>
+                  <h4 class="font-bold text-gray-900">${l.name}</h4>
+                  <p class="text-xs text-gray-400 mt-0.5">${[l.area, l.province_state, l.country].filter(Boolean).join(', ') || 'No area set'}</p>
+                </div>
+                <span class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${l.status==='active'?'bg-green-100 text-green-700':'bg-gray-100 text-gray-500'}">${l.status||'active'}</span>
+              </div>
+              ${l.description ? '<p class="text-xs text-gray-500 mt-2 line-clamp-2">' + l.description + '</p>' : ''}
+              ${l.tags ? '<div class="flex flex-wrap gap-1 mt-2">' + l.tags.split(',').filter(Boolean).map(t => '<span class="px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded text-[10px]">' + t.trim() + '</span>').join('') + '</div>' : ''}
+              <div class="mt-3 flex items-center gap-2">
+                <div class="flex-1 p-3 bg-orange-50 rounded-lg text-center">
+                  <div class="text-xl font-black text-orange-700">${l.member_count || l.total_contacts || 0}</div>
+                  <div class="text-[10px] text-orange-500 uppercase font-semibold">Contacts</div>
+                </div>
+              </div>
+            </div>
+            <div class="px-5 py-3 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
+              <div class="flex gap-1">
+                <button onclick="window.ccViewList(${l.id})" class="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700"><i class="fas fa-eye mr-1"></i>View</button>
+                <button onclick="window.ccImportToList(${l.id})" class="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-semibold hover:bg-emerald-700"><i class="fas fa-file-csv mr-1"></i>Import CSV</button>
+              </div>
+              <button onclick="window.ccDeleteList(${l.id})" class="px-2 py-1.5 text-gray-400 hover:text-red-600 text-xs"><i class="fas fa-trash"></i></button>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+
+    <!-- Create List Modal -->
+    <div id="cc-list-modal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-center justify-center">
+      <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
+        <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+          <h3 class="font-bold text-gray-900"><i class="fas fa-address-book mr-2 text-orange-500"></i>Create Contact List</h3>
+          <button onclick="document.getElementById('cc-list-modal').classList.add('hidden')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="p-6 space-y-4">
+          <div><label class="block text-xs font-semibold text-gray-600 mb-1">List Name *</label><input id="cc-list-name" type="text" placeholder="e.g. Edmonton Roofers Q1 2026" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500" /></div>
+          <div><label class="block text-xs font-semibold text-gray-600 mb-1">Description</label><input id="cc-list-desc" type="text" placeholder="e.g. Roofing companies in the Edmonton metro area" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500" /></div>
+          <div class="grid grid-cols-3 gap-3">
+            <div><label class="block text-xs font-semibold text-gray-600 mb-1">Area/City</label><input id="cc-list-area" type="text" placeholder="e.g. Edmonton" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500" /></div>
+            <div><label class="block text-xs font-semibold text-gray-600 mb-1">Province/State</label><input id="cc-list-prov" type="text" placeholder="e.g. AB" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500" /></div>
+            <div><label class="block text-xs font-semibold text-gray-600 mb-1">Country</label><input id="cc-list-country" type="text" value="CA" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500" /></div>
+          </div>
+          <div><label class="block text-xs font-semibold text-gray-600 mb-1">Tags (comma-separated)</label><input id="cc-list-tags" type="text" placeholder="e.g. residential, commercial, high-value" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500" /></div>
+          <button onclick="window.ccCreateList()" class="w-full bg-orange-600 text-white py-2.5 rounded-lg font-semibold hover:bg-orange-700 transition-colors"><i class="fas fa-plus mr-1"></i>Create List</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Import to List Modal -->
+    <div id="cc-list-import-modal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-center justify-center">
+      <div class="bg-white rounded-2xl shadow-2xl w-full max-w-xl mx-4 max-h-[90vh] overflow-y-auto">
+        <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+          <h3 class="font-bold text-gray-900"><i class="fas fa-file-csv mr-2 text-emerald-500"></i>Import CSV to Contact List</h3>
+          <button onclick="document.getElementById('cc-list-import-modal').classList.add('hidden')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="p-6 space-y-4">
+          <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-700">
+            <p class="font-semibold mb-1"><i class="fas fa-info-circle mr-1"></i>CSV Format</p>
+            <p>Required columns: <code class="bg-white px-1 rounded">company_name</code>, <code class="bg-white px-1 rounded">phone</code></p>
+            <p class="mt-1">Optional: <code class="bg-white px-1 rounded">contact_name</code>, <code class="bg-white px-1 rounded">email</code>, <code class="bg-white px-1 rounded">city</code>, <code class="bg-white px-1 rounded">province_state</code></p>
+          </div>
+          <textarea id="cc-list-csv-data" rows="10" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-xs font-mono" placeholder="company_name,contact_name,phone,email,city,province_state&#10;ABC Roofing,John Smith,+14035551234,john@abc.com,Calgary,AB&#10;XYZ Contractors,Jane Doe,+17805559876,jane@xyz.com,Edmonton,AB"></textarea>
+          <input type="hidden" id="cc-list-import-id" />
+          <div id="cc-list-import-result" class="hidden text-sm"></div>
+          <button onclick="window.ccImportToListExec()" class="w-full bg-emerald-600 text-white py-2.5 rounded-lg font-semibold hover:bg-emerald-700 transition-colors"><i class="fas fa-upload mr-1"></i>Import Contacts</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- View List Members Modal -->
+    <div id="cc-list-view-modal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-center justify-center">
+      <div class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl mx-4 max-h-[90vh] overflow-y-auto">
+        <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+          <h3 class="font-bold text-gray-900"><i class="fas fa-users mr-2 text-blue-500"></i><span id="cc-list-view-title">Contact List</span></h3>
+          <button onclick="document.getElementById('cc-list-view-modal').classList.add('hidden')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+        </div>
+        <div id="cc-list-view-content" class="p-6">
+          <div class="py-12 text-center text-gray-400"><i class="fas fa-spinner fa-spin text-xl"></i></div>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  // ============================================================
+  // DEPLOY TAB — Link agent + contact list and launch
+  // ============================================================
+  function renderDeploy() {
+    const agents = (CC.data.agents || {}).agents || [];
+    const lists = (CC.data.contactLists || {}).lists || [];
+    const campaigns = (CC.data.campaigns || {}).campaigns || [];
+
+    return `<div class="space-y-6">
+      <div class="bg-gradient-to-r from-orange-500 to-red-600 rounded-2xl p-6 text-white shadow-lg">
+        <h3 class="text-xl font-black flex items-center gap-2"><i class="fas fa-rocket"></i>Deploy Marketing Call Center</h3>
+        <p class="text-orange-100 text-sm mt-1">Select an AI agent, connect a contact list, and launch your outbound calling campaign</p>
+      </div>
+
+      <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-6 space-y-6">
+        <!-- Step 1: Select Agent -->
+        <div>
+          <div class="flex items-center gap-2 mb-3">
+            <div class="w-7 h-7 bg-orange-100 rounded-lg flex items-center justify-center"><span class="text-orange-600 font-black text-sm">1</span></div>
+            <h4 class="font-bold text-gray-900">Select AI Agent</h4>
+          </div>
+          ${agents.length === 0 ? '<p class="text-sm text-gray-400 ml-9">No agents created yet. <a href="#" onclick="window.ccSetTab(\'agents\'); return false;" class="text-orange-600 underline">Create one first</a>.</p>' : `
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 ml-9">
+              ${agents.map(a => `
+                <label class="cursor-pointer">
+                  <input type="radio" name="deploy-agent" value="${a.id}" class="hidden peer">
+                  <div class="p-4 border-2 border-gray-100 rounded-xl peer-checked:border-orange-500 peer-checked:bg-orange-50 hover:border-gray-200 transition-all">
+                    <div class="flex items-center gap-3">
+                      <div class="w-10 h-10 bg-gradient-to-br ${a.status==='calling'?'from-green-400 to-emerald-600':'from-gray-300 to-gray-400'} rounded-xl flex items-center justify-center">
+                        <i class="fas fa-robot text-white"></i>
+                      </div>
+                      <div>
+                        <div class="font-bold text-gray-900 text-sm">${a.name}</div>
+                        <div class="text-xs text-gray-400">Voice: ${a.voice_id} &middot; ${a.total_calls||0} calls</div>
+                      </div>
+                    </div>
+                    ${a.persona ? '<p class="text-xs text-gray-500 mt-2 line-clamp-1">' + a.persona + '</p>' : ''}
+                  </div>
+                </label>
+              `).join('')}
+            </div>
+          `}
+        </div>
+
+        <!-- Step 2: Select Contact List -->
+        <div>
+          <div class="flex items-center gap-2 mb-3">
+            <div class="w-7 h-7 bg-orange-100 rounded-lg flex items-center justify-center"><span class="text-orange-600 font-black text-sm">2</span></div>
+            <h4 class="font-bold text-gray-900">Select Contact List</h4>
+          </div>
+          ${lists.length === 0 ? '<p class="text-sm text-gray-400 ml-9">No contact lists created yet. <a href="#" onclick="window.ccSetTab(\'contact-lists\'); return false;" class="text-orange-600 underline">Create one first</a>.</p>' : `
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 ml-9">
+              ${lists.map(l => `
+                <label class="cursor-pointer">
+                  <input type="radio" name="deploy-list" value="${l.id}" class="hidden peer">
+                  <div class="p-4 border-2 border-gray-100 rounded-xl peer-checked:border-orange-500 peer-checked:bg-orange-50 hover:border-gray-200 transition-all">
+                    <div class="flex items-center justify-between">
+                      <div>
+                        <div class="font-bold text-gray-900 text-sm">${l.name}</div>
+                        <div class="text-xs text-gray-400">${[l.area, l.province_state].filter(Boolean).join(', ') || 'No area'}</div>
+                      </div>
+                      <div class="text-right">
+                        <div class="text-lg font-black text-orange-600">${l.member_count || l.total_contacts || 0}</div>
+                        <div class="text-[10px] text-gray-400 uppercase">contacts</div>
+                      </div>
+                    </div>
+                  </div>
+                </label>
+              `).join('')}
+            </div>
+          `}
+        </div>
+
+        <!-- Step 3: Campaign (optional) -->
+        <div>
+          <div class="flex items-center gap-2 mb-3">
+            <div class="w-7 h-7 bg-orange-100 rounded-lg flex items-center justify-center"><span class="text-orange-600 font-black text-sm">3</span></div>
+            <h4 class="font-bold text-gray-900">Link to Campaign <span class="text-xs text-gray-400 font-normal">(optional — auto-creates if blank)</span></h4>
+          </div>
+          <div class="ml-9">
+            <select id="deploy-campaign" class="w-full max-w-md border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500">
+              <option value="">Auto-create new campaign</option>
+              ${campaigns.map(c => '<option value="' + c.id + '">' + c.name + ' (' + (c.status||'draft') + ')</option>').join('')}
+            </select>
+          </div>
+        </div>
+
+        <!-- Deploy Button -->
+        <div class="pt-4 border-t border-gray-100">
+          <div id="cc-deploy-status" class="hidden text-sm mb-3"></div>
+          <button onclick="window.ccDeployCampaign()" class="w-full md:w-auto px-8 py-3 bg-gradient-to-r from-orange-500 to-red-600 text-white rounded-xl font-bold text-sm hover:from-orange-600 hover:to-red-700 transition-all shadow-lg hover:shadow-xl">
+            <i class="fas fa-rocket mr-2"></i>Deploy & Start Calling
+          </button>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  // ============================================================
   // HELPER PILLS
   // ============================================================
   function statusPill(s) {
@@ -761,6 +988,100 @@
       alert('Call initiated! Room: ' + data.room_name);
       ccLoadTab('prospects');
     } else alert(data?.error || 'Dial failed');
+  };
+
+  // Contact Lists
+  window.ccShowCreateList = function() { document.getElementById('cc-list-modal').classList.remove('hidden'); };
+  window.ccCreateList = async function() {
+    const name = document.getElementById('cc-list-name').value.trim();
+    if (!name) return alert('List name required');
+    const data = await ccFetch('/api/call-center/contact-lists', { method: 'POST', body: JSON.stringify({
+      name,
+      description: document.getElementById('cc-list-desc').value,
+      area: document.getElementById('cc-list-area').value,
+      province_state: document.getElementById('cc-list-prov').value,
+      country: document.getElementById('cc-list-country').value || 'CA',
+      tags: document.getElementById('cc-list-tags').value,
+    }) });
+    if (data?.success) { document.getElementById('cc-list-modal').classList.add('hidden'); ccLoadTab('contact-lists'); }
+    else alert(data?.error || 'Failed');
+  };
+  window.ccDeleteList = async function(id) {
+    if (!confirm('Archive this contact list?')) return;
+    await ccFetch('/api/call-center/contact-lists/' + id, { method: 'DELETE' });
+    ccLoadTab('contact-lists');
+  };
+  window.ccImportToList = function(listId) {
+    document.getElementById('cc-list-import-id').value = listId;
+    document.getElementById('cc-list-csv-data').value = '';
+    const resultEl = document.getElementById('cc-list-import-result');
+    if (resultEl) { resultEl.classList.add('hidden'); resultEl.innerHTML = ''; }
+    document.getElementById('cc-list-import-modal').classList.remove('hidden');
+  };
+  window.ccImportToListExec = async function() {
+    const listId = document.getElementById('cc-list-import-id').value;
+    const csv = document.getElementById('cc-list-csv-data').value.trim();
+    if (!csv) return alert('Paste CSV data');
+    const resultEl = document.getElementById('cc-list-import-result');
+    resultEl.classList.remove('hidden');
+    resultEl.className = 'text-sm text-blue-600';
+    resultEl.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>Importing...';
+    const data = await ccFetch('/api/call-center/contact-lists/' + listId + '/import', { method: 'POST', body: JSON.stringify({ csv_data: csv }) });
+    if (data?.success) {
+      resultEl.className = 'text-sm text-green-600 bg-green-50 p-3 rounded-lg';
+      resultEl.innerHTML = '<i class="fas fa-check-circle mr-1"></i>Imported ' + data.imported + ' contacts (' + data.skipped + ' skipped)';
+      setTimeout(function() { document.getElementById('cc-list-import-modal').classList.add('hidden'); ccLoadTab('contact-lists'); }, 2000);
+    } else {
+      resultEl.className = 'text-sm text-red-600 bg-red-50 p-3 rounded-lg';
+      resultEl.innerHTML = '<i class="fas fa-exclamation-circle mr-1"></i>' + (data?.error || 'Import failed');
+    }
+  };
+  window.ccViewList = async function(listId) {
+    document.getElementById('cc-list-view-modal').classList.remove('hidden');
+    const content = document.getElementById('cc-list-view-content');
+    content.innerHTML = '<div class="py-12 text-center text-gray-400"><i class="fas fa-spinner fa-spin text-xl"></i></div>';
+    const data = await ccFetch('/api/call-center/contact-lists/' + listId + '/members?limit=200');
+    if (!data || !data.list) {
+      content.innerHTML = '<p class="text-red-500">Failed to load list</p>';
+      return;
+    }
+    document.getElementById('cc-list-view-title').textContent = data.list.name + ' (' + data.total + ' contacts)';
+    const members = data.members || [];
+    if (members.length === 0) {
+      content.innerHTML = '<div class="py-12 text-center text-gray-400"><i class="fas fa-users text-4xl mb-3 opacity-30"></i><p>No contacts in this list yet</p><p class="text-xs mt-1">Import a CSV or add prospects manually</p></div>';
+      return;
+    }
+    content.innerHTML = '<div class="overflow-x-auto"><table class="w-full text-sm"><thead><tr class="bg-gray-50 text-xs font-semibold text-gray-500 uppercase"><th class="px-3 py-2 text-left">Company</th><th class="px-3 py-2 text-left">Contact</th><th class="px-3 py-2 text-left">Phone</th><th class="px-3 py-2 text-left">Email</th><th class="px-3 py-2 text-left">City</th><th class="px-3 py-2 text-left">Status</th></tr></thead><tbody class="divide-y divide-gray-50">' + members.map(function(m) {
+      return '<tr class="hover:bg-gray-50"><td class="px-3 py-2 font-medium text-gray-900">' + (m.company_name||'—') + '</td><td class="px-3 py-2 text-gray-600">' + (m.contact_name||'—') + '</td><td class="px-3 py-2 font-mono text-xs">' + (m.phone||'—') + '</td><td class="px-3 py-2 text-xs text-gray-500">' + (m.email||'—') + '</td><td class="px-3 py-2 text-xs text-gray-500">' + (m.city||'—') + '</td><td class="px-3 py-2">' + prospectStatusPill(m.status) + '</td></tr>';
+    }).join('') + '</tbody></table></div>';
+  };
+
+  // Deploy Campaign
+  window.ccDeployCampaign = async function() {
+    const agentRadio = document.querySelector('input[name="deploy-agent"]:checked');
+    const listRadio = document.querySelector('input[name="deploy-list"]:checked');
+    if (!agentRadio) return alert('Please select an AI agent');
+    if (!listRadio) return alert('Please select a contact list');
+    const campaignId = document.getElementById('deploy-campaign')?.value || '';
+    const statusEl = document.getElementById('cc-deploy-status');
+    statusEl.classList.remove('hidden');
+    statusEl.className = 'text-sm text-blue-600';
+    statusEl.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>Deploying campaign...';
+
+    const data = await ccFetch('/api/call-center/deploy', { method: 'POST', body: JSON.stringify({
+      agent_id: parseInt(agentRadio.value),
+      contact_list_id: parseInt(listRadio.value),
+      campaign_id: campaignId ? parseInt(campaignId) : undefined,
+    }) });
+
+    if (data?.success) {
+      statusEl.className = 'text-sm text-green-600 bg-green-50 p-4 rounded-lg';
+      statusEl.innerHTML = '<i class="fas fa-check-circle mr-1"></i><strong>Deployed!</strong> ' + data.message + '<br>' +
+        '<span class="text-xs">Campaign ID: ' + data.deployment.campaign_id + ' &middot; ' + data.deployment.queued_prospects + ' prospects queued</span>';
+    } else {
+      statusEl.className = 'text-sm text-red-600 bg-red-50 p-4 rounded-lg';
+      statusEl.innerHTML = '<i class="fas fa-exclamation-circle mr-1"></i>' + (data?.error || 'Deployment failed');
+    }
   };
 
   // ============================================================

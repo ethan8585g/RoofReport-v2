@@ -640,3 +640,258 @@ RULES:
     return c.json({ response: 'I apologize, I had a technical issue. Could you try again?' })
   }
 })
+
+// ============================================================
+// CONTACT LISTS — Reusable named prospect lists by area
+// ============================================================
+
+// GET /contact-lists — All contact lists
+callCenterRoutes.get('/contact-lists', async (c) => {
+  try {
+    const { results } = await c.env.DB.prepare(`
+      SELECT cl.*,
+        (SELECT COUNT(*) FROM cc_contact_list_members clm WHERE clm.list_id = cl.id) as member_count
+      FROM cc_contact_lists cl
+      WHERE cl.status != 'archived'
+      ORDER BY cl.created_at DESC
+    `).all<any>()
+    return c.json({ lists: results })
+  } catch (e: any) { return c.json({ error: e.message }, 500) }
+})
+
+// POST /contact-lists — Create a new contact list
+callCenterRoutes.post('/contact-lists', async (c) => {
+  try {
+    const { name, description, area, province_state, country, tags } = await c.req.json()
+    if (!name) return c.json({ error: 'List name required' }, 400)
+
+    const res = await c.env.DB.prepare(
+      `INSERT INTO cc_contact_lists (name, description, area, province_state, country, tags) VALUES (?,?,?,?,?,?)`
+    ).bind(name, description || '', area || '', province_state || '', country || 'CA', tags || '').run()
+
+    return c.json({ success: true, id: res.meta.last_row_id })
+  } catch (e: any) { return c.json({ error: e.message }, 500) }
+})
+
+// PUT /contact-lists/:id — Update a contact list
+callCenterRoutes.put('/contact-lists/:id', async (c) => {
+  const id = parseInt(c.req.param('id'))
+  const body = await c.req.json()
+  const allowed = ['name', 'description', 'area', 'province_state', 'country', 'tags', 'status']
+  const fields: string[] = []
+  const values: any[] = []
+
+  for (const [key, val] of Object.entries(body)) {
+    if (allowed.includes(key)) { fields.push(`${key}=?`); values.push(val) }
+  }
+  if (fields.length === 0) return c.json({ error: 'No valid fields' }, 400)
+  fields.push("updated_at=datetime('now')")
+  values.push(id)
+
+  await c.env.DB.prepare(`UPDATE cc_contact_lists SET ${fields.join(',')} WHERE id=?`).bind(...values).run()
+  return c.json({ success: true })
+})
+
+// DELETE /contact-lists/:id — Archive a contact list
+callCenterRoutes.delete('/contact-lists/:id', async (c) => {
+  const id = parseInt(c.req.param('id'))
+  await c.env.DB.prepare("UPDATE cc_contact_lists SET status='archived', updated_at=datetime('now') WHERE id=?").bind(id).run()
+  return c.json({ success: true })
+})
+
+// GET /contact-lists/:id/members — Get members of a contact list
+callCenterRoutes.get('/contact-lists/:id/members', async (c) => {
+  const id = parseInt(c.req.param('id'))
+  const page = parseInt(c.req.query('page') || '1')
+  const limit = Math.min(parseInt(c.req.query('limit') || '100'), 500)
+  const offset = (page - 1) * limit
+  try {
+    const list = await c.env.DB.prepare('SELECT * FROM cc_contact_lists WHERE id=?').bind(id).first<any>()
+    if (!list) return c.json({ error: 'List not found' }, 404)
+
+    const { results } = await c.env.DB.prepare(`
+      SELECT p.*, clm.added_at
+      FROM cc_contact_list_members clm
+      JOIN cc_prospects p ON p.id = clm.prospect_id
+      WHERE clm.list_id = ?
+      ORDER BY p.company_name ASC
+      LIMIT ? OFFSET ?
+    `).bind(id, limit, offset).all<any>()
+
+    const countRes = await c.env.DB.prepare('SELECT COUNT(*) as cnt FROM cc_contact_list_members WHERE list_id=?').bind(id).first<any>()
+
+    return c.json({ list, members: results, total: countRes?.cnt || 0, page, limit })
+  } catch (e: any) { return c.json({ error: e.message }, 500) }
+})
+
+// POST /contact-lists/:id/add — Add prospects to a list (by IDs)
+callCenterRoutes.post('/contact-lists/:id/add', async (c) => {
+  const listId = parseInt(c.req.param('id'))
+  const { prospect_ids } = await c.req.json()
+  if (!Array.isArray(prospect_ids) || prospect_ids.length === 0) return c.json({ error: 'prospect_ids array required' }, 400)
+
+  let added = 0
+  for (const pid of prospect_ids) {
+    try {
+      await c.env.DB.prepare(
+        `INSERT OR IGNORE INTO cc_contact_list_members (list_id, prospect_id) VALUES (?,?)`
+      ).bind(listId, pid).run()
+      added++
+    } catch { /* duplicate, skip */ }
+  }
+
+  // Update count
+  await c.env.DB.prepare(
+    `UPDATE cc_contact_lists SET total_contacts = (SELECT COUNT(*) FROM cc_contact_list_members WHERE list_id=?), updated_at=datetime('now') WHERE id=?`
+  ).bind(listId, listId).run()
+
+  return c.json({ success: true, added })
+})
+
+// POST /contact-lists/:id/remove — Remove prospects from a list
+callCenterRoutes.post('/contact-lists/:id/remove', async (c) => {
+  const listId = parseInt(c.req.param('id'))
+  const { prospect_ids } = await c.req.json()
+  if (!Array.isArray(prospect_ids)) return c.json({ error: 'prospect_ids array required' }, 400)
+
+  for (const pid of prospect_ids) {
+    await c.env.DB.prepare('DELETE FROM cc_contact_list_members WHERE list_id=? AND prospect_id=?').bind(listId, pid).run()
+  }
+
+  await c.env.DB.prepare(
+    `UPDATE cc_contact_lists SET total_contacts = (SELECT COUNT(*) FROM cc_contact_list_members WHERE list_id=?), updated_at=datetime('now') WHERE id=?`
+  ).bind(listId, listId).run()
+
+  return c.json({ success: true })
+})
+
+// POST /contact-lists/:id/import — Bulk import contacts directly into a list
+callCenterRoutes.post('/contact-lists/:id/import', async (c) => {
+  const listId = parseInt(c.req.param('id'))
+  try {
+    const { csv_data } = await c.req.json()
+    if (!csv_data) return c.json({ error: 'csv_data required' }, 400)
+
+    const list = await c.env.DB.prepare('SELECT * FROM cc_contact_lists WHERE id=?').bind(listId).first<any>()
+    if (!list) return c.json({ error: 'List not found' }, 404)
+
+    const lines = csv_data.split('\n').filter((l: string) => l.trim())
+    if (lines.length < 2) return c.json({ error: 'CSV must have header + at least 1 row' }, 400)
+
+    const headers = lines[0].split(',').map((h: string) => h.trim().toLowerCase().replace(/[^a-z_]/g, ''))
+    let imported = 0, skipped = 0
+
+    for (let i = 1; i < lines.length; i++) {
+      const vals = lines[i].split(',').map((v: string) => v.trim().replace(/^"|"$/g, ''))
+      const row: any = {}
+      headers.forEach((h: string, idx: number) => { row[h] = vals[idx] || '' })
+
+      const phone = row.phone || row.phone_number || row.telephone || ''
+      const company = row.company_name || row.company || row.business_name || row.name || ''
+      if (!phone || !company) { skipped++; continue }
+
+      // Insert prospect
+      const res = await c.env.DB.prepare(
+        `INSERT INTO cc_prospects (company_name, contact_name, phone, email, website, city, province_state, country, company_size, lead_source) VALUES (?,?,?,?,?,?,?,?,?,?)`
+      ).bind(
+        company, row.contact_name || row.contact || '', phone,
+        row.email || '', row.website || row.url || '',
+        row.city || list.area || '', row.province_state || row.province || row.state || list.province_state || '',
+        row.country || list.country || 'CA', row.company_size || row.size || '', 'import'
+      ).run()
+
+      // Add to list
+      const prospectId = res.meta.last_row_id
+      await c.env.DB.prepare(
+        'INSERT OR IGNORE INTO cc_contact_list_members (list_id, prospect_id) VALUES (?,?)'
+      ).bind(listId, prospectId).run()
+      imported++
+    }
+
+    // Update list count
+    await c.env.DB.prepare(
+      `UPDATE cc_contact_lists SET total_contacts = (SELECT COUNT(*) FROM cc_contact_list_members WHERE list_id=?), updated_at=datetime('now') WHERE id=?`
+    ).bind(listId, listId).run()
+
+    return c.json({ success: true, imported, skipped, total_rows: lines.length - 1 })
+  } catch (e: any) { return c.json({ error: e.message }, 500) }
+})
+
+// ============================================================
+// DEPLOY CAMPAIGN — Link agent + contact list + campaign and start
+// ============================================================
+callCenterRoutes.post('/deploy', async (c) => {
+  try {
+    const { agent_id, contact_list_id, campaign_id, phone_number } = await c.req.json()
+    if (!agent_id) return c.json({ error: 'agent_id required' }, 400)
+    if (!contact_list_id && !campaign_id) return c.json({ error: 'contact_list_id or campaign_id required' }, 400)
+
+    const agent = await c.env.DB.prepare('SELECT * FROM cc_agents WHERE id=?').bind(agent_id).first<any>()
+    if (!agent) return c.json({ error: 'Agent not found' }, 404)
+
+    // If contact list provided, assign all its members to the campaign
+    let targetCampaignId = campaign_id
+    if (contact_list_id) {
+      const list = await c.env.DB.prepare('SELECT * FROM cc_contact_lists WHERE id=?').bind(contact_list_id).first<any>()
+      if (!list) return c.json({ error: 'Contact list not found' }, 404)
+
+      // If no campaign, create one auto from the list
+      if (!targetCampaignId) {
+        const campRes = await c.env.DB.prepare(
+          `INSERT INTO cc_campaigns (name, description, target_region, status) VALUES (?,?,?,?)`
+        ).bind(
+          `${list.name} — Auto Campaign`,
+          `Auto-generated campaign from contact list "${list.name}"`,
+          list.area || '',
+          'active'
+        ).run()
+        targetCampaignId = campRes.meta.last_row_id
+      }
+
+      // Assign all list members to the campaign
+      const { results: members } = await c.env.DB.prepare(
+        'SELECT prospect_id FROM cc_contact_list_members WHERE list_id=?'
+      ).bind(contact_list_id).all<any>()
+
+      for (const m of (members || [])) {
+        await c.env.DB.prepare(
+          `UPDATE cc_prospects SET campaign_id=?, status='queued', assigned_agent_id=?, updated_at=datetime('now') WHERE id=? AND (status='new' OR status='queued')`
+        ).bind(targetCampaignId, agent_id, m.prospect_id).run()
+      }
+
+      // Update campaign totals
+      await c.env.DB.prepare(
+        `UPDATE cc_campaigns SET total_prospects = (SELECT COUNT(*) FROM cc_prospects WHERE campaign_id=?), updated_at=datetime('now') WHERE id=?`
+      ).bind(targetCampaignId, targetCampaignId).run()
+    }
+
+    // Start the agent
+    await c.env.DB.prepare(
+      `UPDATE cc_agents SET status='calling', last_active_at=datetime('now'), updated_at=datetime('now') WHERE id=?`
+    ).bind(agent_id).run()
+
+    // Activate the campaign
+    if (targetCampaignId) {
+      await c.env.DB.prepare(
+        `UPDATE cc_campaigns SET status='active', updated_at=datetime('now') WHERE id=?`
+      ).bind(targetCampaignId).run()
+    }
+
+    const queuedCount = await c.env.DB.prepare(
+      `SELECT COUNT(*) as cnt FROM cc_prospects WHERE campaign_id=? AND (status='new' OR status='queued')`
+    ).bind(targetCampaignId).first<any>()
+
+    return c.json({
+      success: true,
+      deployment: {
+        agent_id,
+        agent_name: agent.name,
+        campaign_id: targetCampaignId,
+        contact_list_id: contact_list_id || null,
+        queued_prospects: queuedCount?.cnt || 0,
+        status: 'active'
+      },
+      message: `Agent "${agent.name}" deployed with ${queuedCount?.cnt || 0} prospects queued for calling`
+    })
+  } catch (e: any) { return c.json({ error: e.message }, 500) }
+})
