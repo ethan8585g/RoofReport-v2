@@ -31,10 +31,20 @@ function saHeaders() {
   return token ? { 'Authorization': 'Bearer ' + token } : {};
 }
 
-async function saFetch(url) {
-  const res = await fetch(url, { headers: saHeaders() });
+async function saFetch(url, opts) {
+  const res = await fetch(url, { headers: saHeaders(), ...(opts || {}) });
   if (res.status === 401 || res.status === 403) {
-    // Session expired or invalid — redirect to login
+    // Check if this is a service-level auth error (not session expiry)
+    // Don't logout for API endpoints that may return 403 for missing config
+    try {
+      const clone = res.clone();
+      const body = await clone.json();
+      if (body.error && (body.error.includes('not configured') || body.error.includes('Admin access') || body.error.includes('Super admin'))) {
+        // Service-level issue, not session expiry — return error response without logout
+        return res;
+      }
+    } catch(e) { /* not JSON, treat as session error */ }
+    // True session expiry — redirect to login
     localStorage.removeItem('rc_user');
     localStorage.removeItem('rc_token');
     window.location.href = '/login';
@@ -117,12 +127,37 @@ async function loadView(view) {
         }
         break;
       case 'livekit':
-        const [lkTrunksRes, lkRulesRes] = await Promise.all([
-          saFetch('/api/secretary/sip/trunks'),
-          saFetch('/api/secretary/sip/dispatch-rules'),
-        ]);
-        if (lkTrunksRes) SA.data.livekit_trunks = await lkTrunksRes.json();
-        if (lkRulesRes) SA.data.livekit_rules = await lkRulesRes.json();
+        try {
+          const [lkTrunksRes, lkRulesRes] = await Promise.all([
+            saFetch('/api/secretary/sip/trunks'),
+            saFetch('/api/secretary/sip/dispatch-rules'),
+          ]);
+          if (lkTrunksRes) {
+            const td = await lkTrunksRes.json();
+            SA.data.livekit_trunks = td.error ? { error: td.error } : td;
+          }
+          if (lkRulesRes) {
+            const rd = await lkRulesRes.json();
+            SA.data.livekit_rules = rd.error ? { error: rd.error } : rd;
+          }
+        } catch(lkErr) {
+          console.warn('LiveKit load error:', lkErr);
+          SA.data.livekit_trunks = { error: lkErr.message };
+          SA.data.livekit_rules = { error: lkErr.message };
+        }
+        break;
+      case 'livekit-agents':
+        // Uses same data as livekit call center
+        if (!SA.data.livekit_trunks) {
+          try {
+            const [lkTRes, lkRRes] = await Promise.all([
+              saFetch('/api/secretary/sip/trunks'),
+              saFetch('/api/secretary/sip/dispatch-rules'),
+            ]);
+            if (lkTRes) { const td = await lkTRes.json(); SA.data.livekit_trunks = td.error ? { error: td.error } : td; }
+            if (lkRRes) { const rd = await lkRRes.json(); SA.data.livekit_rules = rd.error ? { error: rd.error } : rd; }
+          } catch(e) { SA.data.livekit_trunks = { error: e.message }; }
+        }
         break;
       case 'heygen':
         // Handled by heygen.js module
@@ -227,6 +262,7 @@ function renderContent() {
     case 'call-center': break; // Handled by call-center.js
     case 'meta-connect': break; // Handled by meta-connect.js
     case 'livekit': root.innerHTML = renderLiveKitView(); break;
+    case 'livekit-agents': root.innerHTML = renderLiveKitAgentsView(); break;
     case 'heygen': break; // Handled by heygen.js
     default: root.innerHTML = renderUsersView();
   }
@@ -2029,6 +2065,24 @@ window.activatePackage = activatePackage;
 function renderLiveKitView() {
   const trunksData = SA.data.livekit_trunks || {};
   const rulesData = SA.data.livekit_rules || {};
+
+  // Handle configuration errors gracefully
+  if (trunksData.error || rulesData.error) {
+    return `<div class="slide-in space-y-6">
+      <div>
+        <h2 class="text-2xl font-black text-gray-900"><i class="fas fa-phone-alt mr-2 text-green-600"></i>LiveKit Call Center</h2>
+        <p class="text-sm text-gray-500 mt-1">Manage SIP trunks, dispatch rules, and deploy voice agents</p>
+      </div>
+      <div class="bg-amber-50 border border-amber-200 rounded-xl p-6 text-center">
+        <i class="fas fa-exclamation-triangle text-amber-500 text-3xl mb-3"></i>
+        <h3 class="font-bold text-amber-800 mb-2">LiveKit Configuration Required</h3>
+        <p class="text-amber-700 text-sm mb-4">${trunksData.error || rulesData.error || 'LiveKit API keys need to be configured.'}</p>
+        <code class="bg-white px-4 py-2 rounded-lg text-xs block max-w-xl mx-auto text-left">wrangler pages secret put LIVEKIT_API_KEY --project-name roofing-measurement-tool<br>wrangler pages secret put LIVEKIT_API_SECRET --project-name roofing-measurement-tool<br>wrangler pages secret put LIVEKIT_URL --project-name roofing-measurement-tool</code>
+        <button onclick="loadView('livekit')" class="mt-4 px-4 py-2 bg-amber-500 text-white rounded-lg text-sm font-semibold hover:bg-amber-600 transition-colors"><i class="fas fa-sync-alt mr-1"></i>Retry</button>
+      </div>
+    </div>`;
+  }
+
   const inboundTrunks = trunksData.inbound_trunks || [];
   const outboundTrunks = trunksData.outbound_trunks || [];
   const dispatchRules = rulesData.dispatch_rules || [];
@@ -2037,7 +2091,7 @@ function renderLiveKitView() {
     <!-- Header -->
     <div class="flex items-center justify-between">
       <div>
-        <h2 class="text-2xl font-black text-gray-900"><i class="fas fa-phone-alt mr-2 text-green-600"></i>LiveKit Agents</h2>
+        <h2 class="text-2xl font-black text-gray-900"><i class="fas fa-phone-alt mr-2 text-green-600"></i>LiveKit Call Center</h2>
         <p class="text-sm text-gray-500 mt-1">Manage SIP trunks, dispatch rules, and deploy voice agents</p>
       </div>
       <div class="flex gap-2">
@@ -2444,3 +2498,198 @@ async function lkDeleteTrunk(trunkId) {
   }
 }
 window.lkDeleteTrunk = lkDeleteTrunk;
+
+// ============================================================
+// VIEW: LIVEKIT AGENTS — Create & manage custom LiveKit agents
+// ============================================================
+function renderLiveKitAgentsView() {
+  const trunksData = SA.data.livekit_trunks || {};
+  const rulesData = SA.data.livekit_rules || {};
+
+  if (trunksData.error || rulesData.error) {
+    return `
+    <div class="mb-6">
+      <h2 class="text-2xl font-black text-gray-900"><i class="fas fa-robot mr-2 text-purple-600"></i>LiveKit Agents</h2>
+      <p class="text-sm text-gray-500 mt-1">Create and manage custom AI agents for various tasks</p>
+    </div>
+    <div class="bg-amber-50 border border-amber-200 rounded-xl p-6 text-center">
+      <i class="fas fa-exclamation-triangle text-amber-500 text-3xl mb-3"></i>
+      <h3 class="font-bold text-amber-800 mb-2">LiveKit Configuration Required</h3>
+      <p class="text-amber-700 text-sm mb-4">LiveKit API keys need to be configured to manage agents.</p>
+      <code class="bg-white px-4 py-2 rounded-lg text-xs block max-w-xl mx-auto text-left">wrangler pages secret put LIVEKIT_API_KEY --project-name roofing-measurement-tool<br>wrangler pages secret put LIVEKIT_API_SECRET --project-name roofing-measurement-tool<br>wrangler pages secret put LIVEKIT_URL --project-name roofing-measurement-tool</code>
+    </div>`;
+  }
+
+  const dispatchRules = rulesData.dispatch_rules || [];
+  const agents = dispatchRules.filter(r => r.agents && (r.agents.service || r.agents.agent_name));
+
+  return `
+    <div class="flex items-center justify-between mb-6">
+      <div>
+        <h2 class="text-2xl font-black text-gray-900"><i class="fas fa-robot mr-2 text-purple-600"></i>LiveKit Agents</h2>
+        <p class="text-sm text-gray-500 mt-1">Create and manage custom AI agents — voice bots, receptionists, outbound callers, and more</p>
+      </div>
+      <button onclick="lkShowCreateAgentModal()" class="px-5 py-2.5 bg-purple-600 text-white rounded-xl text-sm font-bold hover:bg-purple-700 transition-colors shadow-sm">
+        <i class="fas fa-plus mr-2"></i>Create Agent
+      </button>
+    </div>
+
+    <!-- Agent Types -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div class="bg-gradient-to-br from-purple-50 to-violet-50 border border-purple-100 rounded-xl p-5">
+        <div class="w-10 h-10 bg-purple-100 rounded-xl flex items-center justify-center mb-3"><i class="fas fa-headset text-purple-500"></i></div>
+        <h3 class="font-bold text-gray-900 text-sm">Voice Receptionist</h3>
+        <p class="text-xs text-gray-500 mt-1">Answers inbound calls, takes messages, routes to departments. Best for after-hours coverage.</p>
+        <button onclick="lkShowCreateAgentModal('receptionist')" class="mt-3 px-3 py-1.5 bg-purple-500 text-white rounded-lg text-xs font-semibold hover:bg-purple-600 transition-colors">Create</button>
+      </div>
+      <div class="bg-gradient-to-br from-blue-50 to-sky-50 border border-blue-100 rounded-xl p-5">
+        <div class="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center mb-3"><i class="fas fa-phone-volume text-blue-500"></i></div>
+        <h3 class="font-bold text-gray-900 text-sm">Outbound Sales Caller</h3>
+        <p class="text-xs text-gray-500 mt-1">Makes outbound calls to prospects, pitches services, books appointments. Great for lead follow-up.</p>
+        <button onclick="lkShowCreateAgentModal('sales')" class="mt-3 px-3 py-1.5 bg-blue-500 text-white rounded-lg text-xs font-semibold hover:bg-blue-600 transition-colors">Create</button>
+      </div>
+      <div class="bg-gradient-to-br from-emerald-50 to-green-50 border border-emerald-100 rounded-xl p-5">
+        <div class="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center mb-3"><i class="fas fa-clipboard-check text-emerald-500"></i></div>
+        <h3 class="font-bold text-gray-900 text-sm">Survey / Feedback Agent</h3>
+        <p class="text-xs text-gray-500 mt-1">Calls customers for satisfaction surveys, collects feedback, and rates service quality.</p>
+        <button onclick="lkShowCreateAgentModal('survey')" class="mt-3 px-3 py-1.5 bg-emerald-500 text-white rounded-lg text-xs font-semibold hover:bg-emerald-600 transition-colors">Create</button>
+      </div>
+    </div>
+
+    <!-- Deployed Agents -->
+    <div class="bg-white border border-gray-100 rounded-xl shadow-sm">
+      <div class="p-5 border-b border-gray-100">
+        <h3 class="font-bold text-gray-900"><i class="fas fa-rocket mr-2 text-purple-500"></i>Deployed Agents (${agents.length})</h3>
+      </div>
+      ${agents.length === 0 ? '<div class="p-8 text-center text-gray-400"><i class="fas fa-robot text-3xl mb-3 block text-gray-300"></i>No agents deployed yet. Create one above to get started.</div>' :
+        '<div class="divide-y divide-gray-50">' + agents.map(function(r) {
+          var agentName = (r.agents && r.agents.agent_name) || (r.agents && r.agents.service) || 'Unknown';
+          var room = r.room || {};
+          return '<div class="p-4 flex items-center justify-between hover:bg-gray-50 transition-colors">' +
+            '<div class="flex items-center gap-3">' +
+              '<div class="w-9 h-9 bg-purple-100 rounded-lg flex items-center justify-center"><i class="fas fa-robot text-purple-500 text-sm"></i></div>' +
+              '<div>' +
+                '<div class="font-semibold text-gray-900 text-sm">' + agentName + '</div>' +
+                '<div class="text-xs text-gray-400">Room: ' + (room.room_prefix || room.room || 'default') + ' &bull; Rule: ' + (r.sip_dispatch_rule_id || 'N/A').substring(0, 12) + '...</div>' +
+              '</div>' +
+            '</div>' +
+            '<div class="flex items-center gap-2">' +
+              '<span class="px-2 py-1 bg-green-50 text-green-600 rounded-full text-[10px] font-bold">ACTIVE</span>' +
+              '<button onclick="lkDeleteRule(\'' + r.sip_dispatch_rule_id + '\')" class="px-2 py-1.5 text-red-400 hover:text-red-600 text-xs" title="Delete"><i class="fas fa-trash"></i></button>' +
+            '</div>' +
+          '</div>';
+        }).join('') + '</div>'}
+    </div>
+
+    <!-- Create Agent Modal -->
+    <div id="lkAgentModal" class="fixed inset-0 bg-black/50 z-50 items-center justify-center" style="display:none">
+      <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-auto mt-20 overflow-hidden">
+        <div class="bg-gradient-to-r from-purple-600 to-violet-600 px-6 py-4 flex items-center justify-between">
+          <h3 class="text-white font-bold text-lg"><i class="fas fa-robot mr-2"></i>Create LiveKit Agent</h3>
+          <button onclick="lkCloseAgentModal()" class="text-white/70 hover:text-white"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="p-6 space-y-4">
+          <div>
+            <label class="block text-sm font-semibold text-gray-700 mb-1">Agent Type</label>
+            <select id="lkAgentType" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm">
+              <option value="receptionist">Voice Receptionist</option>
+              <option value="sales">Outbound Sales Caller</option>
+              <option value="survey">Survey / Feedback Agent</option>
+              <option value="custom">Custom Agent</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm font-semibold text-gray-700 mb-1">Agent Name</label>
+            <input id="lkAgentName" type="text" placeholder="e.g. RoofReporter Sales Bot" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm">
+          </div>
+          <div>
+            <label class="block text-sm font-semibold text-gray-700 mb-1">Voice</label>
+            <select id="lkAgentVoice" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm">
+              <option value="alloy">Alloy (Neutral)</option>
+              <option value="echo">Echo (Male)</option>
+              <option value="fable">Fable (Warm)</option>
+              <option value="onyx">Onyx (Deep Male)</option>
+              <option value="nova">Nova (Female)</option>
+              <option value="shimmer">Shimmer (Bright Female)</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm font-semibold text-gray-700 mb-1">System Prompt</label>
+            <textarea id="lkAgentPrompt" rows="5" placeholder="Describe what this agent should do, how it should respond, and any specific instructions..." class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm resize-vertical"></textarea>
+          </div>
+          <div>
+            <label class="block text-sm font-semibold text-gray-700 mb-1">Phone Number (for SIP routing)</label>
+            <input id="lkAgentPhone" type="text" placeholder="+17801234567 (optional)" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm">
+          </div>
+          <div id="lkAgentModalStatus"></div>
+          <button onclick="lkCreateAgent()" class="w-full py-3 bg-purple-600 text-white rounded-xl font-bold text-sm hover:bg-purple-700 transition-colors">
+            <i class="fas fa-rocket mr-2"></i>Deploy Agent
+          </button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function lkShowCreateAgentModal(type) {
+  var modal = document.getElementById('lkAgentModal');
+  if (modal) modal.style.display = 'flex';
+  if (type) {
+    var sel = document.getElementById('lkAgentType');
+    if (sel) sel.value = type;
+    // Auto-fill prompt based on type
+    var prompt = document.getElementById('lkAgentPrompt');
+    if (prompt && !prompt.value.trim()) {
+      var prompts = {
+        receptionist: 'You are a professional receptionist for a roofing company called RoofReporterAI. Answer inbound calls warmly, take messages for the team, answer basic questions about roof measurement reports, and route urgent calls. Be friendly, professional, and concise.',
+        sales: 'You are an outbound sales agent for RoofReporterAI. Your goal is to call potential roofing contractors and offer them our AI-powered roof measurement report service. Highlight: instant satellite-based measurements, 95%+ accuracy, professional PDF reports, and competitive pricing. Book a demo when possible.',
+        survey: 'You are a customer satisfaction survey agent for RoofReporterAI. Call customers who recently received a roof measurement report. Ask about their experience: accuracy, report quality, turnaround time, and likelihood to recommend. Rate satisfaction 1-10 and note any feedback.',
+      };
+      prompt.value = prompts[type] || '';
+    }
+  }
+}
+window.lkShowCreateAgentModal = lkShowCreateAgentModal;
+
+function lkCloseAgentModal() {
+  var modal = document.getElementById('lkAgentModal');
+  if (modal) modal.style.display = 'none';
+}
+window.lkCloseAgentModal = lkCloseAgentModal;
+
+async function lkCreateAgent() {
+  var name = document.getElementById('lkAgentName')?.value?.trim();
+  var agentType = document.getElementById('lkAgentType')?.value || 'custom';
+  var voice = document.getElementById('lkAgentVoice')?.value || 'alloy';
+  var prompt = document.getElementById('lkAgentPrompt')?.value?.trim();
+  var phone = document.getElementById('lkAgentPhone')?.value?.trim();
+  var status = document.getElementById('lkAgentModalStatus');
+
+  if (!name) { if (status) status.innerHTML = '<p class="text-red-500 text-xs">Agent name is required</p>'; return; }
+  if (!prompt) { if (status) status.innerHTML = '<p class="text-red-500 text-xs">System prompt is required</p>'; return; }
+
+  if (status) status.innerHTML = '<p class="text-blue-500 text-xs"><i class="fas fa-spinner fa-spin mr-1"></i>Deploying agent...</p>';
+
+  try {
+    var res = await fetch('/api/secretary/sip/deploy-agent', {
+      method: 'POST',
+      headers: { ...saHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agent_name: name,
+        agent_type: agentType,
+        agent_voice: voice,
+        system_prompt: prompt,
+        phone_number: phone || undefined,
+      })
+    });
+    var data = await res.json();
+    if (data.success) {
+      if (status) status.innerHTML = '<p class="text-green-500 text-xs"><i class="fas fa-check-circle mr-1"></i>Agent deployed successfully!</p>';
+      setTimeout(function() { lkCloseAgentModal(); loadView('livekit-agents'); }, 2000);
+    } else {
+      if (status) status.innerHTML = '<p class="text-red-500 text-xs">Error: ' + (data.error || 'Deployment failed') + '</p>';
+    }
+  } catch(e) {
+    if (status) status.innerHTML = '<p class="text-red-500 text-xs">Network error: ' + e.message + '</p>';
+  }
+}
+window.lkCreateAgent = lkCreateAgent;

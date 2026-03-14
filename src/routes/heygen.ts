@@ -4,6 +4,7 @@
 // ============================================================
 
 import { Hono } from 'hono'
+import { validateAdminSession, requireSuperadmin } from './auth'
 
 type Env = {
   Bindings: {
@@ -17,15 +18,12 @@ const heygen = new Hono<Env>()
 
 const HEYGEN_BASE = 'https://api.heygen.com'
 
-// ── Middleware: require super-admin ─────────────────────────
+// ── Middleware: require super-admin via admin_sessions ─────────────────────────
 heygen.use('/*', async (c, next) => {
-  const authHeader = c.req.header('Authorization')
-  if (!authHeader) return c.json({ error: 'Unauthorized' }, 403)
-  const token = authHeader.replace('Bearer ', '')
-  const session = await c.env.DB.prepare('SELECT u.email, u.role FROM sessions s JOIN users u ON s.user_id = u.id WHERE s.token = ? AND s.expires_at > datetime(\'now\')').bind(token).first<{ email: string; role: string }>()
-  if (!session) return c.json({ error: 'Invalid session' }, 403)
-  const isAdmin = session.role === 'super_admin' || session.email === c.env.ADMIN_BOOTSTRAP_EMAIL
-  if (!isAdmin) return c.json({ error: 'Super admin required' }, 403)
+  const admin = await validateAdminSession(c.env.DB, c.req.header('Authorization'))
+  if (!admin || !requireSuperadmin(admin)) {
+    return c.json({ error: 'Super admin required' }, 403)
+  }
   await next()
 })
 

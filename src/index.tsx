@@ -1207,6 +1207,10 @@ function getSuperAdminDashboardHTML() {
         </div>
         <div class="sa-nav-item rounded-xl px-4 py-3 flex items-center gap-3 text-gray-400" onclick="saSetView('livekit')">
           <i class="fas fa-phone-alt w-5 text-center"></i>
+          <span class="label text-sm font-medium">LiveKit Call Center</span>
+        </div>
+        <div class="sa-nav-item rounded-xl px-4 py-3 flex items-center gap-3 text-gray-400" onclick="saSetView('livekit-agents')">
+          <i class="fas fa-robot w-5 text-center"></i>
           <span class="label text-sm font-medium">LiveKit Agents</span>
         </div>
         <div class="sa-nav-item rounded-xl px-4 py-3 flex items-center gap-3 text-gray-400" onclick="saSetView('heygen')">
