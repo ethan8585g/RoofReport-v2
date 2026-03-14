@@ -2328,12 +2328,14 @@ export function generateRoofDiagramSVG(segments: RoofSegment[], colors: string[]
 
 
 // ============================================================
-// TRACE-BASED ROOF DIAGRAM — Uses actual GPS eave coordinates
-// to draw the TRUE shape of the house. This replaces the AI pixel
-// geometry diagram when user-traced coordinates are available.
-//
-// The roof outline is determined by the eaves polygon (every corner
-// of the house), with ridge, hip, and valley lines overlaid.
+// TRACE-BASED ROOF DIAGRAM — Professional EagleView-style
+// Uses GPS eave coordinates + ridge/hip/valley lines to generate
+// a clean architectural roof diagram with:
+//   - Geometric roof facets with subtle shading
+//   - Color-coded edge lines (ridge=red, hip=amber, valley=blue, eave=black)
+//   - Clean dimension labels on each segment
+//   - Facet identification letters (A, B, C, D...)
+//   - Professional compass rose and legend
 // ============================================================
 export function generateTraceBasedDiagramSVG(
   roofTrace: {
@@ -2350,9 +2352,9 @@ export function generateTraceBasedDiagramSVG(
   trueAreaSqft: number
 ): string {
   const W = 700, H = 700
-  const PAD = 60             // generous padding on all sides
+  const PAD = 55
   const FOOTER_H = 56
-  const LABEL_MARGIN = 50   // extra margin for dimension labels outside polygon (dimLine=22 + extEnd=28 + label text)
+  const LABEL_MARGIN = 45
   const FONT = `font-family="Inter,system-ui,-apple-system,sans-serif"`
 
   const eaves = roofTrace.eaves || []
@@ -2363,12 +2365,20 @@ export function generateTraceBasedDiagramSVG(
     </svg>`
   }
 
+  // Professional edge colors (EagleView standard)
   const EDGE_COLOR: Record<string, string> = {
-    'RIDGE': '#DC2626', 'HIP': '#EA580C', 'VALLEY': '#2563EB',
-    'EAVE': '#16A34A', 'RAKE': '#7C3AED',
+    'RIDGE': '#C62828', 'HIP': '#C62828', 'VALLEY': '#1565C0',
+    'EAVE': '#1a1a1a', 'RAKE': '#1a1a1a',
   }
 
-  const fmtFt = (ft: number): string => ft < 0.3 ? '' : `${ft.toFixed(1)} ft`
+  // Facet fill colors (subtle pastels for professional look)
+  const FACET_FILLS = [
+    'rgba(220,38,38,0.06)', 'rgba(37,99,235,0.06)', 'rgba(22,163,74,0.06)', 'rgba(234,88,12,0.06)',
+    'rgba(124,58,237,0.06)', 'rgba(219,39,119,0.06)', 'rgba(13,148,136,0.06)', 'rgba(245,158,11,0.06)',
+    'rgba(220,38,38,0.04)', 'rgba(37,99,235,0.04)', 'rgba(22,163,74,0.04)', 'rgba(234,88,12,0.04)',
+  ]
+
+  const fmtFt = (ft: number): string => ft < 0.5 ? '' : Math.round(ft).toString()
 
   // ── Convert lat/lng to local X/Y (metres from centroid) ──
   const centLat = eaves.reduce((s, p) => s + p.lat, 0) / eaves.length
@@ -2380,12 +2390,12 @@ export function generateTraceBasedDiagramSVG(
 
   const toXY = (p: { lat: number; lng: number }) => ({
     x: (p.lng - centLng) * M_PER_DEG_LNG,
-    y: -(p.lat - centLat) * M_PER_DEG_LAT  // flip Y so north is up
+    y: -(p.lat - centLat) * M_PER_DEG_LAT
   })
 
   const eavesXY = eaves.map(toXY)
 
-  // Collect ALL points (eaves + ridges + hips + valleys) for bounding box
+  // Collect ALL points for bounding box
   const allPts = [...eavesXY]
   const ridgesXY = (roofTrace.ridges || []).map(line => line.map(toXY))
   const hipsXY = (roofTrace.hips || []).map(line => line.map(toXY))
@@ -2403,16 +2413,13 @@ export function generateTraceBasedDiagramSVG(
 
   const geoW = maxX - minX || 1
   const geoH = maxY - minY || 1
-  // Reserve space: PAD on each side + LABEL_MARGIN for dimension lines
   const totalSidePad = PAD + LABEL_MARGIN
-  const TOP_RESERVE = totalSidePad   // symmetrical top padding for labels
-  const BOTTOM_RESERVE = totalSidePad + FOOTER_H  // labels + footer bar
+  const TOP_RESERVE = totalSidePad
+  const BOTTOM_RESERVE = totalSidePad + FOOTER_H
   const drawW = W - totalSidePad * 2
   const drawH = H - TOP_RESERVE - BOTTOM_RESERVE
-  // Scale to fit — apply 0.92 safety factor to keep everything comfortably inside
   const rawScale = Math.min(drawW / geoW, drawH / geoH)
-  const sc = rawScale * 0.92
-  // Center the roof in the drawable area
+  const sc = rawScale * 0.88
   const oX = totalSidePad + (drawW - geoW * sc) / 2
   const oY = TOP_RESERVE + (drawH - geoH * sc) / 2
 
@@ -2429,191 +2436,425 @@ export function generateTraceBasedDiagramSVG(
     return 2 * 6371000 * Math.asin(Math.sqrt(h)) * M_TO_FT
   }
 
+  // Helper: distance between two XY points in metres
+  const distXY = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+    Math.sqrt((b.x - a.x) ** 2 + (b.y - a.y) ** 2)
+
+  // Helper: find nearest point on polygon edge to a given point
+  const snapToPolygon = (pt: { x: number; y: number }, poly: { x: number; y: number }[]) => {
+    let bestDist = Infinity, bestPt = pt
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i], b = poly[(i + 1) % poly.length]
+      const ab = { x: b.x - a.x, y: b.y - a.y }
+      const abLen2 = ab.x * ab.x + ab.y * ab.y
+      if (abLen2 < 0.001) continue
+      let t = ((pt.x - a.x) * ab.x + (pt.y - a.y) * ab.y) / abLen2
+      t = Math.max(0, Math.min(1, t))
+      const closest = { x: a.x + t * ab.x, y: a.y + t * ab.y }
+      const d = distXY(pt, closest)
+      if (d < bestDist) { bestDist = d; bestPt = closest }
+    }
+    return bestPt
+  }
+
+  // ── COMPUTE FACETS from eave polygon + internal lines ──
+  // Strategy: collect all internal line endpoints (ridges, hips, valleys),
+  // snap them to eave polygon or other line endpoints, then build facet
+  // polygons using the polygon subdivision approach.
+  interface InternalLine { start: { x: number; y: number }; end: { x: number; y: number }; type: string; ftLen: number }
+  const internalLines: InternalLine[] = []
+
+  ridgesXY.forEach((line, i) => {
+    if (line.length < 2) return
+    const ridgePts = roofTrace.ridges![i]
+    const ftLen = haversineFt(ridgePts[0], ridgePts[ridgePts.length - 1])
+    internalLines.push({ start: line[0], end: line[line.length - 1], type: 'RIDGE', ftLen })
+  })
+  hipsXY.forEach((line, i) => {
+    if (line.length < 2) return
+    const hipPts = roofTrace.hips![i]
+    const ftLen = haversineFt(hipPts[0], hipPts[hipPts.length - 1])
+    internalLines.push({ start: line[0], end: line[line.length - 1], type: 'HIP', ftLen })
+  })
+  valleysXY.forEach((line, i) => {
+    if (line.length < 2) return
+    const valPts = roofTrace.valleys![i]
+    const ftLen = haversineFt(valPts[0], valPts[valPts.length - 1])
+    internalLines.push({ start: line[0], end: line[line.length - 1], type: 'VALLEY', ftLen })
+  })
+
+  // Build facets by polygon decomposition:
+  // For each pair of adjacent eave edges that share a common internal vertex (ridge/hip endpoint),
+  // create a triangular or quadrilateral facet
+  const n = eaves.length
+
+  // Collect all unique vertices: eave corners + internal line endpoints
+  const allVertices: { x: number; y: number; label: string }[] = []
+  eavesXY.forEach((p, i) => allVertices.push({ ...p, label: `E${i}` }))
+  const internalVertices: { x: number; y: number }[] = []
+  internalLines.forEach(l => {
+    // Check if endpoints are near the polygon edge (eave connection) or interior
+    const snapDist1 = Math.min(...eavesXY.map(e => distXY(e, l.start)))
+    const snapDist2 = Math.min(...eavesXY.map(e => distXY(e, l.end)))
+    // Interior points are those not snapped to eave corners
+    const threshold = geoW * 0.08 // 8% of width as threshold
+    if (snapDist1 > threshold) {
+      const exists = internalVertices.some(v => distXY(v, l.start) < threshold * 0.5)
+      if (!exists) internalVertices.push(l.start)
+    }
+    if (snapDist2 > threshold) {
+      const exists = internalVertices.some(v => distXY(v, l.end) < threshold * 0.5)
+      if (!exists) internalVertices.push(l.end)
+    }
+  })
+
+  // Simple facet generation: if we have ridge(s), create facets by connecting
+  // eave segments to ridge endpoints via hip lines. If no internal lines,
+  // just show the whole polygon as one facet.
+  interface Facet {
+    points: { x: number; y: number }[]
+    label: string
+    areaSqft: number
+    centerX: number
+    centerY: number
+  }
+  const facets: Facet[] = []
+
+  if (internalLines.length === 0) {
+    // Single facet (flat roof or simple)
+    const centerX = eavesXY.reduce((s, p) => s + p.x, 0) / n
+    const centerY = eavesXY.reduce((s, p) => s + p.y, 0) / n
+    facets.push({
+      points: eavesXY,
+      label: 'A',
+      areaSqft: Math.round(trueAreaSqft),
+      centerX, centerY
+    })
+  } else {
+    // Multiple facets: Use internal lines (ridges/hips) to split the polygon
+    // Strategy: For each internal line endpoint that's "interior" (a ridge peak),
+    // connect it to nearby eave corners to form triangular/quad facets.
+    //
+    // Simplified approach: draw lines from ridge endpoints to nearest eave corners
+    // and build facets from those subdivisions.
+
+    // Gather all internal-line points
+    const ridgeEndpoints: { x: number; y: number }[] = []
+    internalLines.filter(l => l.type === 'RIDGE').forEach(l => {
+      ridgeEndpoints.push(l.start, l.end)
+    })
+
+    // If ridges exist, build facets by connecting eave corners to ridge line
+    if (ridgeEndpoints.length >= 2) {
+      // Find the main ridge line (longest)
+      const mainRidge = internalLines.filter(l => l.type === 'RIDGE').sort((a, b) => b.ftLen - a.ftLen)[0]
+      if (mainRidge) {
+        const rStart = mainRidge.start
+        const rEnd = mainRidge.end
+
+        // Determine which eave corners are "above" vs "below" the ridge line
+        const ridgeDx = rEnd.x - rStart.x
+        const ridgeDy = rEnd.y - rStart.y
+
+        const aboveEaves: number[] = []
+        const belowEaves: number[] = []
+        eavesXY.forEach((p, i) => {
+          const cross = ridgeDx * (p.y - rStart.y) - ridgeDy * (p.x - rStart.x)
+          if (cross >= 0) aboveEaves.push(i)
+          else belowEaves.push(i)
+        })
+
+        // Snap ridge endpoints to nearest eave corners
+        const snapToEave = (pt: { x: number; y: number }) => {
+          let bestIdx = 0, bestDist = Infinity
+          eavesXY.forEach((e, i) => {
+            const d = distXY(e, pt)
+            if (d < bestDist) { bestDist = d; bestIdx = i }
+          })
+          return { idx: bestIdx, dist: bestDist }
+        }
+
+        const rStartSnap = snapToEave(rStart)
+        const rEndSnap = snapToEave(rEnd)
+
+        // Build two main facets (one each side of the ridge)
+        const buildFacetFromSide = (sideIndices: number[], label: string): Facet | null => {
+          if (sideIndices.length < 1) return null
+
+          // Sort indices by their position around the polygon
+          const sorted = [...sideIndices].sort((a, b) => a - b)
+
+          // Build facet polygon: eave corners on this side + ridge endpoints
+          const pts: { x: number; y: number }[] = []
+
+          // Add the eave corners in order
+          sorted.forEach(i => pts.push(eavesXY[i]))
+
+          // Add the ridge endpoints (if not already at an eave corner)
+          const ridgeEndPt1 = rStartSnap.dist < geoW * 0.15 ? eavesXY[rStartSnap.idx] : rStart
+          const ridgeEndPt2 = rEndSnap.dist < geoW * 0.15 ? eavesXY[rEndSnap.idx] : rEnd
+
+          // Check if ridge endpoints are already in pts
+          const alreadyHas1 = pts.some(p => distXY(p, ridgeEndPt1) < geoW * 0.05)
+          const alreadyHas2 = pts.some(p => distXY(p, ridgeEndPt2) < geoW * 0.05)
+
+          if (!alreadyHas2) pts.push(ridgeEndPt2)
+          if (!alreadyHas1) pts.push(ridgeEndPt1)
+
+          if (pts.length < 3) return null
+
+          // Sort by angle from centroid for proper polygon winding
+          const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length
+          const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length
+          pts.sort((a, b) => Math.atan2(a.y - cy, a.x - cx) - Math.atan2(b.y - cy, b.x - cx))
+
+          // Compute area using Shoelace
+          let area2 = 0
+          for (let i = 0; i < pts.length; i++) {
+            const j = (i + 1) % pts.length
+            area2 += pts[i].x * pts[j].y - pts[j].x * pts[i].y
+          }
+          const areaM2 = Math.abs(area2) / 2
+          const areaSqft = Math.round(areaM2 * 10.7639 * (1 / Math.cos(avgPitchDeg * Math.PI / 180)))
+
+          return { points: pts, label, areaSqft, centerX: cx, centerY: cy }
+        }
+
+        const facetA = buildFacetFromSide(aboveEaves, 'A')
+        const facetB = buildFacetFromSide(belowEaves, 'B')
+        if (facetA) facets.push(facetA)
+        if (facetB) facets.push(facetB)
+
+        // If we have hip lines, try to further subdivide facets
+        const hipLines = internalLines.filter(l => l.type === 'HIP')
+        if (hipLines.length > 0 && facets.length >= 2) {
+          // For each hip line, it typically splits a main facet into sub-facets
+          // For now, add additional facets at hip-created sub-regions
+          // This is a simplified approach — the facets already cover the whole polygon
+          // The hip lines will be drawn on top for visual subdivision
+        }
+      }
+    }
+
+    // If no ridge found, try hip-only subdivision or fall back to single facet
+    if (facets.length === 0) {
+      const centerX = eavesXY.reduce((s, p) => s + p.x, 0) / n
+      const centerY = eavesXY.reduce((s, p) => s + p.y, 0) / n
+      facets.push({
+        points: eavesXY,
+        label: 'A',
+        areaSqft: Math.round(trueAreaSqft),
+        centerX, centerY
+      })
+    }
+
+    // Normalize facet areas to match total
+    const totalFacetArea = facets.reduce((s, f) => s + f.areaSqft, 0)
+    if (totalFacetArea > 0 && Math.abs(totalFacetArea - trueAreaSqft) > 50) {
+      const scale = trueAreaSqft / totalFacetArea
+      facets.forEach(f => { f.areaSqft = Math.round(f.areaSqft * scale) })
+    }
+
+    // Re-letter facets
+    facets.forEach((f, i) => { f.label = String.fromCharCode(65 + i) })
+  }
+
   // ── BUILD SVG ──
   let svg = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;display:block;background:#fff">`
   svg += `<rect width="${W}" height="${H}" fill="#FFFFFF"/>`
 
-  // Crosshatch patterns
+  // Defs: subtle diagonal hatch for facets
   svg += `<defs>`
-  svg += `<pattern id="tr-xhatch" patternUnits="userSpaceOnUse" width="5.5" height="5.5">`
-  svg += `<line x1="0" y1="0" x2="5.5" y2="5.5" stroke="#B0B0B0" stroke-width="0.35"/>`
-  svg += `<line x1="5.5" y1="0" x2="0" y2="5.5" stroke="#B0B0B0" stroke-width="0.35"/>`
-  svg += `</pattern>`
+  svg += `<pattern id="tr-hatch-a" patternUnits="userSpaceOnUse" width="8" height="8" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="8" stroke="#C62828" stroke-width="0.3" stroke-opacity="0.12"/></pattern>`
+  svg += `<pattern id="tr-hatch-b" patternUnits="userSpaceOnUse" width="8" height="8" patternTransform="rotate(-45)"><line x1="0" y1="0" x2="0" y2="8" stroke="#1565C0" stroke-width="0.3" stroke-opacity="0.12"/></pattern>`
+  svg += `<pattern id="tr-hatch-c" patternUnits="userSpaceOnUse" width="8" height="8" patternTransform="rotate(30)"><line x1="0" y1="0" x2="0" y2="8" stroke="#2E7D32" stroke-width="0.3" stroke-opacity="0.12"/></pattern>`
+  svg += `<pattern id="tr-hatch-d" patternUnits="userSpaceOnUse" width="8" height="8" patternTransform="rotate(-30)"><line x1="0" y1="0" x2="0" y2="8" stroke="#E65100" stroke-width="0.3" stroke-opacity="0.12"/></pattern>`
   svg += `</defs>`
 
-  // Faint lot outline (smaller than label margin so it stays inside reserved space)
-  const lotPad = 15
-  const lotMinX = Math.min(...eavesXY.map(p => tx(p.x))) - lotPad
-  const lotMaxX = Math.max(...eavesXY.map(p => tx(p.x))) + lotPad
-  const lotMinY = Math.min(...eavesXY.map(p => ty(p.y))) - lotPad
-  const lotMaxY = Math.max(...eavesXY.map(p => ty(p.y))) + lotPad
-  svg += `<rect x="${lotMinX.toFixed(1)}" y="${lotMinY.toFixed(1)}" width="${(lotMaxX - lotMinX).toFixed(1)}" height="${(lotMaxY - lotMinY).toFixed(1)}" fill="none" stroke="#D8DDE3" stroke-width="0.8" stroke-dasharray="4,3" rx="2"/>`
-
-  // ── EAVES POLYGON FILL (crosshatch) ──
-  const eavePts = eavesXY.map(p => `${tx(p.x).toFixed(1)},${ty(p.y).toFixed(1)}`).join(' ')
-  svg += `<polygon points="${eavePts}" fill="url(#tr-xhatch)" stroke="none"/>`
-
-  // ── EAVES PERIMETER (bold green) ──
-  svg += `<polygon points="${eavePts}" fill="none" stroke="#111" stroke-width="2.8" stroke-linejoin="miter"/>`
-  const n = eaves.length
-  for (let i = 0; i < n; i++) {
-    const p1 = eavesXY[i], p2 = eavesXY[(i + 1) % n]
-    svg += `<line x1="${tx(p1.x).toFixed(1)}" y1="${ty(p1.y).toFixed(1)}" x2="${tx(p2.x).toFixed(1)}" y2="${ty(p2.y).toFixed(1)}" stroke="${EDGE_COLOR['EAVE']}" stroke-width="3.2" stroke-linecap="round"/>`
-  }
-  // Corner dots
-  eavesXY.forEach(p => {
-    svg += `<circle cx="${tx(p.x).toFixed(1)}" cy="${ty(p.y).toFixed(1)}" r="3.5" fill="#111"/>`
+  // ── FACET FILLS (subtle shading per facet) ──
+  const hatchIds = ['tr-hatch-a', 'tr-hatch-b', 'tr-hatch-c', 'tr-hatch-d']
+  facets.forEach((facet, fi) => {
+    const pts = facet.points.map(p => `${tx(p.x).toFixed(1)},${ty(p.y).toFixed(1)}`).join(' ')
+    // Light fill + directional hatch
+    svg += `<polygon points="${pts}" fill="${FACET_FILLS[fi % FACET_FILLS.length]}" stroke="none"/>`
+    svg += `<polygon points="${pts}" fill="url(#${hatchIds[fi % hatchIds.length]})" stroke="none"/>`
   })
 
-  // ── EAVE EDGE DIMENSION LABELS ──
+  // ── EAVE PERIMETER (clean black outline) ──
+  const eavePts = eavesXY.map(p => `${tx(p.x).toFixed(1)},${ty(p.y).toFixed(1)}`).join(' ')
+  svg += `<polygon points="${eavePts}" fill="none" stroke="#1a1a1a" stroke-width="2.2" stroke-linejoin="miter"/>`
+
+  // ── RIDGE LINES (red, solid, prominent) ──
+  internalLines.filter(l => l.type === 'RIDGE').forEach(l => {
+    svg += `<line x1="${tx(l.start.x).toFixed(1)}" y1="${ty(l.start.y).toFixed(1)}" x2="${tx(l.end.x).toFixed(1)}" y2="${ty(l.end.y).toFixed(1)}" stroke="${EDGE_COLOR['RIDGE']}" stroke-width="2.2" stroke-linecap="round"/>`
+  })
+
+  // ── HIP LINES (red, thinner) ──
+  internalLines.filter(l => l.type === 'HIP').forEach(l => {
+    svg += `<line x1="${tx(l.start.x).toFixed(1)}" y1="${ty(l.start.y).toFixed(1)}" x2="${tx(l.end.x).toFixed(1)}" y2="${ty(l.end.y).toFixed(1)}" stroke="${EDGE_COLOR['HIP']}" stroke-width="1.6" stroke-linecap="round"/>`
+  })
+
+  // ── VALLEY LINES (blue, dashed) ──
+  internalLines.filter(l => l.type === 'VALLEY').forEach(l => {
+    svg += `<line x1="${tx(l.start.x).toFixed(1)}" y1="${ty(l.start.y).toFixed(1)}" x2="${tx(l.end.x).toFixed(1)}" y2="${ty(l.end.y).toFixed(1)}" stroke="${EDGE_COLOR['VALLEY']}" stroke-width="1.6" stroke-dasharray="6,3" stroke-linecap="round"/>`
+  })
+
+  // ── EAVE EDGE DIMENSION LABELS (professional architectural style) ──
   for (let i = 0; i < n; i++) {
     const a = eaves[i], b = eaves[(i + 1) % n]
     const p1 = eavesXY[i], p2 = eavesXY[(i + 1) % n]
     const sx = tx(p1.x), sy = ty(p1.y), ex = tx(p2.x), ey = ty(p2.y)
     const segPx = Math.sqrt((ex - sx) ** 2 + (ey - sy) ** 2)
-    if (segPx < 18) continue
+    if (segPx < 20) continue
 
     const ftVal = haversineFt(a, b)
-    if (ftVal < 0.3) continue
+    if (ftVal < 0.5) continue
     const label = fmtFt(ftVal)
     if (!label) continue
 
     const dx = ex - sx, dy = ey - sy
     const len = Math.sqrt(dx * dx + dy * dy)
     const nx = -dy / len, ny = dx / len
-    const dimLine = 22
-    const extEnd = dimLine + 6
+
+    // Dimension line offset from edge
+    const dimOffset = 20
+    const extEnd = dimOffset + 8
+
     // Extension lines
-    svg += `<line x1="${(sx + nx * 3).toFixed(1)}" y1="${(sy + ny * 3).toFixed(1)}" x2="${(sx + nx * extEnd).toFixed(1)}" y2="${(sy + ny * extEnd).toFixed(1)}" stroke="#888" stroke-width="0.5"/>`
-    svg += `<line x1="${(ex + nx * 3).toFixed(1)}" y1="${(ey + ny * 3).toFixed(1)}" x2="${(ex + nx * extEnd).toFixed(1)}" y2="${(ey + ny * extEnd).toFixed(1)}" stroke="#888" stroke-width="0.5"/>`
-    // Dimension line
-    const dsx = sx + nx * dimLine, dsy = sy + ny * dimLine
-    const dex = ex + nx * dimLine, dey = ey + ny * dimLine
-    svg += `<line x1="${dsx.toFixed(1)}" y1="${dsy.toFixed(1)}" x2="${dex.toFixed(1)}" y2="${dey.toFixed(1)}" stroke="#555" stroke-width="0.6"/>`
-    // Tick marks
-    const tNx = dx / len, tNy = dy / len
-    svg += `<line x1="${(dsx - tNx * 5).toFixed(1)}" y1="${(dsy - tNy * 5).toFixed(1)}" x2="${(dsx + tNx * 5).toFixed(1)}" y2="${(dsy + tNy * 5).toFixed(1)}" stroke="#555" stroke-width="0.7"/>`
-    svg += `<line x1="${(dex - tNx * 5).toFixed(1)}" y1="${(dey - tNy * 5).toFixed(1)}" x2="${(dex + tNx * 5).toFixed(1)}" y2="${(dey + tNy * 5).toFixed(1)}" stroke="#555" stroke-width="0.7"/>`
-    // Label
+    svg += `<line x1="${(sx + nx * 4).toFixed(1)}" y1="${(sy + ny * 4).toFixed(1)}" x2="${(sx + nx * extEnd).toFixed(1)}" y2="${(sy + ny * extEnd).toFixed(1)}" stroke="#999" stroke-width="0.4"/>`
+    svg += `<line x1="${(ex + nx * 4).toFixed(1)}" y1="${(ey + ny * 4).toFixed(1)}" x2="${(ex + nx * extEnd).toFixed(1)}" y2="${(ey + ny * extEnd).toFixed(1)}" stroke="#999" stroke-width="0.4"/>`
+
+    // Dimension line with arrowheads
+    const dsx = sx + nx * dimOffset, dsy = sy + ny * dimOffset
+    const dex = ex + nx * dimOffset, dey = ey + ny * dimOffset
+    svg += `<line x1="${dsx.toFixed(1)}" y1="${dsy.toFixed(1)}" x2="${dex.toFixed(1)}" y2="${dey.toFixed(1)}" stroke="#333" stroke-width="0.5"/>`
+
+    // Arrow heads at each end
+    const arrowLen = 4
+    const ux = dx / len, uy = dy / len
+    svg += `<polygon points="${dsx.toFixed(1)},${dsy.toFixed(1)} ${(dsx + ux * arrowLen + nx * 1.5).toFixed(1)},${(dsy + uy * arrowLen + ny * 1.5).toFixed(1)} ${(dsx + ux * arrowLen - nx * 1.5).toFixed(1)},${(dsy + uy * arrowLen - ny * 1.5).toFixed(1)}" fill="#333"/>`
+    svg += `<polygon points="${dex.toFixed(1)},${dey.toFixed(1)} ${(dex - ux * arrowLen + nx * 1.5).toFixed(1)},${(dey - uy * arrowLen + ny * 1.5).toFixed(1)} ${(dex - ux * arrowLen - nx * 1.5).toFixed(1)},${(dey - uy * arrowLen - ny * 1.5).toFixed(1)}" fill="#333"/>`
+
+    // Measurement label
     const mx = (dsx + dex) / 2, my = (dsy + dey) / 2
     let angle = Math.atan2(dey - dsy, dex - dsx) * 180 / Math.PI
     if (angle > 90) angle -= 180
     if (angle < -90) angle += 180
-    const bgW = Math.max(label.length * 5.8 + 10, 44)
+    const bgW = Math.max(label.length * 6 + 8, 28)
     svg += `<g transform="translate(${mx.toFixed(1)},${my.toFixed(1)}) rotate(${angle.toFixed(1)})">`
-    svg += `<rect x="${(-bgW / 2).toFixed(1)}" y="-7.5" width="${bgW.toFixed(1)}" height="14" rx="1.5" fill="#fff" opacity="0.94"/>`
-    svg += `<text x="0" y="3" text-anchor="middle" font-size="8.5" font-weight="500" fill="${EDGE_COLOR['EAVE']}" ${FONT}>${label}</text>`
+    svg += `<rect x="${(-bgW / 2).toFixed(1)}" y="-7" width="${bgW.toFixed(1)}" height="13" rx="1" fill="#fff" opacity="0.95"/>`
+    svg += `<text x="0" y="3" text-anchor="middle" font-size="8.5" font-weight="700" fill="#1a1a1a" ${FONT}>${label}</text>`
     svg += `</g>`
   }
 
-  // ── RIDGE LINES (red) ──
-  ridgesXY.forEach((line, i) => {
-    if (line.length < 2) return
-    const ridgePts = roofTrace.ridges![i]
-    const start = line[0], end = line[line.length - 1]
-    svg += `<line x1="${tx(start.x).toFixed(1)}" y1="${ty(start.y).toFixed(1)}" x2="${tx(end.x).toFixed(1)}" y2="${ty(end.y).toFixed(1)}" stroke="${EDGE_COLOR['RIDGE']}" stroke-width="2" stroke-linecap="round"/>`
-    // Label with computed length
-    const ftVal = haversineFt(ridgePts[0], ridgePts[ridgePts.length - 1])
-    if (ftVal < 0.5) return
-    const sx = tx(start.x), sy = ty(start.y), ex = tx(end.x), ey = ty(end.y)
-    const mx = (sx + ex) / 2, my = (sy + ey) / 2
-    let ang = Math.atan2(ey - sy, ex - sx) * 180 / Math.PI
-    if (ang > 90) ang -= 180; if (ang < -90) ang += 180
-    const label = fmtFt(ftVal)
+  // ── INTERNAL LINE DIMENSION LABELS ──
+  internalLines.forEach(l => {
+    if (l.ftLen < 1) return
+    const sx = tx(l.start.x), sy = ty(l.start.y), ex = tx(l.end.x), ey = ty(l.end.y)
+    const segPx = Math.sqrt((ex - sx) ** 2 + (ey - sy) ** 2)
+    if (segPx < 25) return
+
+    const label = fmtFt(l.ftLen)
     if (!label) return
-    const bgW = Math.max(label.length * 5.8 + 10, 44)
-    const perpDx = -(ey - sy), perpDy = ex - sx
-    const perpLen = Math.sqrt(perpDx * perpDx + perpDy * perpDy) || 1
-    const lx = mx + (perpDx / perpLen) * 9, ly = my + (perpDy / perpLen) * 9
+
+    const mx = (sx + ex) / 2, my = (sy + ey) / 2
+    const dx = ex - sx, dy = ey - sy
+    const len = Math.sqrt(dx * dx + dy * dy) || 1
+    const perpDx = -dy / len, perpDy = dx / len
+
+    // Offset label from the line
+    const lx = mx + perpDx * 10, ly = my + perpDy * 10
+    let ang = Math.atan2(dy, dx) * 180 / Math.PI
+    if (ang > 90) ang -= 180; if (ang < -90) ang += 180
+
+    const clr = EDGE_COLOR[l.type] || '#333'
+    const bgW = Math.max(label.length * 6 + 8, 28)
     svg += `<g transform="translate(${lx.toFixed(1)},${ly.toFixed(1)}) rotate(${ang.toFixed(1)})">`
-    svg += `<rect x="${(-bgW / 2).toFixed(1)}" y="-7.5" width="${bgW.toFixed(1)}" height="14" rx="1.5" fill="#fff" opacity="0.94"/>`
-    svg += `<text x="0" y="3" text-anchor="middle" font-size="8.5" font-weight="500" fill="${EDGE_COLOR['RIDGE']}" ${FONT}>${label}</text>`
+    svg += `<rect x="${(-bgW / 2).toFixed(1)}" y="-7" width="${bgW.toFixed(1)}" height="13" rx="1" fill="#fff" opacity="0.95"/>`
+    svg += `<text x="0" y="3" text-anchor="middle" font-size="8" font-weight="600" fill="${clr}" ${FONT}>${label}</text>`
     svg += `</g>`
   })
 
-  // ── HIP LINES (amber) ──
-  hipsXY.forEach((line, i) => {
-    if (line.length < 2) return
-    const start = line[0], end = line[line.length - 1]
-    svg += `<line x1="${tx(start.x).toFixed(1)}" y1="${ty(start.y).toFixed(1)}" x2="${tx(end.x).toFixed(1)}" y2="${ty(end.y).toFixed(1)}" stroke="${EDGE_COLOR['HIP']}" stroke-width="1.8" stroke-linecap="round"/>`
+  // ── FACET LABELS (A, B, C... with area) ──
+  facets.forEach((facet, fi) => {
+    const cx = tx(facet.centerX), cy = ty(facet.centerY)
+    // Facet letter (large)
+    svg += `<text x="${cx.toFixed(1)}" y="${(cy - 2).toFixed(1)}" text-anchor="middle" font-size="16" font-weight="800" fill="#C62828" fill-opacity="0.55" ${FONT}>${facet.label}</text>`
+    // Facet area (small)
+    svg += `<text x="${cx.toFixed(1)}" y="${(cy + 12).toFixed(1)}" text-anchor="middle" font-size="8" font-weight="600" fill="#555" fill-opacity="0.7" ${FONT}>${facet.areaSqft.toLocaleString()} SF</text>`
   })
 
-  // ── VALLEY LINES (blue, dashed) ──
-  valleysXY.forEach((line, i) => {
-    if (line.length < 2) return
-    const valPts = roofTrace.valleys![i]
-    const start = line[0], end = line[line.length - 1]
-    svg += `<line x1="${tx(start.x).toFixed(1)}" y1="${ty(start.y).toFixed(1)}" x2="${tx(end.x).toFixed(1)}" y2="${ty(end.y).toFixed(1)}" stroke="${EDGE_COLOR['VALLEY']}" stroke-width="1.8" stroke-dasharray="8,4" stroke-linecap="round"/>`
-    // Label
-    const ftVal = haversineFt(valPts[0], valPts[valPts.length - 1])
-    if (ftVal < 0.5) return
-    const sx = tx(start.x), sy = ty(start.y), ex = tx(end.x), ey = ty(end.y)
-    const mx = (sx + ex) / 2, my = (sy + ey) / 2
-    let ang = Math.atan2(ey - sy, ex - sx) * 180 / Math.PI
-    if (ang > 90) ang -= 180; if (ang < -90) ang += 180
-    const label = fmtFt(ftVal)
-    if (!label) return
-    const bgW = Math.max(label.length * 5.8 + 10, 44)
-    const perpDx = -(ey - sy), perpDy = ex - sx
-    const perpLen = Math.sqrt(perpDx * perpDx + perpDy * perpDy) || 1
-    const lx = mx + (perpDx / perpLen) * 9, ly = my + (perpDy / perpLen) * 9
-    svg += `<g transform="translate(${lx.toFixed(1)},${ly.toFixed(1)}) rotate(${ang.toFixed(1)})">`
-    svg += `<rect x="${(-bgW / 2).toFixed(1)}" y="-7.5" width="${bgW.toFixed(1)}" height="14" rx="1.5" fill="#fff" opacity="0.94"/>`
-    svg += `<text x="0" y="3" text-anchor="middle" font-size="8.5" font-weight="500" fill="${EDGE_COLOR['VALLEY']}" ${FONT}>${label}</text>`
-    svg += `</g>`
+  // ── VERTEX DOTS (clean small circles at intersections) ──
+  eavesXY.forEach(p => {
+    svg += `<circle cx="${tx(p.x).toFixed(1)}" cy="${ty(p.y).toFixed(1)}" r="2.5" fill="#1a1a1a"/>`
+  })
+  // Interior vertices (ridge/hip endpoints)
+  internalLines.forEach(l => {
+    svg += `<circle cx="${tx(l.start.x).toFixed(1)}" cy="${ty(l.start.y).toFixed(1)}" r="2" fill="#C62828"/>`
+    svg += `<circle cx="${tx(l.end.x).toFixed(1)}" cy="${ty(l.end.y).toFixed(1)}" r="2" fill="#C62828"/>`
   })
 
-  // ── EDGE-TYPE LEGEND (top-left) ──
-  const legendTypes: string[] = ['EAVE']
-  if (roofTrace.ridges?.length) legendTypes.push('RIDGE')
-  if (roofTrace.hips?.length) legendTypes.push('HIP')
-  if (roofTrace.valleys?.length) legendTypes.push('VALLEY')
-  const legendNames: Record<string, string> = { 'EAVE': 'Eave', 'HIP': 'Hip', 'RIDGE': 'Ridge', 'VALLEY': 'Valley', 'RAKE': 'Rake' }
-  const lx = 12, ly = 14
-  svg += `<rect x="${lx}" y="${ly}" width="68" height="${legendTypes.length * 13 + 8}" rx="2" fill="#fff" opacity="0.92" stroke="#ddd" stroke-width="0.5"/>`
-  legendTypes.forEach((t, i) => {
-    const iy = ly + 10 + i * 13
-    const clr = EDGE_COLOR[t] || '#333'
-    const dash = t === 'VALLEY' ? ' stroke-dasharray="3,2"' : ''
-    svg += `<line x1="${lx + 5}" y1="${iy}" x2="${lx + 20}" y2="${iy}" stroke="${clr}" stroke-width="2.5"${dash} stroke-linecap="round"/>`
-    svg += `<text x="${lx + 24}" y="${iy + 3}" font-size="7.5" font-weight="600" fill="#444" ${FONT}>${legendNames[t] || t}</text>`
+  // ── LEGEND (top-left, professional box) ──
+  const legendItems: { label: string; color: string; dash?: boolean }[] = [
+    { label: 'Eave', color: '#1a1a1a' },
+  ]
+  if (roofTrace.ridges?.length) legendItems.push({ label: 'Ridge', color: '#C62828' })
+  if (roofTrace.hips?.length) legendItems.push({ label: 'Hip', color: '#C62828' })
+  if (roofTrace.valleys?.length) legendItems.push({ label: 'Valley', color: '#1565C0', dash: true })
+
+  const lgX = 8, lgY = 8
+  const lgH = legendItems.length * 14 + 10
+  svg += `<rect x="${lgX}" y="${lgY}" width="72" height="${lgH}" rx="3" fill="#fff" fill-opacity="0.95" stroke="#ddd" stroke-width="0.5"/>`
+  legendItems.forEach((item, i) => {
+    const iy = lgY + 12 + i * 14
+    const dashAttr = item.dash ? ' stroke-dasharray="4,2"' : ''
+    svg += `<line x1="${lgX + 6}" y1="${iy}" x2="${lgX + 24}" y2="${iy}" stroke="${item.color}" stroke-width="2"${dashAttr} stroke-linecap="round"/>`
+    svg += `<text x="${lgX + 28}" y="${iy + 3.5}" font-size="8" font-weight="600" fill="#333" ${FONT}>${item.label}</text>`
   })
 
   // ── SOURCE BADGE ──
-  svg += `<text x="${W / 2}" y="${H - FOOTER_H - 8}" text-anchor="middle" font-size="7" fill="#0d9668" ${FONT} font-weight="600">TRACED FROM EAVE COORDINATES — GPS-ACCURATE OUTLINE</text>`
+  svg += `<text x="${W / 2}" y="${H - FOOTER_H - 6}" text-anchor="middle" font-size="6.5" fill="#666" ${FONT} font-weight="500" letter-spacing="0.5">AI-GENERATED ROOF DIAGRAM \u2014 TRACED FROM GPS COORDINATES</text>`
 
-  // ── COMPASS ROSE ──
-  const cX = W - 42, cY = 32
+  // ── COMPASS ROSE (professional style) ──
+  const cX = W - 38, cY = 34
   svg += `<g transform="translate(${cX},${cY})">`
-  svg += `<circle cx="0" cy="0" r="15" fill="#fff" fill-opacity="0.85" stroke="#999" stroke-width="0.7"/>`
-  svg += `<line x1="0" y1="11" x2="0" y2="-11" stroke="#999" stroke-width="0.8"/>`
-  svg += `<line x1="-11" y1="0" x2="11" y2="0" stroke="#999" stroke-width="0.5"/>`
-  svg += `<polygon points="0,-13 -3.5,-4 3.5,-4" fill="#C62828"/>`
-  svg += `<polygon points="0,13 -3.5,4 3.5,4" fill="#999"/>`
-  svg += `<text x="0" y="-17" text-anchor="middle" font-size="8" font-weight="800" fill="#333" ${FONT}>N</text>`
+  svg += `<circle cx="0" cy="0" r="16" fill="#fff" fill-opacity="0.9" stroke="#ccc" stroke-width="0.6"/>`
+  svg += `<line x1="0" y1="12" x2="0" y2="-12" stroke="#bbb" stroke-width="0.6"/>`
+  svg += `<line x1="-12" y1="0" x2="12" y2="0" stroke="#bbb" stroke-width="0.4"/>`
+  svg += `<polygon points="0,-14 -3,-5 3,-5" fill="#C62828"/>`
+  svg += `<polygon points="0,14 -3,5 3,5" fill="#bbb"/>`
+  svg += `<text x="0" y="-18" text-anchor="middle" font-size="7.5" font-weight="800" fill="#333" ${FONT}>N</text>`
+  svg += `<text x="0" y="24" text-anchor="middle" font-size="5.5" font-weight="600" fill="#999" ${FONT}>S</text>`
+  svg += `<text x="20" y="2.5" text-anchor="middle" font-size="5.5" font-weight="600" fill="#999" ${FONT}>E</text>`
+  svg += `<text x="-20" y="2.5" text-anchor="middle" font-size="5.5" font-weight="600" fill="#999" ${FONT}>W</text>`
   svg += `</g>`
 
   // ── FOOTER BAR ──
+  // Single authoritative TOTAL ROOF AREA + waste calculations at 5%, 10%, 15%
   const fY = H - FOOTER_H
   const barW = W * 0.94, barX = (W - barW) / 2
-  const cols = 5
+  const cols = 6
   const colW = barW / cols
   svg += `<rect x="${barX.toFixed(1)}" y="${fY}" width="${barW.toFixed(1)}" height="${FOOTER_H}" rx="0" fill="#002244"/>`
   for (let c = 1; c < cols; c++) {
     svg += `<line x1="${(barX + colW * c).toFixed(1)}" y1="${fY + 8}" x2="${(barX + colW * c).toFixed(1)}" y2="${fY + FOOTER_H - 8}" stroke="#0a3a5e" stroke-width="1"/>`
   }
   const totalLinFt = Math.round(edgeSummary.total_ridge_ft + edgeSummary.total_hip_ft + edgeSummary.total_valley_ft + edgeSummary.total_eave_ft + edgeSummary.total_rake_ft)
+  const waste5 = Math.round(trueAreaSqft * 1.05)
+  const waste10 = Math.round(trueAreaSqft * 1.10)
+  const waste15 = Math.round(trueAreaSqft * 1.15)
   const footerData = [
-    { label: 'EAVE PTS', value: `${n}` },
-    { label: 'PITCH', value: predominantPitch || `${avgPitchDeg.toFixed(0)}\u00B0` },
-    { label: 'AREA', value: `${trueAreaSqft.toLocaleString()} ft²` },
-    { label: 'GROSS SF', value: `${Math.round(totalFootprintSqft).toLocaleString()}` },
-    { label: 'LINEAR FT', value: `${totalLinFt}` },
+    { label: 'PITCH', value: predominantPitch || `${avgPitchDeg.toFixed(0)}\u00B0`, small: false },
+    { label: 'TOTAL ROOF AREA', value: `${Math.round(trueAreaSqft).toLocaleString()} ft\u00B2`, small: true },
+    { label: '+5% WASTE', value: `${waste5.toLocaleString()} ft\u00B2`, small: true },
+    { label: '+10% WASTE', value: `${waste10.toLocaleString()} ft\u00B2`, small: true },
+    { label: '+15% WASTE', value: `${waste15.toLocaleString()} ft\u00B2`, small: true },
+    { label: 'LINEAR FT', value: `${totalLinFt}`, small: false },
   ]
   footerData.forEach((d, i) => {
     const cx = barX + colW * i + colW / 2
-    svg += `<text x="${cx.toFixed(1)}" y="${fY + 15}" text-anchor="middle" font-size="7" font-weight="700" fill="#7eafd4" ${FONT} letter-spacing="1.5">${d.label}</text>`
-    svg += `<text x="${cx.toFixed(1)}" y="${fY + 38}" text-anchor="middle" font-size="${d.label === 'AREA' ? '12' : '17'}" font-weight="800" fill="#fff" ${FONT}>${d.value}</text>`
+    svg += `<text x="${cx.toFixed(1)}" y="${fY + 15}" text-anchor="middle" font-size="6.5" font-weight="700" fill="${d.label === 'TOTAL ROOF AREA' ? '#fbbf24' : '#7eafd4'}" ${FONT} letter-spacing="1">${d.label}</text>`
+    svg += `<text x="${cx.toFixed(1)}" y="${fY + 38}" text-anchor="middle" font-size="${d.small ? '11' : '16'}" font-weight="800" fill="${d.label === 'TOTAL ROOF AREA' ? '#fbbf24' : '#fff'}" ${FONT}>${d.value}</text>`
   })
 
   svg += `</svg>`
