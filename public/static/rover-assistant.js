@@ -448,7 +448,7 @@
       // Show welcome on first open
       if (state.messages.length === 0) {
         var name = state.customerName ? state.customerName.split(' ')[0] : 'there';
-        addMessage('assistant', 'Hey ' + name + '! 🐕 I\'m Rover, your AI assistant. I can help you navigate the platform, order reports, manage your CRM, draft proposals, or answer any roofing business questions. What do you need?');
+        addMessage('assistant', 'Hi! I\'m Roof Reporter AI — your AI assistant to help you with anything RooferAI! Whether it\'s navigating your user dashboard, helping with set-ups, acting as your personal sales assistant, or finding any data or information your business needs — I\'m here for you. How can I help you?');
       }
       setTimeout(function() { inputEl.focus(); }, 350);
     }
