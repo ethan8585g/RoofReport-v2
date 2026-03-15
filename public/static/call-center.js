@@ -62,10 +62,10 @@
 
       <!-- Tab Navigation -->
       <div class="flex gap-1 mb-6 bg-gray-100 rounded-xl p-1">
-        ${['overview','agents','contact-lists','campaigns','prospects','call-logs','deploy'].map(t => 
+        ${['overview','agents','contact-lists','campaigns','prospects','call-logs','phone-setup','deploy'].map(t => 
           `<button onclick="window.ccSetTab('${t}')" id="cc-tab-${t}" class="cc-tab px-4 py-2 rounded-lg text-sm font-medium transition-all ${CC.tab===t ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}">
-            <i class="fas fa-${t==='overview'?'chart-pie':t==='agents'?'robot':t==='contact-lists'?'address-book':t==='campaigns'?'bullhorn':t==='prospects'?'building':t==='call-logs'?'list-alt':t==='deploy'?'rocket':'circle'} mr-1.5"></i>
-            ${t==='overview'?'Overview':t==='agents'?'AI Agents':t==='contact-lists'?'Contact Lists':t==='campaigns'?'Campaigns':t==='prospects'?'Prospects':t==='call-logs'?'Call Logs':t==='deploy'?'Deploy':''}  
+            <i class="fas fa-${t==='overview'?'chart-pie':t==='agents'?'robot':t==='contact-lists'?'address-book':t==='campaigns'?'bullhorn':t==='prospects'?'building':t==='call-logs'?'list-alt':t==='phone-setup'?'phone-alt':t==='deploy'?'rocket':'circle'} mr-1.5"></i>
+            ${t==='overview'?'Overview':t==='agents'?'AI Agents':t==='contact-lists'?'Contact Lists':t==='campaigns'?'Campaigns':t==='prospects'?'Prospects':t==='call-logs'?'Call Logs':t==='phone-setup'?'Phone Setup':t==='deploy'?'Deploy':''}  
           </button>`
         ).join('')}
       </div>
@@ -113,6 +113,9 @@
       case 'contact-lists':
         CC.data.contactLists = await ccFetch('/api/call-center/contact-lists');
         break;
+      case 'phone-setup':
+        CC.data.phoneSetup = await ccFetch('/api/call-center/quick-connect/status');
+        break;
       case 'deploy':
         const [dAgents, dLists, dCamps] = await Promise.all([
           ccFetch('/api/call-center/agents'),
@@ -138,6 +141,7 @@
       case 'prospects': content.innerHTML = renderProspects(); break;
       case 'call-logs': content.innerHTML = renderCallLogs(); break;
       case 'contact-lists': content.innerHTML = renderContactLists(); break;
+      case 'phone-setup': content.innerHTML = renderPhoneSetup(); break;
       case 'deploy': content.innerHTML = renderDeploy(); break;
     }
   }
@@ -1247,5 +1251,311 @@
     }
     ccTestState.processing = false;
   }
+
+  // ============================================================
+  // PHONE SETUP TAB — Quick Connect for Call Center
+  // Same flow as Secretary Quick Connect
+  // ============================================================
+
+  // Phone setup state
+  var ccPhoneState = { step: 1, phoneNumber: '', verifiedData: null };
+
+  function renderPhoneSetup() {
+    var ps = CC.data.phoneSetup || {};
+
+    // If connected, show connected view
+    if (ps.status === 'connected' || ps.status === 'verified') {
+      return renderPhoneConnected(ps);
+    }
+
+    // Otherwise show the Quick Connect wizard
+    if (ccPhoneState.step === 2) return renderPhoneStep2();
+    if (ccPhoneState.step === 3) return renderPhoneStep3();
+    return renderPhoneStep1(ps);
+  }
+
+  function renderPhoneStep1(ps) {
+    var biz = ccPhoneState.phoneNumber || ps.business_phone || '';
+    return '<div class="max-w-lg mx-auto">' +
+      '<div class="text-center mb-8">' +
+        '<div class="w-16 h-16 bg-gradient-to-br from-orange-500 to-red-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg">' +
+          '<i class="fas fa-phone-alt text-white text-2xl"></i>' +
+        '</div>' +
+        '<h3 class="text-2xl font-black text-gray-900">Connect Phone Line</h3>' +
+        '<p class="text-gray-500 mt-2">Set up a dedicated phone number for your AI sales call center.<br>Quick Connect — verify with SMS, auto-configured in seconds.</p>' +
+      '</div>' +
+
+      '<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">' +
+        '<label class="block text-sm font-bold text-gray-700 mb-2"><i class="fas fa-phone mr-2 text-orange-500"></i>Your Business Phone Number</label>' +
+        '<p class="text-xs text-gray-400 mb-3">We\'ll send a verification code to this number.</p>' +
+        '<input type="tel" id="ccPhoneInput" value="' + (biz || '') + '" placeholder="(780) 555-1234" ' +
+          'class="w-full px-4 py-3 border-2 border-gray-200 rounded-xl text-lg font-mono focus:border-orange-500 focus:ring-2 focus:ring-orange-200 outline-none transition-all" ' +
+          'oninput="window.ccFormatPhoneInput(this)">' +
+
+        '<button onclick="window.ccPhoneSendCode()" id="ccSendCodeBtn" ' +
+          'class="w-full mt-4 py-3 bg-gradient-to-r from-orange-500 to-red-600 text-white font-bold rounded-xl hover:shadow-lg transition-all flex items-center justify-center gap-2">' +
+          '<i class="fas fa-sms"></i> Send Verification Code' +
+        '</button>' +
+      '</div>' +
+
+      '<div class="mt-6 bg-blue-50 rounded-xl p-4 border border-blue-100">' +
+        '<p class="text-sm text-blue-700"><i class="fas fa-shield-alt mr-2"></i><strong>How it works:</strong> We verify your phone via SMS, then auto-provision a dedicated AI line for your call center. No SIP trunks, no carrier setup — just enter, verify, connect.</p>' +
+      '</div>' +
+    '</div>';
+  }
+
+  function renderPhoneStep2() {
+    var ph = ccPhoneState.phoneNumber;
+    return '<div class="max-w-lg mx-auto">' +
+      '<div class="text-center mb-8">' +
+        '<div class="w-16 h-16 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg">' +
+          '<i class="fas fa-sms text-white text-2xl"></i>' +
+        '</div>' +
+        '<h3 class="text-2xl font-black text-gray-900">Enter Verification Code</h3>' +
+        '<p class="text-gray-500 mt-2">We sent a 6-digit code to <strong>' + (ph || 'your phone') + '</strong></p>' +
+      '</div>' +
+
+      '<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">' +
+        '<div class="flex gap-2 justify-center mb-6" id="ccCodeInputs">' +
+          '<input type="text" maxlength="1" class="w-12 h-14 text-center text-2xl font-black border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:ring-2 focus:ring-orange-200 outline-none" oninput="window.ccCodeDigitInput(this, 0)">' +
+          '<input type="text" maxlength="1" class="w-12 h-14 text-center text-2xl font-black border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:ring-2 focus:ring-orange-200 outline-none" oninput="window.ccCodeDigitInput(this, 1)">' +
+          '<input type="text" maxlength="1" class="w-12 h-14 text-center text-2xl font-black border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:ring-2 focus:ring-orange-200 outline-none" oninput="window.ccCodeDigitInput(this, 2)">' +
+          '<span class="flex items-center text-gray-300 text-xl">—</span>' +
+          '<input type="text" maxlength="1" class="w-12 h-14 text-center text-2xl font-black border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:ring-2 focus:ring-orange-200 outline-none" oninput="window.ccCodeDigitInput(this, 3)">' +
+          '<input type="text" maxlength="1" class="w-12 h-14 text-center text-2xl font-black border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:ring-2 focus:ring-orange-200 outline-none" oninput="window.ccCodeDigitInput(this, 4)">' +
+          '<input type="text" maxlength="1" class="w-12 h-14 text-center text-2xl font-black border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:ring-2 focus:ring-orange-200 outline-none" oninput="window.ccCodeDigitInput(this, 5)">' +
+        '</div>' +
+        '<div id="ccVerifyStatus" class="text-center text-sm h-6 mb-3"></div>' +
+        '<button onclick="window.ccPhoneVerifyCode()" id="ccVerifyBtn" ' +
+          'class="w-full py-3 bg-gradient-to-r from-orange-500 to-red-600 text-white font-bold rounded-xl hover:shadow-lg transition-all flex items-center justify-center gap-2">' +
+          '<i class="fas fa-check-circle"></i> Verify & Setup Phone Line' +
+        '</button>' +
+        '<button onclick="window.ccPhoneBack()" class="w-full mt-2 py-2 text-gray-500 hover:text-gray-700 text-sm">← Change phone number</button>' +
+      '</div>' +
+
+      '<div class="mt-4 text-center">' +
+        '<button onclick="window.ccPhoneResend()" class="text-sm text-orange-600 hover:text-orange-700 font-medium">Didn\'t get the code? Resend</button>' +
+      '</div>' +
+    '</div>';
+  }
+
+  function renderPhoneStep3() {
+    var data = ccPhoneState.verifiedData || {};
+    var inst = data.instructions || {};
+    return '<div class="max-w-lg mx-auto">' +
+      '<div class="text-center mb-8">' +
+        '<div class="w-16 h-16 bg-gradient-to-br from-green-500 to-emerald-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg">' +
+          '<i class="fas fa-check text-white text-2xl"></i>' +
+        '</div>' +
+        '<h3 class="text-2xl font-black text-gray-900">Phone Verified!</h3>' +
+        '<p class="text-gray-500 mt-2">Activate call forwarding with one simple step:</p>' +
+      '</div>' +
+
+      '<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">' +
+        '<div class="grid grid-cols-2 gap-4 mb-6">' +
+          '<div class="bg-gray-50 rounded-xl p-4 text-center">' +
+            '<p class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Your Phone</p>' +
+            '<p class="text-lg font-black text-gray-900 mt-1">' + (data.business_phone_display || 'N/A') + '</p>' +
+          '</div>' +
+          '<div class="bg-orange-50 rounded-xl p-4 text-center">' +
+            '<p class="text-[10px] uppercase font-bold text-orange-400 tracking-wider">AI Call Center Line</p>' +
+            '<p class="text-lg font-black text-orange-600 mt-1">' + (data.ai_phone_display || 'N/A') + '</p>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="bg-gradient-to-r from-orange-500 to-red-600 rounded-xl p-5 text-white mb-4">' +
+          '<p class="text-sm font-bold mb-2"><i class="fas fa-phone mr-2"></i>Activate Forwarding</p>' +
+          '<div class="flex items-center gap-3">' +
+            '<code class="text-2xl font-black tracking-wider flex-1">' + (data.forwarding_code || '*72...') + '</code>' +
+            '<button onclick="window.ccCopyText(\'' + (data.forwarding_code || '') + '\')" class="bg-white/20 hover:bg-white/30 px-3 py-2 rounded-lg text-sm font-bold"><i class="fas fa-copy"></i></button>' +
+          '</div>' +
+          '<p class="text-orange-100 text-xs mt-2">Dial this from your business phone. Wait for 2 beeps.</p>' +
+        '</div>' +
+
+        '<div class="bg-gray-50 rounded-xl p-4 text-sm text-gray-600 space-y-1">' +
+          '<p><strong>1.</strong> ' + (inst.step1 || 'Pick up your business phone') + '</p>' +
+          '<p><strong>2.</strong> ' + (inst.step2 || 'Dial the code above') + '</p>' +
+          '<p><strong>3.</strong> ' + (inst.step3 || 'Wait for confirmation') + '</p>' +
+          '<p><strong>4.</strong> ' + (inst.step4 || 'Done!') + '</p>' +
+          '<p class="text-gray-400 mt-2 pt-2 border-t"><i class="fas fa-undo mr-1"></i> ' + (inst.disable || 'To disable: Dial *73') + '</p>' +
+        '</div>' +
+
+        '<button onclick="window.ccPhoneComplete()" id="ccCompleteBtn" ' +
+          'class="w-full mt-4 py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white font-bold rounded-xl hover:shadow-lg transition-all flex items-center justify-center gap-2">' +
+          '<i class="fas fa-check-double"></i> I\'ve Activated Forwarding — Go Live!' +
+        '</button>' +
+      '</div>' +
+    '</div>';
+  }
+
+  function renderPhoneConnected(ps) {
+    return '<div class="max-w-lg mx-auto">' +
+      '<div class="text-center mb-8">' +
+        '<div class="w-16 h-16 bg-gradient-to-br from-green-500 to-emerald-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg animate-pulse">' +
+          '<i class="fas fa-check-double text-white text-2xl"></i>' +
+        '</div>' +
+        '<h3 class="text-2xl font-black text-gray-900">Phone Line Connected</h3>' +
+        '<p class="text-green-600 font-medium mt-1"><i class="fas fa-circle text-xs mr-1 animate-pulse"></i> AI Call Center is live</p>' +
+      '</div>' +
+
+      '<div class="bg-white rounded-2xl border border-green-200 shadow-sm p-6">' +
+        '<div class="grid grid-cols-2 gap-4 mb-6">' +
+          '<div class="bg-gray-50 rounded-xl p-4 text-center">' +
+            '<p class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Your Phone</p>' +
+            '<p class="text-lg font-black text-gray-900 mt-1">' + (ps.business_phone_display || 'N/A') + '</p>' +
+          '</div>' +
+          '<div class="bg-green-50 rounded-xl p-4 text-center">' +
+            '<p class="text-[10px] uppercase font-bold text-green-500 tracking-wider">AI Line</p>' +
+            '<p class="text-lg font-black text-green-600 mt-1">' + (ps.ai_phone_display || 'N/A') + '</p>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="bg-green-50 border border-green-100 rounded-xl p-4 mb-4">' +
+          '<h4 class="font-bold text-green-800 text-sm mb-2"><i class="fas fa-route mr-2"></i>How calls work:</h4>' +
+          '<ol class="text-sm text-green-700 space-y-1 list-decimal ml-4">' +
+            '<li>Incoming call hits your business phone</li>' +
+            '<li>If not answered → forwards to AI line</li>' +
+            '<li>AI sales agent picks up and handles the call</li>' +
+            '<li>Call transcript and outcome logged to your dashboard</li>' +
+          '</ol>' +
+        '</div>' +
+
+        '<div class="flex gap-3">' +
+          '<button onclick="window.ccPhoneDisconnect()" class="flex-1 py-2.5 border-2 border-red-200 text-red-600 rounded-xl text-sm font-bold hover:bg-red-50 transition-all">' +
+            '<i class="fas fa-unlink mr-1"></i> Disconnect' +
+          '</button>' +
+          '<button onclick="window.ccPhoneReconnect()" class="flex-1 py-2.5 border-2 border-orange-200 text-orange-600 rounded-xl text-sm font-bold hover:bg-orange-50 transition-all">' +
+            '<i class="fas fa-redo mr-1"></i> Reconfigure' +
+          '</button>' +
+        '</div>' +
+
+        '<div class="mt-4 bg-gray-50 rounded-xl p-3 text-center">' +
+          '<p class="text-xs text-gray-500">Forwarding code: <code class="font-bold text-gray-700">' + (ps.forwarding_code || '*72...') + '</code> · Deactivate: <code class="font-bold text-gray-700">' + (ps.disable_forwarding_code || '*73') + '</code></p>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }
+
+  // ── Phone Setup Handlers ──
+
+  window.ccFormatPhoneInput = function(input) {
+    var digits = input.value.replace(/\D/g, '');
+    if (digits.length > 10) digits = digits.slice(0, 10);
+    if (digits.length >= 7) input.value = '(' + digits.slice(0,3) + ') ' + digits.slice(3,6) + '-' + digits.slice(6);
+    else if (digits.length >= 4) input.value = '(' + digits.slice(0,3) + ') ' + digits.slice(3);
+    else if (digits.length > 0) input.value = '(' + digits;
+    else input.value = '';
+  };
+
+  window.ccPhoneSendCode = async function() {
+    var input = document.getElementById('ccPhoneInput');
+    var phone = (input ? input.value : '').replace(/\D/g, '');
+    if (phone.length < 10) { alert('Please enter a valid 10-digit phone number.'); return; }
+
+    var btn = document.getElementById('ccSendCodeBtn');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Sending...'; }
+
+    var res = await ccFetch('/api/call-center/quick-connect/send-code', { method: 'POST', body: JSON.stringify({ phone_number: phone }) });
+    if (res && res.success) {
+      ccPhoneState.phoneNumber = res.phone_number || phone;
+      ccPhoneState.step = 2;
+      if (res.dev_code) alert('Dev mode code: ' + res.dev_code);
+      renderTab('phone-setup');
+    } else {
+      alert((res && res.error) || 'Failed to send code. Please try again.');
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-sms mr-1"></i> Send Verification Code'; }
+    }
+  };
+
+  window.ccCodeDigitInput = function(el, idx) {
+    var val = el.value.replace(/\D/g, '');
+    el.value = val.slice(0, 1);
+    if (val && idx < 5) {
+      var inputs = document.querySelectorAll('#ccCodeInputs input');
+      var nextIdx = idx < 2 ? idx + 1 : idx + 1; // skip the dash span
+      if (inputs[nextIdx]) inputs[nextIdx].focus();
+    }
+    // Auto-submit if all 6 filled
+    var inputs = document.querySelectorAll('#ccCodeInputs input');
+    var code = '';
+    inputs.forEach(function(inp) { code += inp.value; });
+    if (code.length === 6) window.ccPhoneVerifyCode();
+  };
+
+  window.ccPhoneVerifyCode = async function() {
+    var inputs = document.querySelectorAll('#ccCodeInputs input');
+    var code = '';
+    inputs.forEach(function(inp) { code += inp.value; });
+    if (code.length !== 6) { document.getElementById('ccVerifyStatus').innerHTML = '<span class="text-red-500">Please enter all 6 digits</span>'; return; }
+
+    var btn = document.getElementById('ccVerifyBtn');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Verifying & Setting Up...'; }
+    document.getElementById('ccVerifyStatus').innerHTML = '<span class="text-orange-500"><i class="fas fa-spinner fa-spin mr-1"></i>Purchasing phone number & configuring...</span>';
+
+    var res = await ccFetch('/api/call-center/quick-connect/verify', { method: 'POST', body: JSON.stringify({ phone_number: ccPhoneState.phoneNumber, code: code }) });
+    if (res && res.success) {
+      ccPhoneState.verifiedData = res;
+      ccPhoneState.step = 3;
+      renderTab('phone-setup');
+    } else {
+      document.getElementById('ccVerifyStatus').innerHTML = '<span class="text-red-500"><i class="fas fa-exclamation-circle mr-1"></i>' + ((res && res.error) || 'Verification failed') + '</span>';
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-check-circle mr-1"></i> Verify & Setup Phone Line'; }
+    }
+  };
+
+  window.ccPhoneBack = function() {
+    ccPhoneState.step = 1;
+    renderTab('phone-setup');
+  };
+
+  window.ccPhoneResend = async function() {
+    var res = await ccFetch('/api/call-center/quick-connect/send-code', { method: 'POST', body: JSON.stringify({ phone_number: ccPhoneState.phoneNumber }) });
+    if (res && res.success) {
+      alert('New verification code sent!');
+      if (res.dev_code) alert('Dev mode code: ' + res.dev_code);
+    } else {
+      alert((res && res.error) || 'Failed to resend.');
+    }
+  };
+
+  window.ccPhoneComplete = async function() {
+    var btn = document.getElementById('ccCompleteBtn');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Activating...'; }
+
+    var res = await ccFetch('/api/call-center/quick-connect/complete', { method: 'POST', body: JSON.stringify({}) });
+    if (res && res.success) {
+      CC.data.phoneSetup = await ccFetch('/api/call-center/quick-connect/status');
+      ccPhoneState.step = 1;
+      renderTab('phone-setup');
+    } else {
+      alert((res && res.error) || 'Failed to activate.');
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-check-double mr-1"></i> I\'ve Activated Forwarding — Go Live!'; }
+    }
+  };
+
+  window.ccPhoneDisconnect = async function() {
+    if (!confirm('Disconnect the AI phone line? You can re-connect anytime.')) return;
+    var res = await ccFetch('/api/call-center/quick-connect/disconnect', { method: 'POST', body: JSON.stringify({}) });
+    if (res && res.success) {
+      alert('Phone line disconnected. Don\'t forget to dial *73 from your business phone to deactivate forwarding.');
+      ccPhoneState = { step: 1, phoneNumber: '', verifiedData: null };
+      CC.data.phoneSetup = await ccFetch('/api/call-center/quick-connect/status');
+      renderTab('phone-setup');
+    }
+  };
+
+  window.ccPhoneReconnect = function() {
+    ccPhoneState = { step: 1, phoneNumber: '', verifiedData: null };
+    CC.data.phoneSetup = { status: 'not_started' };
+    renderTab('phone-setup');
+  };
+
+  window.ccCopyText = function(text) {
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text).then(function() { alert('Copied: ' + text); });
+    } else {
+      prompt('Copy this:', text);
+    }
+  };
 
 })();

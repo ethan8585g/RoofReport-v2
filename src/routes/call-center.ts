@@ -24,6 +24,11 @@
 // GET  /api/call-center/dashboard              — Stats overview
 // POST /api/call-center/livekit-token          — Generate LK token for outbound
 // GET  /api/call-center/next-prospect/:agentId — Get next prospect to call
+// GET  /api/call-center/quick-connect/status    — Phone setup status
+// POST /api/call-center/quick-connect/send-code — Send SMS verification
+// POST /api/call-center/quick-connect/verify    — Verify code + auto-setup
+// POST /api/call-center/quick-connect/complete  — Mark phone as active
+// POST /api/call-center/quick-connect/disconnect— Disconnect phone line
 // ============================================================
 
 import { Hono } from 'hono'
@@ -894,4 +899,398 @@ callCenterRoutes.post('/deploy', async (c) => {
       message: `Agent "${agent.name}" deployed with ${queuedCount?.cnt || 0} prospects queued for calling`
     })
   } catch (e: any) { return c.json({ error: e.message }, 500) }
+})
+
+// ============================================================
+// QUICK CONNECT — Phone Setup for Call Center (Admin)
+// Same flow as Secretary Quick Connect but for the admin outbound dialer
+// ============================================================
+
+// Helper: Normalize phone to E.164
+function normalizePhone(phone: string): string {
+  let n = phone.replace(/[\s\-\(\)\.]/g, '')
+  if (n.startsWith('1') && n.length === 11) n = '+' + n
+  else if (!n.startsWith('+') && n.length === 10) n = '+1' + n
+  else if (!n.startsWith('+')) n = '+' + n
+  return n
+}
+
+// Helper: Format phone for display
+function formatPhoneDisplay(n: string): string {
+  if (!n) return ''
+  const d = n.replace(/^\+1/, '').replace(/\D/g, '')
+  if (d.length === 10) return `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}`
+  return n
+}
+
+// Helper: Twilio API for call center
+async function ccTwilioAPI(accountSid: string, authToken: string, method: string, path: string, body?: Record<string, string>) {
+  const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}${path}.json`
+  const headers: Record<string, string> = {
+    'Authorization': 'Basic ' + btoa(`${accountSid}:${authToken}`),
+    'Content-Type': 'application/x-www-form-urlencoded',
+  }
+  let formBody = ''
+  if (body) {
+    formBody = Object.entries(body).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&')
+  }
+  const resp = await fetch(url, { method, headers, body: formBody || undefined })
+  return resp.json() as Promise<any>
+}
+
+// Helper: base64url encode
+function ccBase64urlEncode(data: any): string {
+  const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : new Uint8Array(data)
+  let binary = ''
+  bytes.forEach((b: number) => binary += String.fromCharCode(b))
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+// Helper: LiveKit SIP API for call center
+async function ccLivekitSipAPI(apiKey: string, apiSecret: string, livekitUrl: string, method: string, path: string, body?: any) {
+  const now = Math.floor(Date.now() / 1000)
+  const header = { alg: 'HS256', typ: 'JWT' }
+  const payload = {
+    iss: apiKey, sub: 'server', iat: now, exp: now + 300, nbf: now,
+    video: { roomCreate: true, roomList: true, roomAdmin: true },
+    sip: { admin: true, call: true }
+  }
+  const headerB64 = ccBase64urlEncode(JSON.stringify(header))
+  const payloadB64 = ccBase64urlEncode(JSON.stringify(payload))
+  const signingInput = `${headerB64}.${payloadB64}`
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(apiSecret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+  const signature = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(signingInput))
+  const sigB64 = ccBase64urlEncode(new Uint8Array(signature))
+  const jwt = `${headerB64}.${payloadB64}.${sigB64}`
+
+  const httpUrl = livekitUrl.replace('wss://', 'https://').replace(/\/$/, '')
+  const resp = await fetch(`${httpUrl}${path}`, {
+    method,
+    headers: { 'Authorization': `Bearer ${jwt}`, 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  })
+  return resp.json() as Promise<any>
+}
+
+// GET /quick-connect/status — Get call center phone setup status
+callCenterRoutes.get('/quick-connect/status', async (c) => {
+  try {
+    const { results } = await c.env.DB.prepare(
+      `SELECT * FROM cc_phone_config ORDER BY id DESC LIMIT 1`
+    ).all<any>()
+
+    const config = results?.[0]
+    if (!config) return c.json({ status: 'not_started' })
+
+    const aiDigits = (config.assigned_phone_number || '').replace(/^\+1/, '').replace(/\D/g, '')
+    return c.json({
+      status: config.connection_status || 'not_started',
+      business_phone: config.business_phone || '',
+      business_phone_display: formatPhoneDisplay(config.business_phone || ''),
+      ai_phone_number: config.assigned_phone_number || '',
+      ai_phone_display: formatPhoneDisplay(config.assigned_phone_number || ''),
+      phone_verified: !!config.phone_verified,
+      is_active: !!config.is_active,
+      has_trunk: !!config.livekit_inbound_trunk_id,
+      has_dispatch: !!config.livekit_dispatch_rule_id,
+      forwarding_code: aiDigits ? `*72${aiDigits}` : '',
+      disable_forwarding_code: '*73',
+      label: config.label || 'Primary Outbound Line',
+    })
+  } catch (e: any) {
+    return c.json({ status: 'not_started', error: e.message })
+  }
+})
+
+// POST /quick-connect/send-code — Send SMS verification to admin phone
+callCenterRoutes.post('/quick-connect/send-code', async (c) => {
+  try {
+    const { phone_number } = await c.req.json()
+    if (!phone_number) return c.json({ error: 'Phone number is required' }, 400)
+
+    const normalized = normalizePhone(phone_number)
+
+    // Upsert phone config record
+    const existing = await c.env.DB.prepare(
+      `SELECT id FROM cc_phone_config ORDER BY id DESC LIMIT 1`
+    ).first<any>()
+
+    if (existing) {
+      await c.env.DB.prepare(
+        `UPDATE cc_phone_config SET business_phone = ?, updated_at = datetime('now') WHERE id = ?`
+      ).bind(normalized, existing.id).run()
+    } else {
+      await c.env.DB.prepare(
+        `INSERT INTO cc_phone_config (business_phone, label) VALUES (?, 'Primary Outbound Line')`
+      ).bind(normalized).run()
+    }
+
+    // Try Twilio Verify
+    const twilioSid = (c.env as any).TWILIO_ACCOUNT_SID
+    const twilioAuth = (c.env as any).TWILIO_AUTH_TOKEN
+    const twilioVerifySid = (c.env as any).TWILIO_VERIFY_SERVICE_SID
+
+    if (twilioSid && twilioAuth && twilioVerifySid) {
+      try {
+        const url = `https://verify.twilio.com/v2/Services/${twilioVerifySid}/Verifications`
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Basic ' + btoa(`${twilioSid}:${twilioAuth}`),
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: `To=${encodeURIComponent(normalized)}&Channel=sms`,
+        })
+        const data = await resp.json() as any
+        if (data.status === 'pending') {
+          return c.json({ success: true, phone_number: normalized, message: `Verification code sent to ${normalized}`, method: 'twilio_verify' })
+        }
+      } catch (err: any) {
+        console.error('[CC QuickConnect] Twilio Verify failed:', err.message)
+      }
+    }
+
+    // Fallback: generate and store a code
+    const code = String(Math.floor(100000 + Math.random() * 900000))
+    const configRow = await c.env.DB.prepare(`SELECT id FROM cc_phone_config ORDER BY id DESC LIMIT 1`).first<any>()
+    if (configRow) {
+      await c.env.DB.prepare(
+        `UPDATE cc_phone_config SET verification_code = ?, verification_expires = datetime('now', '+10 minutes'), updated_at = datetime('now') WHERE id = ?`
+      ).bind(code, configRow.id).run()
+    }
+
+    // Try Twilio SMS
+    if (twilioSid && twilioAuth) {
+      const twilioFrom = (c.env as any).TWILIO_PHONE_NUMBER
+      if (twilioFrom) {
+        try {
+          await ccTwilioAPI(twilioSid, twilioAuth, 'POST', '/Messages', {
+            To: normalized, From: twilioFrom,
+            Body: `Your RoofReporterAI Call Center verification code is: ${code}. Expires in 10 min.`,
+          })
+          return c.json({ success: true, phone_number: normalized, message: `Verification code sent to ${normalized}`, method: 'twilio_sms' })
+        } catch (err: any) {
+          console.error('[CC QuickConnect] Twilio SMS failed:', err.message)
+        }
+      }
+    }
+
+    // Dev mode fallback
+    return c.json({ success: true, phone_number: normalized, message: `Dev mode — verification code is: ${code}`, method: 'dev_mode', dev_code: code })
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500)
+  }
+})
+
+// POST /quick-connect/verify — Verify code and auto-setup phone number
+callCenterRoutes.post('/quick-connect/verify', async (c) => {
+  try {
+    const { phone_number, code } = await c.req.json()
+    if (!code) return c.json({ error: 'Verification code is required' }, 400)
+
+    const normalized = normalizePhone(phone_number || '')
+
+    // Verify code via Twilio Verify
+    const twilioSid = (c.env as any).TWILIO_ACCOUNT_SID
+    const twilioAuth = (c.env as any).TWILIO_AUTH_TOKEN
+    const twilioVerifySid = (c.env as any).TWILIO_VERIFY_SERVICE_SID
+    let verified = false
+
+    if (twilioSid && twilioAuth && twilioVerifySid) {
+      try {
+        const url = `https://verify.twilio.com/v2/Services/${twilioVerifySid}/VerificationCheck`
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers: { 'Authorization': 'Basic ' + btoa(`${twilioSid}:${twilioAuth}`), 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: `To=${encodeURIComponent(normalized)}&Code=${encodeURIComponent(code)}`,
+        })
+        const data = await resp.json() as any
+        verified = data.status === 'approved'
+      } catch (err: any) {
+        console.error('[CC QuickConnect] Verify check failed:', err.message)
+      }
+    }
+
+    // Fallback: check stored code
+    if (!verified) {
+      const config = await c.env.DB.prepare(
+        `SELECT verification_code, verification_expires FROM cc_phone_config ORDER BY id DESC LIMIT 1`
+      ).first<any>()
+      if (config?.verification_code === code && config?.verification_expires > new Date().toISOString()) {
+        verified = true
+      }
+    }
+
+    // Dev bypass: "000000"
+    if (!verified && code === '000000') verified = true
+
+    if (!verified) return c.json({ error: 'Invalid or expired verification code' }, 400)
+
+    // --- AUTO PURCHASE PHONE NUMBER ---
+    const apiKey = (c.env as any).LIVEKIT_API_KEY
+    const apiSecret = (c.env as any).LIVEKIT_API_SECRET
+    const livekitUrl = (c.env as any).LIVEKIT_URL
+
+    let aiPhoneNumber = ''
+    let trunkId = ''
+    let dispatchId = ''
+    let connectionMethod = 'livekit_number'
+    let forwardingCode = ''
+
+    // Check if already have a number
+    const existingConfig = await c.env.DB.prepare(
+      `SELECT assigned_phone_number, livekit_inbound_trunk_id, livekit_dispatch_rule_id FROM cc_phone_config ORDER BY id DESC LIMIT 1`
+    ).first<any>()
+
+    if (existingConfig?.assigned_phone_number && existingConfig?.livekit_inbound_trunk_id) {
+      aiPhoneNumber = existingConfig.assigned_phone_number
+      trunkId = existingConfig.livekit_inbound_trunk_id
+      dispatchId = existingConfig.livekit_dispatch_rule_id || ''
+    } else {
+      // Option A: LiveKit Phone Numbers
+      if (apiKey && apiSecret && livekitUrl) {
+        try {
+          const searchResult = await ccLivekitSipAPI(apiKey, apiSecret, livekitUrl, 'POST',
+            '/twirp/livekit.PhoneNumberService/SearchPhoneNumbers', { country_code: 'US', limit: 5 })
+          if (searchResult?.items?.length > 0) {
+            const purchaseResult = await ccLivekitSipAPI(apiKey, apiSecret, livekitUrl, 'POST',
+              '/twirp/livekit.PhoneNumberService/PurchasePhoneNumber', { phone_numbers: [searchResult.items[0].e164_format] })
+            if (purchaseResult?.phone_numbers?.length > 0) {
+              aiPhoneNumber = purchaseResult.phone_numbers[0].e164_format
+              connectionMethod = 'livekit_direct'
+              const dispatchResult = await ccLivekitSipAPI(apiKey, apiSecret, livekitUrl, 'POST',
+                '/twirp/livekit.SIP/CreateSIPDispatchRule', {
+                  rule: { dispatchRuleIndividual: { roomPrefix: `cc-outbound-` } },
+                  name: `cc-outbound-dispatch`,
+                  metadata: JSON.stringify({ service: 'call_center_outbound' }),
+                })
+              dispatchId = dispatchResult?.sip_dispatch_rule_id || ''
+              if (dispatchId) {
+                await ccLivekitSipAPI(apiKey, apiSecret, livekitUrl, 'POST',
+                  '/twirp/livekit.PhoneNumberService/UpdatePhoneNumber',
+                  { phone_number: aiPhoneNumber, sip_dispatch_rule_id: dispatchId })
+              }
+            }
+          }
+        } catch (err: any) {
+          console.error('[CC QuickConnect] LiveKit Phone Numbers failed:', err.message)
+        }
+      }
+
+      // Option B: Twilio + LiveKit SIP
+      if (!aiPhoneNumber && twilioSid && twilioAuth) {
+        try {
+          let search = await ccTwilioAPI(twilioSid, twilioAuth, 'GET', '/AvailablePhoneNumbers/CA/Local?AreaCode=780&VoiceEnabled=true&PageSize=1', undefined)
+          if (!search?.available_phone_numbers?.length) search = await ccTwilioAPI(twilioSid, twilioAuth, 'GET', '/AvailablePhoneNumbers/CA/Local?VoiceEnabled=true&PageSize=1', undefined)
+          if (!search?.available_phone_numbers?.length) search = await ccTwilioAPI(twilioSid, twilioAuth, 'GET', '/AvailablePhoneNumbers/US/Local?VoiceEnabled=true&PageSize=1', undefined)
+
+          if (search?.available_phone_numbers?.length > 0) {
+            const purchased = await ccTwilioAPI(twilioSid, twilioAuth, 'POST', '/IncomingPhoneNumbers', {
+              PhoneNumber: search.available_phone_numbers[0].phone_number,
+              FriendlyName: `RoofReporterAI Call Center Outbound`,
+            })
+            if (purchased?.sid) {
+              aiPhoneNumber = purchased.phone_number
+              connectionMethod = 'twilio_sip'
+              if (apiKey && apiSecret && livekitUrl) {
+                const trunkResult = await ccLivekitSipAPI(apiKey, apiSecret, livekitUrl, 'POST',
+                  '/twirp/livekit.SIP/CreateSIPInboundTrunk', {
+                    trunk: { name: `cc-outbound`, numbers: [aiPhoneNumber], krisp_enabled: true, metadata: JSON.stringify({ service: 'call_center' }) }
+                  })
+                trunkId = trunkResult?.sip_trunk_id || trunkResult?.trunk?.sip_trunk_id || ''
+                const dispatchResult = await ccLivekitSipAPI(apiKey, apiSecret, livekitUrl, 'POST',
+                  '/twirp/livekit.SIP/CreateSIPDispatchRule', {
+                    trunk_ids: trunkId ? [trunkId] : [],
+                    rule: { dispatchRuleIndividual: { roomPrefix: `cc-outbound-` } },
+                    name: `cc-outbound-dispatch`,
+                    metadata: JSON.stringify({ service: 'call_center' }),
+                  })
+                dispatchId = dispatchResult?.sip_dispatch_rule_id || ''
+              }
+            }
+          }
+        } catch (err: any) {
+          console.error('[CC QuickConnect] Twilio purchase failed:', err.message)
+        }
+      }
+
+      // Option C: Dev placeholder
+      if (!aiPhoneNumber) {
+        aiPhoneNumber = '+17800000002'
+        connectionMethod = 'dev_placeholder'
+      }
+    }
+
+    if (!aiPhoneNumber) {
+      return c.json({ error: 'Unable to auto-purchase phone number. Configure Twilio/LiveKit API keys.', verified: true }, 503)
+    }
+
+    const aiDigits = aiPhoneNumber.replace(/^\+1/, '').replace(/\D/g, '')
+    forwardingCode = `*72${aiDigits}`
+
+    // Update config
+    await c.env.DB.prepare(`
+      UPDATE cc_phone_config SET
+        business_phone = ?,
+        assigned_phone_number = ?,
+        connection_status = 'verified',
+        forwarding_method = ?,
+        livekit_inbound_trunk_id = ?,
+        livekit_dispatch_rule_id = ?,
+        verification_code = NULL,
+        verification_expires = NULL,
+        phone_verified = 1,
+        phone_verified_at = datetime('now'),
+        updated_at = datetime('now')
+      WHERE id = (SELECT id FROM cc_phone_config ORDER BY id DESC LIMIT 1)
+    `).bind(normalized, aiPhoneNumber, connectionMethod, trunkId || '', dispatchId || '').run()
+
+    return c.json({
+      success: true, verified: true,
+      business_phone: normalized,
+      business_phone_display: formatPhoneDisplay(normalized),
+      ai_phone_number: aiPhoneNumber,
+      ai_phone_display: formatPhoneDisplay(aiPhoneNumber),
+      connection_method: connectionMethod,
+      trunk_id: trunkId,
+      dispatch_rule_id: dispatchId,
+      forwarding_code: forwardingCode,
+      disable_forwarding_code: '*73',
+      instructions: {
+        step1: `Pick up your business phone (${formatPhoneDisplay(normalized)})`,
+        step2: `Dial: ${forwardingCode}`,
+        step3: 'Wait for the confirmation tone (2 beeps)',
+        step4: 'Done! Calls forward to the AI sales agent.',
+        disable: 'To disable: Dial *73',
+      },
+      message: 'Phone verified and AI call center number assigned!',
+    })
+  } catch (e: any) {
+    console.error('[CC QuickConnect] Setup error:', e)
+    return c.json({ error: 'Setup failed: ' + e.message, verified: true }, 500)
+  }
+})
+
+// POST /quick-connect/complete — Mark call center phone as fully active
+callCenterRoutes.post('/quick-connect/complete', async (c) => {
+  try {
+    await c.env.DB.prepare(
+      `UPDATE cc_phone_config SET connection_status = 'connected', is_active = 1, updated_at = datetime('now') WHERE id = (SELECT id FROM cc_phone_config ORDER BY id DESC LIMIT 1)`
+    ).run()
+    return c.json({ success: true, message: 'Call center phone line is now live!' })
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500)
+  }
+})
+
+// POST /quick-connect/disconnect — Disconnect phone line
+callCenterRoutes.post('/quick-connect/disconnect', async (c) => {
+  try {
+    await c.env.DB.prepare(
+      `UPDATE cc_phone_config SET connection_status = 'disconnected', is_active = 0, updated_at = datetime('now') WHERE id = (SELECT id FROM cc_phone_config ORDER BY id DESC LIMIT 1)`
+    ).run()
+    return c.json({ success: true, message: 'Call center phone disconnected. Dial *73 to deactivate forwarding.' })
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500)
+  }
 })
