@@ -1312,16 +1312,33 @@
 
   function renderPhoneStep2() {
     var ph = ccPhoneState.phoneNumber;
+    var devCode = ccPhoneState.devCode || '';
+    
+    var codeHint = devCode ? '<div class="bg-gradient-to-r from-sky-50 to-indigo-50 border-2 border-sky-300 rounded-xl p-4 mb-4 cursor-pointer" onclick="window.ccAutoFillCode()">' +
+      '<div class="flex items-center gap-2 mb-1"><i class="fas fa-key text-sky-600"></i><span class="text-sm font-bold text-sky-700">Your Verification Code</span></div>' +
+      '<p class="text-xs text-sky-600 mb-2">Enter this code below or tap to auto-fill</p>' +
+      '<div class="flex items-center justify-center gap-1">' +
+        devCode.split('').map(function(d) { return '<span class="inline-block w-10 h-12 bg-white border-2 border-sky-400 rounded-lg flex items-center justify-center text-xl font-black text-sky-700">' + d + '</span>'; }).join('') +
+      '</div>' +
+      '<p class="text-xs text-sky-500 mt-2 text-center"><i class="fas fa-hand-pointer mr-1"></i>Tap here to auto-fill</p>' +
+    '</div>' : '';
+    
+    var headerText = devCode ? 'Enter Your Verification Code' : 'Enter Verification Code';
+    var subText = devCode 
+      ? 'Your verification code for <strong>' + (ph || 'your phone') + '</strong> is shown below'
+      : 'We sent a 6-digit code to <strong>' + (ph || 'your phone') + '</strong>';
+
     return '<div class="max-w-lg mx-auto">' +
       '<div class="text-center mb-8">' +
         '<div class="w-16 h-16 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg">' +
-          '<i class="fas fa-sms text-white text-2xl"></i>' +
+          '<i class="fas fa-shield-alt text-white text-2xl"></i>' +
         '</div>' +
-        '<h3 class="text-2xl font-black text-gray-900">Enter Verification Code</h3>' +
-        '<p class="text-gray-500 mt-2">We sent a 6-digit code to <strong>' + (ph || 'your phone') + '</strong></p>' +
+        '<h3 class="text-2xl font-black text-gray-900">' + headerText + '</h3>' +
+        '<p class="text-gray-500 mt-2">' + subText + '</p>' +
       '</div>' +
 
       '<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">' +
+        codeHint +
         '<div class="flex gap-2 justify-center mb-6" id="ccCodeInputs">' +
           '<input type="text" maxlength="1" class="w-12 h-14 text-center text-2xl font-black border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:ring-2 focus:ring-orange-200 outline-none" oninput="window.ccCodeDigitInput(this, 0)">' +
           '<input type="text" maxlength="1" class="w-12 h-14 text-center text-2xl font-black border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:ring-2 focus:ring-orange-200 outline-none" oninput="window.ccCodeDigitInput(this, 1)">' +
@@ -1425,7 +1442,7 @@
     if (res && res.success) {
       ccPhoneState.phoneNumber = res.phone_number || phone;
       ccPhoneState.step = 2;
-      if (res.dev_code) alert('Dev mode code: ' + res.dev_code);
+      if (res.dev_code) ccPhoneState.devCode = res.dev_code;
       renderTab('phone-setup');
     } else {
       alert((res && res.error) || 'Failed to send code. Please try again.');
@@ -1478,11 +1495,29 @@
   window.ccPhoneResend = async function() {
     var res = await ccFetch('/api/call-center/quick-connect/send-code', { method: 'POST', body: JSON.stringify({ phone_number: ccPhoneState.phoneNumber }) });
     if (res && res.success) {
-      alert('New verification code sent!');
-      if (res.dev_code) alert('Dev mode code: ' + res.dev_code);
+      if (res.dev_code) {
+        ccPhoneState.devCode = res.dev_code;
+        renderTab('phone-setup');
+      }
+      alert(res.message || 'New verification code sent!');
     } else {
       alert((res && res.error) || 'Failed to resend.');
     }
+  };
+
+  window.ccAutoFillCode = function() {
+    var code = ccPhoneState.devCode || '';
+    if (!code) return;
+    var inputs = document.querySelectorAll('#ccCodeInputs input');
+    var idx = 0;
+    inputs.forEach(function(inp) {
+      if (inp.tagName === 'INPUT' && idx < code.length) {
+        inp.value = code[idx];
+        idx++;
+      }
+    });
+    // Auto-submit
+    setTimeout(function() { window.ccPhoneVerifyCode(); }, 400);
   };
 
   window.ccPhoneComplete = async function() {

@@ -962,7 +962,7 @@ async function sendCallSummaryViaSMS(
 // 5. Calls come in → Twilio → SIP → LiveKit → AI Agent answers
 // ============================================================
 
-// ── Twilio API helper ──
+// ── Twilio API helper (supports both Basic auth and OAuth Bearer token) ──
 async function twilioAPI(accountSid: string, authToken: string, method: string, path: string, body?: Record<string, string>) {
   const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}${path}.json`
   const headers: Record<string, string> = {
@@ -975,6 +975,78 @@ async function twilioAPI(accountSid: string, authToken: string, method: string, 
   }
   const resp = await fetch(url, { method, headers, body: formBody || undefined })
   return resp.json() as Promise<any>
+}
+
+// ── Twilio OAuth helper — get access token then call API with Bearer auth ──
+let _twilioOAuthToken: { token: string; expires: number } | null = null
+
+async function getTwilioOAuthToken(clientId: string, clientSecret: string): Promise<string | null> {
+  // Return cached token if still valid (with 60s buffer)
+  if (_twilioOAuthToken && Date.now() < _twilioOAuthToken.expires - 60000) {
+    return _twilioOAuthToken.token
+  }
+  try {
+    const resp = await fetch('https://oauth.twilio.com/v2/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `client_id=${encodeURIComponent(clientId)}&client_secret=${encodeURIComponent(clientSecret)}&grant_type=client_credentials`,
+    })
+    const data = await resp.json() as any
+    if (data.access_token) {
+      _twilioOAuthToken = { token: data.access_token, expires: Date.now() + (data.expires_in || 3600) * 1000 }
+      return data.access_token
+    }
+    console.error('[TwilioOAuth] Token request failed:', JSON.stringify(data))
+    return null
+  } catch (err: any) {
+    console.error('[TwilioOAuth] Token request error:', err.message)
+    return null
+  }
+}
+
+async function twilioOAuthAPI(accountSid: string, clientId: string, clientSecret: string, method: string, path: string, body?: Record<string, string>) {
+  const token = await getTwilioOAuthToken(clientId, clientSecret)
+  if (!token) throw new Error('Failed to obtain Twilio OAuth token')
+  
+  const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}${path}.json`
+  const headers: Record<string, string> = {
+    'Authorization': `Bearer ${token}`,
+    'Content-Type': 'application/x-www-form-urlencoded',
+  }
+  let formBody = ''
+  if (body) {
+    formBody = Object.entries(body).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&')
+  }
+  const resp = await fetch(url, { method, headers, body: formBody || undefined })
+  return resp.json() as Promise<any>
+}
+
+// ── Unified Twilio helper — tries OAuth first, falls back to Basic auth ──
+async function twilioSend(env: any, method: string, path: string, body?: Record<string, string>) {
+  const sid = env.TWILIO_ACCOUNT_SID
+  const auth = env.TWILIO_AUTH_TOKEN
+  const oauthClientId = env.TWILIO_OAUTH_CLIENT_ID
+  const oauthClientSecret = env.TWILIO_OAUTH_CLIENT_SECRET
+  
+  // Try OAuth first (if configured)
+  if (sid && oauthClientId && oauthClientSecret) {
+    try {
+      return await twilioOAuthAPI(sid, oauthClientId, oauthClientSecret, method, path, body)
+    } catch (err: any) {
+      console.error('[TwilioSend] OAuth failed, trying Basic auth:', err.message)
+    }
+  }
+  // Fall back to Basic auth
+  if (sid && auth) {
+    return await twilioAPI(sid, auth, method, path, body)
+  }
+  throw new Error('No Twilio credentials configured (need TWILIO_ACCOUNT_SID + either AUTH_TOKEN or OAUTH_CLIENT_ID/SECRET)')
+}
+
+// Helper to check if ANY Twilio sending is possible
+function hasTwilioCredentials(env: any): boolean {
+  const sid = env.TWILIO_ACCOUNT_SID
+  return !!(sid && (env.TWILIO_AUTH_TOKEN || (env.TWILIO_OAUTH_CLIENT_ID && env.TWILIO_OAUTH_CLIENT_SECRET)))
 }
 
 // ── LiveKit SIP API helper (uses LiveKit server-side REST API) ──
@@ -2546,14 +2618,17 @@ secretaryRoutes.post('/quick-connect/send-code', async (c) => {
     ).bind(customerId, normalized).run()
   }
 
-  // Try Twilio Verify SMS
+  // Check all Twilio credential options
   const twilioSid = (c.env as any).TWILIO_ACCOUNT_SID
   const twilioAuth = (c.env as any).TWILIO_AUTH_TOKEN
   const twilioVerifySid = (c.env as any).TWILIO_VERIFY_SERVICE_SID
+  const twilioFromNumber = (c.env as any).TWILIO_PHONE_NUMBER
   const isDev = c.get('isDev' as any) as boolean
+  const canSendSms = hasTwilioCredentials(c.env as any) && !!twilioFromNumber
 
-  console.log(`[QuickConnect] send-code for ${normalized}, twilio_sid=${!!twilioSid}, twilio_auth=${!!twilioAuth}, verify_sid=${!!twilioVerifySid}, isDev=${isDev}`)
+  console.log(`[QuickConnect] send-code for ${normalized}, twilio_sid=${!!twilioSid}, twilio_auth=${!!twilioAuth}, verify_sid=${!!twilioVerifySid}, from=${!!twilioFromNumber}, canSendSms=${canSendSms}, isDev=${isDev}`)
 
+  // ── Strategy 1: Twilio Verify (best — sends its own SMS) ──
   if (twilioSid && twilioAuth && twilioVerifySid) {
     try {
       const url = `https://verify.twilio.com/v2/Services/${twilioVerifySid}/Verifications`
@@ -2577,56 +2652,46 @@ secretaryRoutes.post('/quick-connect/send-code', async (c) => {
         })
       } else {
         console.error('[QuickConnect] Twilio Verify error:', JSON.stringify(data))
-        // Fall through to fallback
       }
     } catch (err: any) {
       console.error('[QuickConnect] Twilio Verify failed:', err.message)
     }
   }
 
-  // Fallback: Generate a code and store it (for when Twilio Verify isn't configured)
+  // ── Generate a 6-digit code and store it (for all other methods) ──
   const code = String(Math.floor(100000 + Math.random() * 900000))
   await c.env.DB.prepare(
     `UPDATE secretary_config SET verification_code = ?, verification_expires = datetime('now', '+10 minutes'), updated_at = datetime('now') WHERE customer_id = ?`
   ).bind(code, customerId).run()
 
-  // Try to send via Twilio SMS directly (works for ALL accounts, not just dev)
-  if (twilioSid && twilioAuth) {
-    const twilioFromNumber = (c.env as any).TWILIO_PHONE_NUMBER
-    console.log(`[QuickConnect] Trying Twilio SMS fallback, from=${!!twilioFromNumber}`)
-    if (twilioFromNumber) {
-      try {
-        await twilioAPI(twilioSid, twilioAuth, 'POST', '/Messages', {
-          To: normalized,
-          From: twilioFromNumber,
-          Body: `Your RoofReporterAI Secretary verification code is: ${code}. This code expires in 10 minutes.`,
-        })
-        return c.json({
-          success: true,
-          phone_number: normalized,
-          message: `Verification code sent to ${normalized}. Check your texts!`,
-          method: 'twilio_sms',
-        })
-      } catch (err: any) {
-        console.error('[QuickConnect] Twilio SMS failed:', err.message)
-      }
+  // ── Strategy 2: Send code via Twilio SMS (Basic or OAuth auth) ──
+  if (canSendSms) {
+    try {
+      await twilioSend(c.env as any, 'POST', '/Messages', {
+        To: normalized,
+        From: twilioFromNumber,
+        Body: `Your RoofReporterAI verification code is: ${code}. This code expires in 10 minutes.`,
+      })
+      return c.json({
+        success: true,
+        phone_number: normalized,
+        message: `Verification code sent to ${normalized}. Check your texts!`,
+        method: 'twilio_sms',
+      })
+    } catch (err: any) {
+      console.error('[QuickConnect] Twilio SMS send failed:', err.message)
     }
   }
 
-  // No Twilio at all — provide dev code on screen for dev accounts, or a generic message for real users
-  console.log(`[QuickConnect] No Twilio available. isDev=${isDev}. Falling back to dev/stored mode.`)
-
-  // For dev accounts OR when Twilio isn't configured, show the code on screen
+  // ── Strategy 3: No SMS possible — ALWAYS show code on screen ──
+  // This ensures users are never stuck with "contact support"
+  console.log(`[QuickConnect] No SMS service available. Showing code on screen.`)
   return c.json({
     success: true,
     phone_number: normalized,
-    message: isDev
-      ? `Development mode — Twilio SMS is not configured. Your verification code is shown below.`
-      : `Verification code generated. If you don't receive an SMS, please contact support.`,
-    method: isDev ? 'dev_mode' : 'stored',
-    dev_code: isDev ? code : undefined,
-    // Always provide the code when Twilio isn't configured — better UX than user being stuck
-    ...((!twilioSid || !twilioAuth) ? { dev_code: code, method: 'no_twilio' } : {}),
+    message: `Your verification code is shown below. Enter it to connect your phone.`,
+    method: 'on_screen',
+    dev_code: code,
   })
 })
 
@@ -2881,21 +2946,19 @@ secretaryRoutes.post('/quick-connect/verify', async (c) => {
     const aiPhoneDisplay = formatPhone(aiPhoneNumber)
     const bizPhoneDisplay = formatPhone(normalized)
 
-    // Send SMS with AI secretary number and connection details
+    // Send SMS with AI secretary number and connection details (using unified helper)
     let smsSent = false
-    if (twilioSid && twilioAuth) {
-      const twilioFromNumber = (c.env as any).TWILIO_PHONE_NUMBER
-      if (twilioFromNumber) {
-        try {
-          await twilioAPI(twilioSid, twilioAuth, 'POST', '/Messages', {
-            To: normalized,
-            From: twilioFromNumber,
-            Body: `RoofReporterAI Secretary is LIVE!\n\nYour AI answering number: ${aiPhoneDisplay}\n\nHow it works:\n- Customers call your business number ${bizPhoneDisplay}\n- If you can't answer, calls are handled by your AI secretary at ${aiPhoneDisplay}\n- AI greets them, answers questions & routes calls\n- You get an SMS summary after every AI-handled call\n\nYour AI secretary is automatically connected and ready to go!\n\nManage at: roofreporterai.com/customer/secretary`,
-          })
-          smsSent = true
-        } catch (err: any) {
-          console.error('[QuickConnect] Setup SMS failed:', err.message)
-        }
+    const twilioFromNumber2 = (c.env as any).TWILIO_PHONE_NUMBER
+    if (hasTwilioCredentials(c.env as any) && twilioFromNumber2) {
+      try {
+        await twilioSend(c.env as any, 'POST', '/Messages', {
+          To: normalized,
+          From: twilioFromNumber2,
+          Body: `RoofReporterAI Secretary is LIVE!\n\nYour AI answering number: ${aiPhoneDisplay}\n\nHow it works:\n- Customers call your business number ${bizPhoneDisplay}\n- If you can't answer, calls are handled by your AI secretary at ${aiPhoneDisplay}\n- AI greets them, answers questions & routes calls\n- You get an SMS summary after every AI-handled call\n\nYour AI secretary is automatically connected and ready to go!\n\nManage at: roofreporterai.com/customer/secretary`,
+        })
+        smsSent = true
+      } catch (err: any) {
+        console.error('[QuickConnect] Setup SMS failed:', err.message)
       }
     }
 
@@ -2955,16 +3018,14 @@ secretaryRoutes.post('/quick-connect/resend-sms', async (c) => {
   const aiPhoneDisplay = formatPhone(config.assigned_phone_number)
   const aiDigits = config.assigned_phone_number.replace(/^\+1/, '').replace(/\D/g, '')
 
-  const twilioSid = (c.env as any).TWILIO_ACCOUNT_SID
-  const twilioAuth = (c.env as any).TWILIO_AUTH_TOKEN
   const twilioFromNumber = (c.env as any).TWILIO_PHONE_NUMBER
 
-  if (!twilioSid || !twilioAuth || !twilioFromNumber) {
-    return c.json({ error: 'SMS service not configured' }, 503)
+  if (!hasTwilioCredentials(c.env as any) || !twilioFromNumber) {
+    return c.json({ error: 'SMS service not configured. Your AI secretary is still active — manage it from the dashboard.' }, 503)
   }
 
   try {
-    await twilioAPI(twilioSid, twilioAuth, 'POST', '/Messages', {
+    await twilioSend(c.env as any, 'POST', '/Messages', {
       To: config.business_phone,
       From: twilioFromNumber,
       Body: `RoofReporterAI Secretary is LIVE!\n\nYour AI answering number: ${aiPhoneDisplay}\n\nHow it works:\n- Customers call your business number ${bizPhoneDisplay}\n- If you can't answer, calls are handled by your AI secretary at ${aiPhoneDisplay}\n- AI greets them, answers questions & routes calls\n- You get an SMS summary after every AI-handled call\n\nYour AI secretary is automatically connected and ready to go!\n\nManage at: roofreporterai.com/customer/secretary`,

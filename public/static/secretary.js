@@ -610,23 +610,30 @@
     var el = document.getElementById('qcStepContent');
     if (!el) return;
     var qc = state.quickConnect || {};
-    var devHint = qc.devCode ? '<div class="bg-gradient-to-r from-amber-50 to-orange-50 border-2 border-amber-300 rounded-xl p-4 mt-3 mb-2 cursor-pointer" onclick="qcAutoFillDevCode()">' +
-      '<div class="flex items-center gap-2 mb-1"><i class="fas fa-flask text-amber-600"></i><span class="text-sm font-bold text-amber-700">Development Mode</span></div>' +
-      '<p class="text-xs text-amber-600 mb-2">Twilio SMS not configured — code shown here instead of texted</p>' +
+    var codeHint = qc.devCode ? '<div class="bg-gradient-to-r from-sky-50 to-indigo-50 border-2 border-sky-300 rounded-xl p-4 mt-3 mb-2 cursor-pointer" onclick="qcAutoFillDevCode()">' +
+      '<div class="flex items-center gap-2 mb-1"><i class="fas fa-key text-sky-600"></i><span class="text-sm font-bold text-sky-700">Your Verification Code</span></div>' +
+      '<p class="text-xs text-sky-600 mb-2">Enter this code below or tap to auto-fill</p>' +
       '<div class="flex items-center justify-center gap-1">' +
-        qc.devCode.split('').map(function(d) { return '<span class="inline-block w-10 h-12 bg-white border-2 border-amber-400 rounded-lg flex items-center justify-center text-xl font-black text-amber-700">' + d + '</span>'; }).join('') +
+        qc.devCode.split('').map(function(d) { return '<span class="inline-block w-10 h-12 bg-white border-2 border-sky-400 rounded-lg flex items-center justify-center text-xl font-black text-sky-700">' + d + '</span>'; }).join('') +
       '</div>' +
-      '<p class="text-xs text-amber-500 mt-2 text-center"><i class="fas fa-hand-pointer mr-1"></i>Tap here to auto-fill</p>' +
+      '<p class="text-xs text-sky-500 mt-2 text-center"><i class="fas fa-hand-pointer mr-1"></i>Tap here to auto-fill</p>' +
     '</div>' : '';
+
+    var headerText = qc.devCode 
+      ? '<h4 class="text-xl font-extrabold text-gray-800 mb-2">Enter Your Verification Code</h4>'
+      : '<h4 class="text-xl font-extrabold text-gray-800 mb-2">Check your phone!</h4>';
+    var subText = qc.devCode
+      ? '<p class="text-gray-500 text-sm mb-2">Your verification code for <strong class="text-gray-700">' + formatPhone(qc.phone || '') + '</strong> is shown below</p>'
+      : '<p class="text-gray-500 text-sm mb-2">We sent a 6-digit code to <strong class="text-gray-700">' + formatPhone(qc.phone || '') + '</strong></p>';
 
     el.innerHTML =
       '<div class="bg-white rounded-2xl border-2 border-sky-100 shadow-sm p-8">' +
         '<div class="max-w-md mx-auto text-center">' +
           '<div class="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">' +
-            '<i class="fas fa-sms text-green-500 text-2xl"></i></div>' +
-          '<h4 class="text-xl font-extrabold text-gray-800 mb-2">Check your phone!</h4>' +
-          '<p class="text-gray-500 text-sm mb-2">We sent a 6-digit code to <strong class="text-gray-700">' + formatPhone(qc.phone || '') + '</strong></p>' +
-          devHint +
+            '<i class="fas fa-shield-alt text-green-500 text-2xl"></i></div>' +
+          headerText +
+          subText +
+          codeHint +
 
           '<div class="flex justify-center gap-2 my-6" id="qcCodeInputs">' +
             '<input type="text" maxlength="1" class="w-12 h-14 text-center text-2xl font-bold border-2 border-gray-300 rounded-xl focus:border-sky-500 focus:ring-4 focus:ring-sky-100 transition-all" data-idx="0">' +

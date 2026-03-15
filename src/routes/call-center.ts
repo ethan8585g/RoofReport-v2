@@ -938,6 +938,52 @@ async function ccTwilioAPI(accountSid: string, authToken: string, method: string
   return resp.json() as Promise<any>
 }
 
+// Unified Twilio helper for call-center (supports OAuth + Basic)
+let _ccTwilioOAuthToken: { token: string; expires: number } | null = null
+
+async function ccGetTwilioOAuthToken(clientId: string, clientSecret: string): Promise<string | null> {
+  if (_ccTwilioOAuthToken && Date.now() < _ccTwilioOAuthToken.expires - 60000) return _ccTwilioOAuthToken.token
+  try {
+    const resp = await fetch('https://oauth.twilio.com/v2/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `client_id=${encodeURIComponent(clientId)}&client_secret=${encodeURIComponent(clientSecret)}&grant_type=client_credentials`,
+    })
+    const data = await resp.json() as any
+    if (data.access_token) {
+      _ccTwilioOAuthToken = { token: data.access_token, expires: Date.now() + (data.expires_in || 3600) * 1000 }
+      return data.access_token
+    }
+    return null
+  } catch { return null }
+}
+
+async function ccTwilioSend(env: any, method: string, path: string, body?: Record<string, string>) {
+  const sid = env.TWILIO_ACCOUNT_SID
+  const auth = env.TWILIO_AUTH_TOKEN
+  const oauthId = env.TWILIO_OAUTH_CLIENT_ID
+  const oauthSecret = env.TWILIO_OAUTH_CLIENT_SECRET
+  if (sid && oauthId && oauthSecret) {
+    try {
+      const token = await ccGetTwilioOAuthToken(oauthId, oauthSecret)
+      if (token) {
+        const url = `https://api.twilio.com/2010-04-01/Accounts/${sid}${path}.json`
+        let formBody = ''
+        if (body) formBody = Object.entries(body).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&')
+        const resp = await fetch(url, { method, headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/x-www-form-urlencoded' }, body: formBody || undefined })
+        return resp.json() as Promise<any>
+      }
+    } catch (err: any) { console.error('[CC TwilioOAuth] failed:', err.message) }
+  }
+  if (sid && auth) return ccTwilioAPI(sid, auth, method, path, body)
+  throw new Error('No Twilio credentials configured')
+}
+
+function ccHasTwilioCredentials(env: any): boolean {
+  const sid = env.TWILIO_ACCOUNT_SID
+  return !!(sid && (env.TWILIO_AUTH_TOKEN || (env.TWILIO_OAUTH_CLIENT_ID && env.TWILIO_OAUTH_CLIENT_SECRET)))
+}
+
 // Helper: base64url encode
 function ccBase64urlEncode(data: any): string {
   const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : new Uint8Array(data)
@@ -1072,8 +1118,8 @@ callCenterRoutes.post('/quick-connect/send-code', async (c) => {
       }
     }
 
-    // Dev mode fallback
-    return c.json({ success: true, phone_number: normalized, message: `Dev mode — verification code is: ${code}`, method: 'dev_mode', dev_code: code })
+    // Dev/no-SMS fallback — always show code on screen
+    return c.json({ success: true, phone_number: normalized, message: `Your verification code is shown below. Enter it to connect your phone.`, method: 'on_screen', dev_code: code })
   } catch (e: any) {
     return c.json({ error: e.message }, 500)
   }
