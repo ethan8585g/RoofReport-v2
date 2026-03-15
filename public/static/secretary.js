@@ -816,7 +816,11 @@
         '<div class="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-lg mx-auto mb-6">' +
           '<div class="bg-gray-50 rounded-xl p-4">' +
             '<p class="text-xs text-gray-500 uppercase tracking-wide">Your Business Number</p>' +
-            '<p class="font-mono font-bold text-gray-800 text-lg mt-1">' + formatPhone(ps.business_phone || '') + '</p></div>' +
+            '<div class="flex items-center gap-2 mt-1">' +
+              '<input type="tel" id="connectedBizPhone" value="' + esc(ps.business_phone || '') + '" class="flex-1 font-mono font-bold text-gray-800 text-lg bg-white border border-gray-300 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-sky-400 focus:border-sky-400">' +
+              '<button onclick="secUpdateBizPhone()" class="px-3 py-2 bg-sky-100 text-sky-600 rounded-lg text-sm font-semibold hover:bg-sky-200 transition-all" title="Save"><i class="fas fa-save"></i></button>' +
+            '</div>' +
+            '<p class="text-xs text-gray-400 mt-1">Edit to change your forwarding number</p></div>' +
           '<div class="bg-sky-50 rounded-xl p-4">' +
             '<p class="text-xs text-sky-600 uppercase tracking-wide">AI Secretary Number</p>' +
             '<p class="font-mono font-bold text-sky-800 text-lg mt-1">' + formatPhone(ps.assigned_phone_number || '') + '</p></div>' +
@@ -846,6 +850,25 @@
       renderConnectTab();
     } catch(e) { alert('Test failed'); }
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-phone-alt mr-2"></i>Send Test Call'; }
+  };
+
+  // Update business phone number from Connected view
+  window.secUpdateBizPhone = async function() {
+    var input = document.getElementById('connectedBizPhone');
+    if (!input || !input.value.trim()) { showToast('Enter a phone number', 'error'); return; }
+    try {
+      var res = await fetch('/api/secretary/config', {
+        method: 'POST', headers: authHeaders(),
+        body: JSON.stringify({ business_phone: input.value.trim() })
+      });
+      if (res.ok) {
+        if (state.config) state.config.business_phone = input.value.trim();
+        if (state.phoneSetup) state.phoneSetup.business_phone = input.value.trim();
+        showToast('Business phone updated!', 'success');
+      } else {
+        showToast('Failed to update', 'error');
+      }
+    } catch(e) { showToast('Network error', 'error'); }
   };
 
   window.secConfirmConnection = async function(connected) {
@@ -1224,15 +1247,18 @@
 
   // ============================================================
   // VOICE TEST AGENT — Browser microphone test
-  // Lets users talk to the AI secretary through the browser
-  // before deploying to their phone system
+  // Uses Web Speech API for transcription (works in Chrome, Edge, Safari)
+  // Then sends text to AI chat endpoint for response
   // ============================================================
-  var testState = { active: false, mediaRecorder: null, audioChunks: [], conversationHistory: [], processing: false };
+  var testState = { active: false, recognition: null, conversationHistory: [], processing: false };
 
   window.secTestAgent = function() {
     // Build the test modal
     var existing = document.getElementById('voiceTestModal');
     if (existing) existing.remove();
+
+    // Check for Web Speech API support
+    var hasSpeechAPI = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
 
     var modal = document.createElement('div');
     modal.id = 'voiceTestModal';
@@ -1248,21 +1274,32 @@
         '</div>' +
         '<div class="p-5">' +
           '<div id="vtConversation" class="h-64 overflow-y-auto mb-4 space-y-3 p-3 bg-gray-50 rounded-xl border border-gray-200">' +
-            '<div class="text-center text-gray-400 text-sm py-8"><i class="fas fa-robot text-3xl block mb-2 text-emerald-300"></i>Press the microphone button and speak to test your AI secretary.<br><span class="text-xs">The AI will respond based on your saved configuration.</span></div>' +
+            '<div class="text-center text-gray-400 text-sm py-8"><i class="fas fa-robot text-3xl block mb-2 text-emerald-300"></i>' +
+            (hasSpeechAPI
+              ? 'Press the microphone button and speak to test your AI secretary.<br><span class="text-xs">The AI will respond based on your saved configuration.</span>'
+              : '<span class="text-amber-600 font-semibold">Speech recognition not supported in this browser.</span><br><span class="text-xs">Use the text input below to type your message, or try Chrome/Edge.</span>') +
+            '</div>' +
           '</div>' +
           '<div id="vtStatus" class="text-center text-xs text-gray-400 mb-3 h-4"></div>' +
+          // Text input fallback (always available)
+          '<div class="flex items-center gap-2 mb-3">' +
+            '<input type="text" id="vtTextInput" placeholder="Or type a message here..." class="flex-1 border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-emerald-400 focus:border-emerald-400" onkeydown="if(event.key===\'Enter\')secSendText()">' +
+            '<button onclick="secSendText()" class="px-4 py-2.5 bg-emerald-500 text-white rounded-xl text-sm font-semibold hover:bg-emerald-600 transition-all"><i class="fas fa-paper-plane"></i></button>' +
+          '</div>' +
           '<div class="flex items-center justify-center gap-4">' +
-            '<button onclick="secStartRecording()" id="vtRecordBtn" class="w-16 h-16 rounded-full bg-emerald-500 text-white flex items-center justify-center hover:bg-emerald-600 transition-all shadow-lg hover:shadow-xl active:scale-95">' +
-              '<i class="fas fa-microphone text-2xl"></i>' +
-            '</button>' +
-            '<button onclick="secStopRecording()" id="vtStopBtn" class="w-16 h-16 rounded-full bg-red-500 text-white flex items-center justify-center hover:bg-red-600 transition-all shadow-lg hidden animate-pulse">' +
-              '<i class="fas fa-stop text-2xl"></i>' +
-            '</button>' +
+            (hasSpeechAPI ?
+              '<button onclick="secStartRecording()" id="vtRecordBtn" class="w-16 h-16 rounded-full bg-emerald-500 text-white flex items-center justify-center hover:bg-emerald-600 transition-all shadow-lg hover:shadow-xl active:scale-95">' +
+                '<i class="fas fa-microphone text-2xl"></i>' +
+              '</button>' +
+              '<button onclick="secStopRecording()" id="vtStopBtn" class="w-16 h-16 rounded-full bg-red-500 text-white flex items-center justify-center hover:bg-red-600 transition-all shadow-lg hidden animate-pulse">' +
+                '<i class="fas fa-stop text-2xl"></i>' +
+              '</button>'
+              : '') +
             '<button onclick="secResetTest()" class="w-10 h-10 rounded-full bg-gray-200 text-gray-500 flex items-center justify-center hover:bg-gray-300 transition-all" title="Reset conversation">' +
               '<i class="fas fa-redo text-sm"></i>' +
             '</button>' +
           '</div>' +
-          '<p class="text-center text-xs text-gray-400 mt-3">Your microphone audio is transcribed and sent to the AI. No audio is stored.</p>' +
+          '<p class="text-center text-xs text-gray-400 mt-3">Speak or type to test your AI secretary. No audio is stored.</p>' +
         '</div>' +
       '</div>';
     document.body.appendChild(modal);
@@ -1271,8 +1308,9 @@
   };
 
   window.secCloseTestModal = function() {
-    if (testState.mediaRecorder && testState.mediaRecorder.state !== 'inactive') {
-      testState.mediaRecorder.stop();
+    if (testState.recognition) {
+      try { testState.recognition.stop(); } catch(e) {}
+      testState.recognition = null;
     }
     testState.active = false;
     testState.conversationHistory = [];
@@ -1283,85 +1321,131 @@
   window.secResetTest = function() {
     testState.conversationHistory = [];
     var conv = document.getElementById('vtConversation');
-    if (conv) conv.innerHTML = '<div class="text-center text-gray-400 text-sm py-8"><i class="fas fa-robot text-3xl block mb-2 text-emerald-300"></i>Conversation reset. Press the microphone to start again.</div>';
+    if (conv) conv.innerHTML = '<div class="text-center text-gray-400 text-sm py-8"><i class="fas fa-robot text-3xl block mb-2 text-emerald-300"></i>Conversation reset. Press the microphone or type to start again.</div>';
   };
 
-  window.secStartRecording = async function() {
+  // Text input method (always works)
+  window.secSendText = function() {
     if (testState.processing) return;
-    try {
-      var stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      testState.audioChunks = [];
-      var options = { mimeType: 'audio/webm;codecs=opus' };
-      if (!MediaRecorder.isTypeSupported(options.mimeType)) options = { mimeType: 'audio/webm' };
-      if (!MediaRecorder.isTypeSupported(options.mimeType)) options = {};
-      testState.mediaRecorder = new MediaRecorder(stream, options);
-      testState.mediaRecorder.ondataavailable = function(e) { if (e.data.size > 0) testState.audioChunks.push(e.data); };
-      testState.mediaRecorder.onstop = function() {
-        stream.getTracks().forEach(function(t) { t.stop(); });
-        if (testState.audioChunks.length > 0) processVoiceTest();
-      };
-      testState.mediaRecorder.start();
+    var input = document.getElementById('vtTextInput');
+    if (!input || !input.value.trim()) return;
+    var text = input.value.trim();
+    input.value = '';
+    processAIChat(text);
+  };
+
+  // Speech recognition using Web Speech API
+  window.secStartRecording = function() {
+    if (testState.processing) return;
+    var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert('Speech recognition not supported. Please use the text input or try Chrome/Edge.');
+      return;
+    }
+
+    testState.recognition = new SpeechRecognition();
+    testState.recognition.continuous = false;
+    testState.recognition.interimResults = true;
+    testState.recognition.lang = 'en-US';
+    testState.recognition.maxAlternatives = 1;
+
+    var recordBtn = document.getElementById('vtRecordBtn');
+    var stopBtn = document.getElementById('vtStopBtn');
+    var statusEl = document.getElementById('vtStatus');
+
+    testState.recognition.onstart = function() {
       testState.active = true;
-      document.getElementById('vtRecordBtn').classList.add('hidden');
-      document.getElementById('vtStopBtn').classList.remove('hidden');
-      document.getElementById('vtStatus').textContent = 'Listening... speak now';
-      document.getElementById('vtStatus').className = 'text-center text-xs text-red-500 mb-3 h-4 font-semibold';
+      if (recordBtn) recordBtn.classList.add('hidden');
+      if (stopBtn) stopBtn.classList.remove('hidden');
+      if (statusEl) { statusEl.textContent = 'Listening... speak now'; statusEl.className = 'text-center text-xs text-red-500 mb-3 h-4 font-semibold'; }
+    };
+
+    testState.recognition.onresult = function(event) {
+      var transcript = '';
+      for (var i = event.resultIndex; i < event.results.length; i++) {
+        transcript += event.results[i][0].transcript;
+      }
+      if (statusEl && transcript) statusEl.textContent = 'Heard: "' + transcript.substring(0, 60) + (transcript.length > 60 ? '...' : '') + '"';
+    };
+
+    testState.recognition.onend = function() {
+      testState.active = false;
+      if (recordBtn) recordBtn.classList.remove('hidden');
+      if (stopBtn) stopBtn.classList.add('hidden');
+
+      // Get final transcript
+      if (testState._lastTranscript && testState._lastTranscript.trim()) {
+        processAIChat(testState._lastTranscript.trim());
+        testState._lastTranscript = '';
+      } else {
+        if (statusEl) { statusEl.textContent = 'No speech detected. Try again or type your message.'; statusEl.className = 'text-center text-xs text-amber-500 mb-3 h-4'; }
+      }
+    };
+
+    testState.recognition.onerror = function(event) {
+      testState.active = false;
+      if (recordBtn) recordBtn.classList.remove('hidden');
+      if (stopBtn) stopBtn.classList.add('hidden');
+      if (event.error === 'not-allowed') {
+        alert('Microphone access denied. Please allow microphone access in your browser settings.');
+      } else {
+        if (statusEl) { statusEl.textContent = 'Error: ' + event.error + '. Try typing instead.'; statusEl.className = 'text-center text-xs text-red-500 mb-3 h-4'; }
+      }
+    };
+
+    testState._lastTranscript = '';
+    // Override onresult to capture final transcript
+    var origOnResult = testState.recognition.onresult;
+    testState.recognition.onresult = function(event) {
+      var transcript = '';
+      var isFinal = false;
+      for (var i = event.resultIndex; i < event.results.length; i++) {
+        transcript += event.results[i][0].transcript;
+        if (event.results[i].isFinal) isFinal = true;
+      }
+      testState._lastTranscript = transcript;
+      if (statusEl && transcript) statusEl.textContent = 'Heard: "' + transcript.substring(0, 60) + '"';
+      if (isFinal) {
+        // Auto-process on final result
+        try { testState.recognition.stop(); } catch(e) {}
+      }
+    };
+
+    try {
+      testState.recognition.start();
     } catch(e) {
-      alert('Microphone access denied. Please allow microphone access in your browser settings.');
+      alert('Could not start microphone. Please check your browser permissions.');
     }
   };
 
   window.secStopRecording = function() {
-    if (testState.mediaRecorder && testState.mediaRecorder.state !== 'inactive') {
-      testState.mediaRecorder.stop();
+    if (testState.recognition) {
+      try { testState.recognition.stop(); } catch(e) {}
     }
     testState.active = false;
-    document.getElementById('vtRecordBtn').classList.remove('hidden');
-    document.getElementById('vtStopBtn').classList.add('hidden');
-    document.getElementById('vtStatus').textContent = 'Processing...';
-    document.getElementById('vtStatus').className = 'text-center text-xs text-amber-500 mb-3 h-4 font-semibold';
+    var recordBtn = document.getElementById('vtRecordBtn');
+    var stopBtn = document.getElementById('vtStopBtn');
+    if (recordBtn) recordBtn.classList.remove('hidden');
+    if (stopBtn) stopBtn.classList.add('hidden');
   };
 
-  async function processVoiceTest() {
+  async function processAIChat(userText) {
+    if (testState.processing || !userText) return;
     testState.processing = true;
     var conv = document.getElementById('vtConversation');
     var statusEl = document.getElementById('vtStatus');
 
-    // Convert audio to blob and send for transcription
-    var audioBlob = new Blob(testState.audioChunks, { type: testState.mediaRecorder.mimeType || 'audio/webm' });
+    // Show user message
+    conv.innerHTML += '<div class="flex justify-end"><div class="bg-sky-500 text-white rounded-xl rounded-tr-sm px-3 py-2 max-w-xs text-sm">' + esc(userText) + '</div></div>';
+    testState.conversationHistory.push({ role: 'user', content: userText });
 
-    // Add user thinking bubble
-    conv.innerHTML += '<div class="flex justify-end"><div class="bg-sky-100 text-sky-800 rounded-xl rounded-tr-sm px-3 py-2 max-w-xs text-sm"><i class="fas fa-spinner fa-spin mr-1 text-xs"></i>Transcribing...</div></div>';
+    // Show AI thinking
+    conv.innerHTML += '<div class="flex justify-start" id="vtThinking"><div class="bg-emerald-50 text-emerald-800 rounded-xl rounded-tl-sm px-3 py-2 max-w-xs text-sm"><i class="fas fa-robot mr-1"></i><i class="fas fa-spinner fa-spin ml-1 text-xs"></i> Thinking...</div></div>';
     conv.scrollTop = conv.scrollHeight;
+    if (statusEl) { statusEl.textContent = 'AI is responding...'; statusEl.className = 'text-center text-xs text-amber-500 mb-3 h-4 font-semibold'; }
 
     try {
-      // Step 1: Transcribe audio
-      var formData = new FormData();
-      formData.append('audio', audioBlob, 'recording.webm');
-      var transcribeRes = await fetch('/api/secretary/test/transcribe', { method: 'POST', headers: { 'Authorization': 'Bearer ' + getToken() }, body: formData });
-      var transcribeData = await transcribeRes.json();
-      
-      if (!transcribeData.text || transcribeData.text.trim() === '') {
-        // Remove thinking bubble
-        conv.lastChild.remove();
-        conv.innerHTML += '<div class="flex justify-end"><div class="bg-red-50 text-red-600 rounded-xl rounded-tr-sm px-3 py-2 max-w-xs text-sm"><i class="fas fa-exclamation-circle mr-1"></i>Could not understand. Try speaking louder.</div></div>';
-        conv.scrollTop = conv.scrollHeight;
-        testState.processing = false;
-        if (statusEl) { statusEl.textContent = 'Ready'; statusEl.className = 'text-center text-xs text-gray-400 mb-3 h-4'; }
-        return;
-      }
-
-      // Replace thinking bubble with actual text
-      conv.lastChild.remove();
-      var userText = transcribeData.text.trim();
-      conv.innerHTML += '<div class="flex justify-end"><div class="bg-sky-500 text-white rounded-xl rounded-tr-sm px-3 py-2 max-w-xs text-sm">' + esc(userText) + '</div></div>';
-      testState.conversationHistory.push({ role: 'user', content: userText });
-
-      // Add AI thinking bubble
-      conv.innerHTML += '<div class="flex justify-start"><div class="bg-emerald-50 text-emerald-800 rounded-xl rounded-tl-sm px-3 py-2 max-w-xs text-sm"><i class="fas fa-robot mr-1"></i><i class="fas fa-spinner fa-spin ml-1 text-xs"></i> Thinking...</div></div>';
-      conv.scrollTop = conv.scrollHeight;
-
-      // Step 2: Get AI response using current config
+      // Get AI response
       var greeting = document.getElementById('secGreeting') ? document.getElementById('secGreeting').value : (state.config?.greeting_script || '');
       var qa = document.getElementById('secQA') ? document.getElementById('secQA').value : (state.config?.common_qa || '');
       var notes = document.getElementById('secNotes') ? document.getElementById('secNotes').value : (state.config?.general_notes || '');
@@ -1379,22 +1463,35 @@
       });
       var aiData = await aiRes.json();
 
-      // Replace thinking bubble with AI response
-      conv.lastChild.remove();
+      // Replace thinking with response
+      var thinking = document.getElementById('vtThinking');
+      if (thinking) thinking.remove();
       var aiText = aiData.response || 'Sorry, I had trouble responding. Please try again.';
       conv.innerHTML += '<div class="flex justify-start"><div class="bg-emerald-50 text-emerald-800 rounded-xl rounded-tl-sm px-3 py-2 max-w-xs text-sm"><i class="fas fa-robot text-emerald-500 mr-1"></i>' + esc(aiText) + '</div></div>';
       testState.conversationHistory.push({ role: 'assistant', content: aiText });
       conv.scrollTop = conv.scrollHeight;
 
-      // Step 3: Text-to-speech playback
+      // TTS playback if available
       if (aiData.audio_url) {
         var audio = new Audio(aiData.audio_url);
         audio.play().catch(function() {});
+      } else if (window.speechSynthesis) {
+        // Use browser TTS as fallback
+        var utterance = new SpeechSynthesisUtterance(aiText);
+        utterance.rate = 1.0;
+        utterance.pitch = 1.0;
+        utterance.volume = 0.8;
+        // Try to use a female voice
+        var voices = window.speechSynthesis.getVoices();
+        var femaleVoice = voices.find(function(v) { return v.name.includes('female') || v.name.includes('Samantha') || v.name.includes('Google US English'); });
+        if (femaleVoice) utterance.voice = femaleVoice;
+        window.speechSynthesis.speak(utterance);
       }
 
-      if (statusEl) { statusEl.textContent = 'Press mic to continue the conversation'; statusEl.className = 'text-center text-xs text-emerald-500 mb-3 h-4'; }
+      if (statusEl) { statusEl.textContent = 'Press mic or type to continue'; statusEl.className = 'text-center text-xs text-emerald-500 mb-3 h-4'; }
     } catch(e) {
-      conv.lastChild.remove();
+      var thinking2 = document.getElementById('vtThinking');
+      if (thinking2) thinking2.remove();
       conv.innerHTML += '<div class="flex justify-start"><div class="bg-red-50 text-red-600 rounded-xl rounded-tl-sm px-3 py-2 max-w-xs text-sm"><i class="fas fa-exclamation-triangle mr-1"></i>Error: ' + (e.message || 'Network error') + '</div></div>';
       conv.scrollTop = conv.scrollHeight;
       if (statusEl) { statusEl.textContent = 'Error occurred. Try again.'; statusEl.className = 'text-center text-xs text-red-500 mb-3 h-4'; }

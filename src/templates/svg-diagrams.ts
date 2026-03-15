@@ -2379,6 +2379,7 @@ export function generateTraceBasedDiagramSVG(
   ]
 
   const fmtFt = (ft: number): string => ft < 0.5 ? '' : Math.round(ft).toString()
+  const fmtFtUnit = (ft: number): string => ft < 0.5 ? '' : `${Math.round(ft)} ft`
 
   // ── Convert lat/lng to local X/Y (metres from centroid) ──
   const centLat = eaves.reduce((s, p) => s + p.lat, 0) / eaves.length
@@ -2709,7 +2710,7 @@ export function generateTraceBasedDiagramSVG(
 
     const ftVal = haversineFt(a, b)
     if (ftVal < 0.5) continue
-    const label = fmtFt(ftVal)
+    const label = fmtFtUnit(ftVal)
     if (!label) continue
 
     const dx = ex - sx, dy = ey - sy
@@ -2717,7 +2718,7 @@ export function generateTraceBasedDiagramSVG(
     const nx = -dy / len, ny = dx / len
 
     // Dimension line offset from edge
-    const dimOffset = 20
+    const dimOffset = 22
     const extEnd = dimOffset + 8
 
     // Extension lines
@@ -2727,35 +2728,35 @@ export function generateTraceBasedDiagramSVG(
     // Dimension line with arrowheads
     const dsx = sx + nx * dimOffset, dsy = sy + ny * dimOffset
     const dex = ex + nx * dimOffset, dey = ey + ny * dimOffset
-    svg += `<line x1="${dsx.toFixed(1)}" y1="${dsy.toFixed(1)}" x2="${dex.toFixed(1)}" y2="${dey.toFixed(1)}" stroke="#333" stroke-width="0.5"/>`
+    svg += `<line x1="${dsx.toFixed(1)}" y1="${dsy.toFixed(1)}" x2="${dex.toFixed(1)}" y2="${dey.toFixed(1)}" stroke="#1a1a1a" stroke-width="0.6"/>`
 
     // Arrow heads at each end
-    const arrowLen = 4
+    const arrowLen = 4.5
     const ux = dx / len, uy = dy / len
-    svg += `<polygon points="${dsx.toFixed(1)},${dsy.toFixed(1)} ${(dsx + ux * arrowLen + nx * 1.5).toFixed(1)},${(dsy + uy * arrowLen + ny * 1.5).toFixed(1)} ${(dsx + ux * arrowLen - nx * 1.5).toFixed(1)},${(dsy + uy * arrowLen - ny * 1.5).toFixed(1)}" fill="#333"/>`
-    svg += `<polygon points="${dex.toFixed(1)},${dey.toFixed(1)} ${(dex - ux * arrowLen + nx * 1.5).toFixed(1)},${(dey - uy * arrowLen + ny * 1.5).toFixed(1)} ${(dex - ux * arrowLen - nx * 1.5).toFixed(1)},${(dey - uy * arrowLen - ny * 1.5).toFixed(1)}" fill="#333"/>`
+    svg += `<polygon points="${dsx.toFixed(1)},${dsy.toFixed(1)} ${(dsx + ux * arrowLen + nx * 1.8).toFixed(1)},${(dsy + uy * arrowLen + ny * 1.8).toFixed(1)} ${(dsx + ux * arrowLen - nx * 1.8).toFixed(1)},${(dsy + uy * arrowLen - ny * 1.8).toFixed(1)}" fill="#1a1a1a"/>`
+    svg += `<polygon points="${dex.toFixed(1)},${dey.toFixed(1)} ${(dex - ux * arrowLen + nx * 1.8).toFixed(1)},${(dey - uy * arrowLen + ny * 1.8).toFixed(1)} ${(dex - ux * arrowLen - nx * 1.8).toFixed(1)},${(dey - uy * arrowLen - ny * 1.8).toFixed(1)}" fill="#1a1a1a"/>`
 
-    // Measurement label
+    // Measurement label with "ft" suffix
     const mx = (dsx + dex) / 2, my = (dsy + dey) / 2
     let angle = Math.atan2(dey - dsy, dex - dsx) * 180 / Math.PI
     if (angle > 90) angle -= 180
     if (angle < -90) angle += 180
-    const bgW = Math.max(label.length * 6 + 8, 28)
+    const bgW = Math.max(label.length * 5.5 + 10, 36)
     svg += `<g transform="translate(${mx.toFixed(1)},${my.toFixed(1)}) rotate(${angle.toFixed(1)})">`
-    svg += `<rect x="${(-bgW / 2).toFixed(1)}" y="-7" width="${bgW.toFixed(1)}" height="13" rx="1" fill="#fff" opacity="0.95"/>`
-    svg += `<text x="0" y="3" text-anchor="middle" font-size="8.5" font-weight="700" fill="#1a1a1a" ${FONT}>${label}</text>`
+    svg += `<rect x="${(-bgW / 2).toFixed(1)}" y="-8" width="${bgW.toFixed(1)}" height="14" rx="2" fill="#fff" stroke="#ddd" stroke-width="0.3" opacity="0.97"/>`
+    svg += `<text x="0" y="3" text-anchor="middle" font-size="8" font-weight="700" fill="#1a1a1a" ${FONT}>${label}</text>`
     svg += `</g>`
   }
 
-  // ── INTERNAL LINE DIMENSION LABELS ──
+  // ── INTERNAL LINE DIMENSION LABELS (Ridge/Hip/Valley with ft and color) ──
   internalLines.forEach(l => {
     if (l.ftLen < 1) return
     const sx = tx(l.start.x), sy = ty(l.start.y), ex = tx(l.end.x), ey = ty(l.end.y)
     const segPx = Math.sqrt((ex - sx) ** 2 + (ey - sy) ** 2)
     if (segPx < 25) return
 
-    const label = fmtFt(l.ftLen)
-    if (!label) return
+    const ftLabel = fmtFtUnit(l.ftLen)
+    if (!ftLabel) return
 
     const mx = (sx + ex) / 2, my = (sy + ey) / 2
     const dx = ex - sx, dy = ey - sy
@@ -2763,15 +2764,15 @@ export function generateTraceBasedDiagramSVG(
     const perpDx = -dy / len, perpDy = dx / len
 
     // Offset label from the line
-    const lx = mx + perpDx * 10, ly = my + perpDy * 10
+    const lx = mx + perpDx * 12, ly = my + perpDy * 12
     let ang = Math.atan2(dy, dx) * 180 / Math.PI
     if (ang > 90) ang -= 180; if (ang < -90) ang += 180
 
     const clr = EDGE_COLOR[l.type] || '#333'
-    const bgW = Math.max(label.length * 6 + 8, 28)
+    const bgW = Math.max(ftLabel.length * 5.5 + 10, 36)
     svg += `<g transform="translate(${lx.toFixed(1)},${ly.toFixed(1)}) rotate(${ang.toFixed(1)})">`
-    svg += `<rect x="${(-bgW / 2).toFixed(1)}" y="-7" width="${bgW.toFixed(1)}" height="13" rx="1" fill="#fff" opacity="0.95"/>`
-    svg += `<text x="0" y="3" text-anchor="middle" font-size="8" font-weight="600" fill="${clr}" ${FONT}>${label}</text>`
+    svg += `<rect x="${(-bgW / 2).toFixed(1)}" y="-8" width="${bgW.toFixed(1)}" height="14" rx="2" fill="#fff" stroke="${clr}" stroke-width="0.4" opacity="0.97"/>`
+    svg += `<text x="0" y="3" text-anchor="middle" font-size="8" font-weight="700" fill="${clr}" ${FONT}>${ftLabel}</text>`
     svg += `</g>`
   })
 
@@ -2794,26 +2795,31 @@ export function generateTraceBasedDiagramSVG(
     svg += `<circle cx="${tx(l.end.x).toFixed(1)}" cy="${ty(l.end.y).toFixed(1)}" r="2" fill="#C62828"/>`
   })
 
-  // ── LEGEND (top-left, professional box) ──
-  const legendItems: { label: string; color: string; dash?: boolean }[] = [
-    { label: 'Eave', color: '#1a1a1a' },
+  // ── LEGEND (top-left, professional box with edge totals) ──
+  const legendItems: { label: string; color: string; dash?: boolean; totalFt?: number }[] = [
+    { label: 'Eave', color: '#1a1a1a', totalFt: Math.round(edgeSummary.total_eave_ft) },
   ]
-  if (roofTrace.ridges?.length) legendItems.push({ label: 'Ridge', color: '#C62828' })
-  if (roofTrace.hips?.length) legendItems.push({ label: 'Hip', color: '#C62828' })
-  if (roofTrace.valleys?.length) legendItems.push({ label: 'Valley', color: '#1565C0', dash: true })
+  if (roofTrace.ridges?.length) legendItems.push({ label: 'Ridge', color: '#C62828', totalFt: Math.round(edgeSummary.total_ridge_ft) })
+  if (roofTrace.hips?.length) legendItems.push({ label: 'Hip', color: '#C62828', totalFt: Math.round(edgeSummary.total_hip_ft) })
+  if (roofTrace.valleys?.length) legendItems.push({ label: 'Valley', color: '#1565C0', dash: true, totalFt: Math.round(edgeSummary.total_valley_ft) })
+  if (edgeSummary.total_rake_ft > 0) legendItems.push({ label: 'Rake', color: '#1565C0', totalFt: Math.round(edgeSummary.total_rake_ft) })
 
   const lgX = 8, lgY = 8
-  const lgH = legendItems.length * 14 + 10
-  svg += `<rect x="${lgX}" y="${lgY}" width="72" height="${lgH}" rx="3" fill="#fff" fill-opacity="0.95" stroke="#ddd" stroke-width="0.5"/>`
+  const lgW = 120
+  const lgH = legendItems.length * 14 + 12
+  svg += `<rect x="${lgX}" y="${lgY}" width="${lgW}" height="${lgH}" rx="3" fill="#fff" fill-opacity="0.96" stroke="#ddd" stroke-width="0.5"/>`
   legendItems.forEach((item, i) => {
-    const iy = lgY + 12 + i * 14
+    const iy = lgY + 13 + i * 14
     const dashAttr = item.dash ? ' stroke-dasharray="4,2"' : ''
-    svg += `<line x1="${lgX + 6}" y1="${iy}" x2="${lgX + 24}" y2="${iy}" stroke="${item.color}" stroke-width="2"${dashAttr} stroke-linecap="round"/>`
-    svg += `<text x="${lgX + 28}" y="${iy + 3.5}" font-size="8" font-weight="600" fill="#333" ${FONT}>${item.label}</text>`
+    svg += `<line x1="${lgX + 6}" y1="${iy}" x2="${lgX + 22}" y2="${iy}" stroke="${item.color}" stroke-width="2"${dashAttr} stroke-linecap="round"/>`
+    svg += `<text x="${lgX + 26}" y="${iy + 3.5}" font-size="7.5" font-weight="600" fill="#333" ${FONT}>${item.label}</text>`
+    if (item.totalFt) {
+      svg += `<text x="${lgX + lgW - 6}" y="${iy + 3.5}" text-anchor="end" font-size="7" font-weight="700" fill="${item.color}" ${FONT}>${item.totalFt} ft</text>`
+    }
   })
 
   // ── SOURCE BADGE ──
-  svg += `<text x="${W / 2}" y="${H - FOOTER_H - 6}" text-anchor="middle" font-size="6.5" fill="#666" ${FONT} font-weight="500" letter-spacing="0.5">AI-GENERATED ROOF DIAGRAM \u2014 TRACED FROM GPS COORDINATES</text>`
+  svg += `<text x="${W / 2}" y="${H - FOOTER_H - 6}" text-anchor="middle" font-size="6.5" fill="#666" ${FONT} font-weight="500" letter-spacing="0.5">AI-GENERATED ROOF DIAGRAM \u2014 TRACED FROM GPS COORDINATES \u2014 All dimensions in feet. Pitch multiplier applied for true 3D area.</text>`
 
   // ── COMPASS ROSE (professional style) ──
   const cX = W - 38, cY = 34
