@@ -131,10 +131,29 @@ export function generateProfessionalReportHTML(report: RoofReport): string {
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;color:#1a1a2e;font-size:9.5pt;line-height:1.4;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-.page{width:8.5in;min-height:11in;margin:0 auto;background:#fff;position:relative;overflow:hidden;page-break-after:always}
+.page{width:8.5in;min-height:11in;margin:0 auto;background:#fff;display:flex;flex-direction:column;position:relative;page-break-after:always}
 .page:last-child{page-break-after:auto}
+.page-content{flex:1 1 auto}
+.page-footer{flex-shrink:0;height:28px;display:flex;align-items:center;justify-content:space-between;padding:0 28px;margin-top:auto}
 @media print{.page{page-break-after:always;min-height:auto;box-shadow:none;margin:0}body{background:#fff}}
 @media screen{.page{box-shadow:0 2px 16px rgba(0,0,0,0.10);margin:20px auto}}
+
+/* ===== MOBILE RESPONSIVE — prevent overlap on small screens ===== */
+@media screen and (max-width:900px){
+  .page{width:100%!important;min-height:auto!important;overflow:visible!important}
+  .page [style*="display:flex"]{flex-wrap:wrap!important}
+  .page-content [style*="display:flex"]{flex-wrap:wrap!important}
+  .page table{font-size:7px!important;word-break:break-word}
+  .page svg{max-width:100%!important;height:auto!important}
+}
+@media screen and (max-width:600px){
+  .page{font-size:8pt}
+  .page [style*="padding:0 28px"]{padding-left:10px!important;padding-right:10px!important}
+  .page [style*="padding:12px 28px"]{padding-left:10px!important;padding-right:10px!important}
+  .page [style*="padding:10px 28px"]{padding-left:10px!important;padding-right:10px!important}
+  .page [style*="padding:6px 28px"]{padding-left:10px!important;padding-right:10px!important}
+  .page-footer{padding:0 10px!important}
+}
 
 /* ===== Project Totals table ===== */
 .pt-row{display:flex;justify-content:space-between;padding:5px 12px;font-size:10px;border-bottom:1px solid #e0e0e0}
@@ -156,6 +175,7 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
 
 <!-- ==================== PAGE 1: PROJECT TOTALS + AERIAL IMAGE ==================== -->
 <div class="page">
+  <div class="page-content">
   <!-- Top teal gradient bar -->
   <div style="height:4px;background:linear-gradient(90deg,${TEAL},${TEAL_DARK})"></div>
 
@@ -276,8 +296,10 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
     &copy; ${new Date().getFullYear()} RoofReporterAI. All imagery &copy; Google.
   </div>
 
+  </div><!-- end page-content -->
+
   <!-- Footer bar -->
-  <div style="position:absolute;bottom:0;left:0;right:0;height:28px;background:linear-gradient(90deg,${TEAL},${TEAL_DARK});display:flex;align-items:center;justify-content:space-between;padding:0 28px">
+  <div class="page-footer" style="background:linear-gradient(90deg,${TEAL},${TEAL_DARK})">
     <span style="color:#fff;font-size:9px;font-weight:700">Roof Reporter AI</span>
     <span style="color:#E0F2F1;font-size:7.5px">roofreporterai.com &bull; Report: ${reportNum} &bull; ${reportDate} &bull; p.1</span>
   </div>
@@ -285,6 +307,7 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
 
 <!-- ==================== PAGE 2: ROOF AREA ANALYSIS ==================== -->
 <div class="page">
+  <div class="page-content">
   <!-- Top red bar -->
   <div style="height:4px;background:${RED}"></div>
 
@@ -441,8 +464,10 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
     </div>
   </div>
 
+  </div><!-- end page-content -->
+
   <!-- Footer bar -->
-  <div style="position:absolute;bottom:0;left:0;right:0;height:28px;background:${RED};display:flex;align-items:center;justify-content:space-between;padding:0 28px">
+  <div class="page-footer" style="background:${RED}">
     <span style="color:#fff;font-size:9px;font-weight:700">Roof Reporter AI</span>
     <span style="color:#ffcdd2;font-size:7.5px">roofreporterai.com &bull; Report: ${reportNum} &bull; ${reportDate} &bull; p.2</span>
   </div>
@@ -453,6 +478,7 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
 <!-- ==================== PITCH DIAGRAM PAGE ==================== -->
 ${report.segments.length >= 2 ? `
 <div class="page">
+  <div class="page-content">
   <!-- Top indigo accent bar -->
   <div style="height:4px;background:linear-gradient(90deg,#4338ca,#6366f1)"></div>
 
@@ -573,8 +599,10 @@ ${report.segments.length >= 2 ? `
     </div>
   </div>
 
+  </div><!-- end page-content -->
+
   <!-- Footer bar -->
-  <div style="position:absolute;bottom:0;left:0;right:0;height:28px;background:linear-gradient(90deg,#4338ca,#6366f1);display:flex;align-items:center;justify-content:space-between;padding:0 28px">
+  <div class="page-footer" style="background:linear-gradient(90deg,#4338ca,#6366f1)">
     <span style="color:#fff;font-size:9px;font-weight:700">Roof Reporter AI</span>
     <span style="color:#c7d2fe;font-size:7.5px">roofreporterai.com &bull; Report: ${reportNum} &bull; ${reportDate} &bull; Pitch Analysis</span>
   </div>
@@ -627,11 +655,12 @@ export function buildVisionFindingsHTML(vf: VisionFindings): string {
   return `
 <!-- ==================== VISION INSPECTION PAGE ==================== -->
 <div class="page" style="page-break-before:always">
+  <div class="page-content">
   <div style="background:#002244;padding:10px 32px;display:flex;justify-content:space-between;align-items:center">
     <div style="color:#fff;font-size:13px;font-weight:700;letter-spacing:1px">&#128065; AI VISION INSPECTION</div>
     <div style="color:#7eafd4;font-size:9px;text-align:right">Multimodal Roof Condition Analysis &bull; ${vf.model}</div>
   </div>
-  <div style="padding:16px 32px 50px">
+  <div style="padding:16px 32px 12px">
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
       <div style="background:${heatBg};border:1px solid ${heatColor}33;border-radius:6px;padding:14px">
         <div style="font-size:9px;font-weight:700;color:${heatColor};text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">&#128293; CRM Heat Score</div>
@@ -691,6 +720,11 @@ export function buildVisionFindingsHTML(vf: VisionFindings): string {
       <strong>AI Vision Note:</strong> ${vf.summary} &mdash; Inspected ${new Date(vf.inspected_at).toLocaleDateString('en-CA')} using ${vf.model}. Duration: ${vf.duration_ms}ms.
       ${vf.heat_score.total >= 50 ? '<br><strong>&#9888; Field verification strongly recommended.</strong>' : ''}
     </div>
+  </div><!-- end page-content -->
+
+  <div class="page-footer" style="background:#002244">
+    <span style="color:#fff;font-size:9px;font-weight:700">Roof Reporter AI</span>
+    <span style="color:#7eafd4;font-size:7.5px">AI Vision Inspection &bull; ${vf.model}</span>
   </div>
 </div>`
 }
@@ -859,16 +893,30 @@ export function generateSimpleTwoPageReport(report: RoofReport): string {
 body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;color:#1a1a2e;font-size:9pt;line-height:1.35;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 @media print{.page{page-break-after:always;min-height:auto;box-shadow:none;margin:0}body{background:#fff}}
 @media screen{.page{box-shadow:0 2px 16px rgba(0,0,0,0.10);margin:20px auto}}
-.page{background:#fff;position:relative;overflow:hidden;page-break-after:always}
+.page{background:#fff;display:flex;flex-direction:column;page-break-after:always}
 .page:last-child{page-break-after:auto}
 .page-portrait{width:8.5in;min-height:11in}
 .page-landscape{width:11in;min-height:8.5in}
+.page-content{flex:1 1 auto}
+.page-footer{flex-shrink:0;display:flex;justify-content:space-between;align-items:center;margin-top:auto}
+@media screen and (max-width:900px){
+  .page{width:100%!important;min-height:auto!important}
+  .page table{font-size:7px!important;word-break:break-word}
+  .page svg{max-width:100%!important;height:auto!important}
+}
+@media screen and (max-width:600px){
+  .page{font-size:8pt}
+  .page [style*="padding:0 22px"]{padding-left:10px!important;padding-right:10px!important}
+  .page [style*="padding:14px 28px"]{padding-left:10px!important;padding-right:10px!important}
+  .page-footer{padding-left:10px!important;padding-right:10px!important}
+}
 </style>
 </head>
 <body>
 
 <!-- ==================== PAGE 1: ROOF AREA ANALYSIS (Portrait 8.5×11) ==================== -->
 <div class="page page-portrait">
+  <div class="page-content">
   <!-- Red top accent bar -->
   <div style="height:6px;background:linear-gradient(90deg,#CC0000,#E60000)"></div>
 
@@ -1000,8 +1048,10 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
     </div>
   </div>
 
+  </div><!-- end page-content -->
+
   <!-- Page 1 Footer -->
-  <div style="position:absolute;bottom:0;left:0;right:0;padding:6px 22px;display:flex;justify-content:space-between;align-items:center;border-top:1px solid #eee;background:#fff">
+  <div class="page-footer" style="padding:6px 22px;border-top:1px solid #eee;background:#fff">
     <div style="display:flex;align-items:center;gap:6px">
       <div style="width:16px;height:16px;background:#00838F;border-radius:3px;display:flex;align-items:center;justify-content:center">
         <div style="width:8px;height:8px;border:1.5px solid #fff;border-radius:1px"></div>
@@ -1014,6 +1064,7 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
 
 <!-- ==================== PAGE 2: PROJECT TOTALS SUMMARY (Landscape 11×8.5) ==================== -->
 <div class="page page-landscape">
+  <div class="page-content">
   <!-- Top teal accent bar -->
   <div style="height:5px;background:linear-gradient(90deg,#00838F,#00BCD4,#00838F)"></div>
 
@@ -1128,8 +1179,10 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fff;colo
     </div>
   </div>
 
+  </div><!-- end page-content -->
+
   <!-- Page 2 Footer -->
-  <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(135deg,#00696B,#00838F);padding:8px 22px;display:flex;justify-content:space-between;align-items:center">
+  <div class="page-footer" style="background:linear-gradient(135deg,#00696B,#00838F);padding:8px 22px">
     <span style="font-size:9px;font-weight:700;color:#fff">Roof Reporter AI</span>
     <span style="font-size:7px;color:rgba(255,255,255,0.7)">&copy; Roof Reporter AI &bull; ${fullAddress} &bull; ${reportDate} &bull; p.2/2</span>
   </div>

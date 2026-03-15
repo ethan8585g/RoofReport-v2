@@ -2841,16 +2841,15 @@ secretaryRoutes.post('/quick-connect/verify', async (c) => {
       }, 503)
     }
 
-    // Generate the simple forwarding code
+    // AI number is now assigned — auto-activate and send SMS setup confirmation
     const aiDigits = aiPhoneNumber.replace(/^\+1/, '').replace(/\D/g, '')
-    forwardingCode = `*72${aiDigits}`
 
-    // Update secretary config with everything
+    // Update secretary config — mark as CONNECTED immediately (no manual forwarding step)
     await c.env.DB.prepare(`
       UPDATE secretary_config SET
         business_phone = ?,
         assigned_phone_number = ?,
-        connection_status = 'verified',
+        connection_status = 'connected',
         forwarding_method = ?,
         livekit_inbound_trunk_id = ?,
         livekit_dispatch_rule_id = ?,
@@ -2858,6 +2857,7 @@ secretaryRoutes.post('/quick-connect/verify', async (c) => {
         verification_expires = NULL,
         phone_verified = 1,
         phone_verified_at = datetime('now'),
+        is_active = 1,
         updated_at = datetime('now')
       WHERE customer_id = ?
     `).bind(
@@ -2876,26 +2876,42 @@ secretaryRoutes.post('/quick-connect/verify', async (c) => {
       return n
     }
 
+    const aiPhoneDisplay = formatPhone(aiPhoneNumber)
+    const bizPhoneDisplay = formatPhone(normalized)
+
+    // Send SMS with AI secretary number and connection details
+    let smsSent = false
+    if (twilioSid && twilioAuth) {
+      const twilioFromNumber = (c.env as any).TWILIO_PHONE_NUMBER
+      if (twilioFromNumber) {
+        try {
+          await twilioAPI(twilioSid, twilioAuth, 'POST', '/Messages', {
+            To: normalized,
+            From: twilioFromNumber,
+            Body: `RoofReporterAI Secretary is LIVE!\n\nYour AI answering number: ${aiPhoneDisplay}\n\nHow it works:\n- Customers call your business number ${bizPhoneDisplay}\n- If you can't answer, they're forwarded to ${aiPhoneDisplay}\n- AI greets them, answers questions & routes calls\n- You get an SMS summary after every AI-handled call\n\nTo set up no-answer forwarding on your phone:\nDial *72${aiDigits} from ${bizPhoneDisplay}\n\nTo disable anytime: Dial *73\n\nManage at: roofreporterai.com/customer/secretary`,
+          })
+          smsSent = true
+        } catch (err: any) {
+          console.error('[QuickConnect] Setup SMS failed:', err.message)
+        }
+      }
+    }
+
     return c.json({
       success: true,
       verified: true,
+      connected: true,
       business_phone: normalized,
-      business_phone_display: formatPhone(normalized),
+      business_phone_display: bizPhoneDisplay,
       ai_phone_number: aiPhoneNumber,
-      ai_phone_display: formatPhone(aiPhoneNumber),
+      ai_phone_display: aiPhoneDisplay,
       connection_method: connectionMethod,
       trunk_id: trunkId,
       dispatch_rule_id: dispatchId,
-      forwarding_code: forwardingCode,
-      disable_forwarding_code: '*73',
-      instructions: {
-        step1: `Pick up your business phone (${formatPhone(normalized)})`,
-        step2: `Dial: ${forwardingCode}`,
-        step3: 'Wait for the confirmation tone (2 beeps)',
-        step4: 'Done! Calls to your number now forward to the AI when you don\'t answer.',
-        disable: 'To disable: Dial *73 from your business phone',
-      },
-      message: 'Phone verified and AI secretary number assigned! Follow the simple forwarding instructions to go live.',
+      sms_sent: smsSent,
+      message: smsSent
+        ? `Phone verified and your AI secretary is LIVE! We've texted ${bizPhoneDisplay} with your AI secretary number and setup details.`
+        : `Phone verified and your AI secretary is LIVE! Your AI secretary number is ${aiPhoneDisplay}.`,
     })
   } catch (err: any) {
     console.error('[QuickConnect] Setup error:', err)
@@ -2903,7 +2919,7 @@ secretaryRoutes.post('/quick-connect/verify', async (c) => {
   }
 })
 
-// POST /quick-connect/complete — Mark connection as fully active
+// POST /quick-connect/complete — Mark connection as fully active (legacy, still works)
 secretaryRoutes.post('/quick-connect/complete', async (c) => {
   const customerId = c.get('customerId' as any) as number
 
@@ -2912,6 +2928,50 @@ secretaryRoutes.post('/quick-connect/complete', async (c) => {
   ).bind(customerId).run()
 
   return c.json({ success: true, message: 'Your AI secretary is now live!' })
+})
+
+// POST /quick-connect/resend-sms — Resend the setup details SMS
+secretaryRoutes.post('/quick-connect/resend-sms', async (c) => {
+  const customerId = c.get('customerId' as any) as number
+
+  const config = await c.env.DB.prepare(
+    `SELECT business_phone, assigned_phone_number FROM secretary_config WHERE customer_id = ?`
+  ).bind(customerId).first<any>()
+
+  if (!config?.business_phone || !config?.assigned_phone_number) {
+    return c.json({ error: 'Phone not configured yet. Please complete the setup first.' }, 400)
+  }
+
+  const formatPhone = (n: string) => {
+    if (!n) return ''
+    const d = n.replace(/^\+1/, '').replace(/\D/g, '')
+    if (d.length === 10) return `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}`
+    return n
+  }
+
+  const bizPhoneDisplay = formatPhone(config.business_phone)
+  const aiPhoneDisplay = formatPhone(config.assigned_phone_number)
+  const aiDigits = config.assigned_phone_number.replace(/^\+1/, '').replace(/\D/g, '')
+
+  const twilioSid = (c.env as any).TWILIO_ACCOUNT_SID
+  const twilioAuth = (c.env as any).TWILIO_AUTH_TOKEN
+  const twilioFromNumber = (c.env as any).TWILIO_PHONE_NUMBER
+
+  if (!twilioSid || !twilioAuth || !twilioFromNumber) {
+    return c.json({ error: 'SMS service not configured' }, 503)
+  }
+
+  try {
+    await twilioAPI(twilioSid, twilioAuth, 'POST', '/Messages', {
+      To: config.business_phone,
+      From: twilioFromNumber,
+      Body: `RoofReporterAI Secretary is LIVE!\n\nYour AI answering number: ${aiPhoneDisplay}\n\nHow it works:\n- Customers call your business number ${bizPhoneDisplay}\n- If you can't answer, they're forwarded to ${aiPhoneDisplay}\n- AI greets them, answers questions & routes calls\n- You get an SMS summary after every AI-handled call\n\nTo set up no-answer forwarding on your phone:\nDial *72${aiDigits} from ${bizPhoneDisplay}\n\nTo disable anytime: Dial *73\n\nManage at: roofreporterai.com/customer/secretary`,
+    })
+    return c.json({ success: true, message: `Setup details sent to ${bizPhoneDisplay}. Check your texts!` })
+  } catch (err: any) {
+    console.error('[QuickConnect] Resend SMS failed:', err.message)
+    return c.json({ error: 'Failed to send SMS. Please try again.' }, 500)
+  }
 })
 
 // GET /quick-connect/status — Get current quick-connect setup status
@@ -2931,8 +2991,6 @@ secretaryRoutes.get('/quick-connect/status', async (c) => {
     return n
   }
 
-  const aiDigits = (config.assigned_phone_number || '').replace(/^\+1/, '').replace(/\D/g, '')
-
   return c.json({
     status: config.connection_status || 'not_started',
     business_phone: config.business_phone || '',
@@ -2943,7 +3001,5 @@ secretaryRoutes.get('/quick-connect/status', async (c) => {
     is_active: !!config.is_active,
     has_trunk: !!config.livekit_inbound_trunk_id,
     has_dispatch: !!config.livekit_dispatch_rule_id,
-    forwarding_code: aiDigits ? `*72${aiDigits}` : '',
-    disable_forwarding_code: '*73',
   })
 })

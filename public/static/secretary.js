@@ -39,7 +39,6 @@
     phoneSetup: null,
     carriers: [],
     selectedCarrier: '',
-    forwardingInstructions: null,
     connectStep: 1,
     // Quick Connect state
     quickConnect: {},
@@ -87,7 +86,6 @@
         state.phoneSetup = data2.setup;
         if (data2.setup) {
           state.selectedCarrier = data2.setup.carrier_name || '';
-          state.forwardingInstructions = data2.setup.forwarding_instructions || null;
         }
       }
     } catch(e) {}
@@ -103,11 +101,7 @@
           state.quickConnect.ai_phone_display = qcData.ai_phone_display;
           state.quickConnect.business_phone = qcData.business_phone;
           state.quickConnect.business_phone_display = qcData.business_phone_display;
-          state.quickConnect.forwarding_code = qcData.forwarding_code;
-          state.quickConnect.verified = qcData.phone_verified;
-          if (state.phoneSetup) {
-            state.phoneSetup.forwarding_code = qcData.forwarding_code;
-          }
+          state.quickConnect.connected = qcData.status === 'connected';
         }
       }
     } catch(e) {}
@@ -196,8 +190,8 @@
           '<h3 class="font-bold text-gray-800 text-lg mb-4"><i class="fas fa-plug text-sky-500 mr-2"></i>How It Works</h3>' +
           '<div class="space-y-4">' +
             howStep(1, 'Subscribe & Configure', 'Set up your AI secretary with your greeting script, FAQ answers, and call routing departments.') +
-            howStep(2, 'Connect Your Phone', 'We assign an AI answering line. Set up no-answer call forwarding from your existing number — 30 seconds.') +
-            howStep(3, 'AI Answers When You Can\'t', 'Your phone rings first. If you don\'t answer or you\'re on another call, it forwards to the AI. The AI greets the caller, answers questions, routes to departments, and takes messages.') +
+            howStep(2, 'Connect Via Text', 'Enter your business phone number and verify with a text message. That\'s it — your AI secretary goes live instantly.') +
+            howStep(3, 'AI Answers When You Can\'t', 'Your phone rings first. If you don\'t answer or you\'re on another call, the AI picks up. It greets the caller, answers questions, routes to departments, and takes messages.') +
             howStep(4, 'Get SMS Summary + Call Log', 'After every AI-handled call, you receive a text message with the caller info, transcript summary, and which department was selected. Full logs always in your dashboard.') +
           '</div>' +
         '</div>' +
@@ -263,7 +257,7 @@
           '<div><p class="font-bold text-gray-800">' + (state.isActive ? 'Service ACTIVE' : 'Service PAUSED') + '</p>' +
             '<p class="text-xs text-gray-500">' +
               (state.phoneSetup?.connection_status === 'connected' ? '<span class="text-green-600"><i class="fas fa-link mr-1"></i>Phone Connected</span>' :
-               state.phoneSetup?.assigned_phone_number ? '<span class="text-amber-600"><i class="fas fa-exclamation-triangle mr-1"></i>Phone Not Yet Forwarded</span>' :
+               state.phoneSetup?.assigned_phone_number ? '<span class="text-amber-600"><i class="fas fa-exclamation-triangle mr-1"></i>Phone Setup Incomplete</span>' :
                '<span class="text-gray-400"><i class="fas fa-phone-slash mr-1"></i>No Phone Connected</span>') +
               ' &bull; ' + (state.subscription?.status || 'unknown') + '</p></div></div>' +
         '<div class="flex gap-2">' +
@@ -485,7 +479,8 @@
 
   // ============================================================
   // CONNECT PHONE TAB — Quick Connect (SMS Verification)
-  // Like Genspark "Call for Me" — enter number, verify, connected!
+  // Enter number → verify via text → DONE — AI is live!
+  // No more manual *72 forwarding codes.
   // ============================================================
   function renderConnectTab() {
     var content = document.getElementById('secContent');
@@ -493,28 +488,26 @@
     var ps = state.phoneSetup || {};
     var qc = state.quickConnect || {};
     var isConnected = ps.connection_status === 'connected';
-    var isVerified = ps.connection_status === 'verified' || !!qc.ai_phone_number;
 
     // Determine current step
     var step = 1; // Enter phone
-    if (isConnected) step = 4; // Done!
-    else if (isVerified || qc.ai_phone_number) step = 3; // Forward
+    if (isConnected || qc.connected) step = 3; // Done!
     else if (qc.codeSent) step = 2; // Enter code
 
-    // Progress bar — 3 simple steps
+    // Progress bar — 3 simple steps (no forwarding step!)
     var steps = [
       { num: 1, label: 'Your Number', icon: 'fa-phone', done: step > 1 },
       { num: 2, label: 'Verify', icon: 'fa-shield-alt', done: step > 2 },
-      { num: 3, label: 'Activate', icon: 'fa-bolt', done: step > 3 },
+      { num: 3, label: 'Live!', icon: 'fa-bolt', done: step >= 3 },
     ];
 
     var html = '<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 mb-6">' +
       '<div class="flex items-center justify-between mb-2">' +
         '<h3 class="font-bold text-gray-800 text-lg"><i class="fas fa-phone-alt text-sky-500 mr-2"></i>Connect Your Phone</h3>' +
         (isConnected ? '<span class="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm font-semibold"><i class="fas fa-check-circle mr-1"></i>Connected</span>' :
-         '<span class="px-3 py-1 bg-sky-50 text-sky-600 rounded-full text-sm font-medium">~60 seconds</span>') +
+         '<span class="px-3 py-1 bg-sky-50 text-sky-600 rounded-full text-sm font-medium">~30 seconds</span>') +
       '</div>' +
-      '<p class="text-gray-500 text-sm mb-4">Enter your business phone, verify via text, and your AI secretary is live. No carrier setup, no complicated steps.</p>' +
+      '<p class="text-gray-500 text-sm mb-4">Enter your business phone, verify via text, and your AI secretary is live. We\'ll text you all the setup details.</p>' +
       '<div class="flex items-center gap-1">';
     for (var si = 0; si < steps.length; si++) {
       var s = steps[si];
@@ -534,8 +527,7 @@
     content.innerHTML = html;
 
     // Render the current step
-    if (step === 4) renderQCComplete();
-    else if (step === 3) renderQCForward();
+    if (step === 3) renderQCComplete();
     else if (step === 2) renderQCVerify();
     else renderQCEnterPhone();
   }
@@ -639,7 +631,7 @@
           '</div>' +
 
           '<button onclick="qcVerifyCode()" id="qcVerifyBtn" class="w-full py-4 bg-green-500 text-white rounded-2xl font-bold text-base hover:bg-green-600 transition-all shadow-lg hover:shadow-xl">' +
-            '<i class="fas fa-check-circle mr-2"></i>Verify & Connect My Phone</button>' +
+            '<i class="fas fa-check-circle mr-2"></i>Verify & Go Live</button>' +
 
           '<div class="flex justify-center gap-4 mt-4">' +
             '<button onclick="qcSendCode()" class="text-sm text-sky-600 hover:text-sky-700 font-semibold"><i class="fas fa-redo mr-1"></i>Resend Code</button>' +
@@ -672,7 +664,7 @@
     if (inputs[0]) inputs[0].focus();
   }
 
-  // Verify the code and auto-setup
+  // Verify the code — after this, the user is CONNECTED (no manual forwarding needed)
   window.qcVerifyCode = async function() {
     var inputs = document.querySelectorAll('#qcCodeInputs input');
     var code = '';
@@ -680,7 +672,7 @@
     if (code.length < 6) { showToast('Enter all 6 digits', 'error'); return; }
 
     var btn = document.getElementById('qcVerifyBtn');
-    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Verifying & setting up...'; }
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Verifying & activating your AI secretary...'; }
 
     try {
       var qc = state.quickConnect || {};
@@ -691,120 +683,32 @@
       var data = await res.json();
       if (data.success) {
         state.quickConnect = Object.assign(state.quickConnect || {}, data);
-        state.quickConnect.verified = true;
+        state.quickConnect.connected = true;
         if (state.phoneSetup) {
-          state.phoneSetup.connection_status = 'verified';
+          state.phoneSetup.connection_status = 'connected';
           state.phoneSetup.assigned_phone_number = data.ai_phone_number;
           state.phoneSetup.business_phone = data.business_phone;
+        } else {
+          state.phoneSetup = {
+            connection_status: 'connected',
+            assigned_phone_number: data.ai_phone_number,
+            business_phone: data.business_phone,
+          };
         }
-        showToast('Phone verified! AI secretary number assigned.', 'success');
-        renderConnectTab();
+        state.isActive = true;
+        showToast(data.message || 'Your AI secretary is now LIVE!', 'success');
+        renderConnectTab(); // Goes straight to Connected screen
       } else {
         showToast(data.error || 'Invalid code', 'error');
         inputs.forEach(function(inp) { inp.value = ''; inp.style.borderColor = '#ef4444'; });
         if (inputs[0]) inputs[0].focus();
       }
     } catch(e) { showToast('Network error', 'error'); }
-    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-check-circle mr-2"></i>Verify & Connect My Phone'; }
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-check-circle mr-2"></i>Verify & Go Live'; }
   };
 
-  // ── Step 3: Forward your phone (simple one-line instruction) ──
-  function renderQCForward() {
-    var el = document.getElementById('qcStepContent');
-    if (!el) return;
-    var qc = state.quickConnect || {};
-    var ps = state.phoneSetup || {};
-    var bizPhone = qc.business_phone_display || formatPhone(qc.business_phone || ps.business_phone || '');
-    var aiPhone = qc.ai_phone_display || formatPhone(qc.ai_phone_number || ps.assigned_phone_number || '');
-    var fwdCode = qc.forwarding_code || ps.forwarding_code || '';
-    var inst = qc.instructions || {};
-
-    el.innerHTML =
-      '<div class="bg-white rounded-2xl border-2 border-sky-100 shadow-sm p-8">' +
-        '<div class="max-w-lg mx-auto">' +
-
-          // Success badge
-          '<div class="text-center mb-6">' +
-            '<div class="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-3">' +
-              '<i class="fas fa-check text-green-500 text-3xl"></i></div>' +
-            '<h4 class="text-xl font-extrabold text-gray-800 mb-1">Almost there! One last step.</h4>' +
-            '<p class="text-gray-500 text-sm">Pick up your business phone and dial this code to activate forwarding.</p>' +
-          '</div>' +
-
-          // The simple forwarding code
-          '<div class="bg-gradient-to-r from-sky-500 to-blue-600 rounded-2xl p-6 text-center text-white mb-6 shadow-lg">' +
-            '<p class="text-xs uppercase tracking-widest opacity-80 mb-1">Dial this from your business phone</p>' +
-            '<p class="text-4xl font-mono font-black tracking-wider mb-2" id="qcFwdCode">' + esc(fwdCode) + '</p>' +
-            '<button onclick="qcCopyCode()" class="text-xs opacity-80 hover:opacity-100 transition-all"><i class="fas fa-copy mr-1"></i>Copy to clipboard</button>' +
-          '</div>' +
-
-          // Visual step-by-step
-          '<div class="space-y-3 mb-6">' +
-            '<div class="flex items-start gap-3 bg-gray-50 rounded-xl p-3">' +
-              '<span class="flex-shrink-0 w-7 h-7 rounded-full bg-sky-500 text-white flex items-center justify-center text-xs font-bold">1</span>' +
-              '<p class="text-sm text-gray-700">' + (inst.step1 || 'Pick up your business phone <strong>' + bizPhone + '</strong>') + '</p></div>' +
-            '<div class="flex items-start gap-3 bg-sky-50 rounded-xl p-3 border-2 border-sky-200">' +
-              '<span class="flex-shrink-0 w-7 h-7 rounded-full bg-sky-500 text-white flex items-center justify-center text-xs font-bold">2</span>' +
-              '<p class="text-sm text-gray-700 font-semibold">' + (inst.step2 || 'Dial: <span class="font-mono bg-white px-2 py-0.5 rounded">' + esc(fwdCode) + '</span>') + '</p></div>' +
-            '<div class="flex items-start gap-3 bg-gray-50 rounded-xl p-3">' +
-              '<span class="flex-shrink-0 w-7 h-7 rounded-full bg-sky-500 text-white flex items-center justify-center text-xs font-bold">3</span>' +
-              '<p class="text-sm text-gray-700">' + (inst.step3 || 'Wait for the confirmation tone (2 beeps)') + '</p></div>' +
-          '</div>' +
-
-          // Phone number cards
-          '<div class="grid grid-cols-2 gap-3 mb-6">' +
-            '<div class="bg-gray-50 rounded-xl p-3 text-center">' +
-              '<p class="text-xs text-gray-500 uppercase tracking-wide">Your Number</p>' +
-              '<p class="font-mono font-bold text-gray-800">' + bizPhone + '</p></div>' +
-            '<div class="bg-sky-50 rounded-xl p-3 text-center">' +
-              '<p class="text-xs text-sky-600 uppercase tracking-wide">AI Secretary Number</p>' +
-              '<p class="font-mono font-bold text-sky-800">' + aiPhone + '</p></div>' +
-          '</div>' +
-
-          // How it works
-          '<div class="bg-emerald-50 border border-emerald-200 rounded-xl p-4 mb-6">' +
-            '<p class="text-sm font-semibold text-emerald-800 mb-1"><i class="fas fa-info-circle mr-1"></i>How it works after forwarding:</p>' +
-            '<ul class="text-sm text-emerald-700 space-y-1 ml-5 list-disc">' +
-              '<li>Calls to ' + bizPhone + ' ring YOUR phone first</li>' +
-              '<li>If you don\'t answer, the AI secretary picks up automatically</li>' +
-              '<li>You get an SMS summary of every AI-handled call</li>' +
-              '<li>To disable anytime: dial <strong class="font-mono">*73</strong> from your phone</li>' +
-            '</ul>' +
-          '</div>' +
-
-          // Action buttons
-          '<div class="flex gap-3">' +
-            '<button onclick="qcComplete()" id="qcCompleteBtn" class="flex-1 py-4 bg-green-500 text-white rounded-2xl font-bold text-base hover:bg-green-600 transition-all shadow-lg hover:shadow-xl">' +
-              '<i class="fas fa-check-double mr-2"></i>I\'ve Dialed It — Go Live!</button>' +
-          '</div>' +
-
-          '<p class="text-center text-xs text-gray-400 mt-3">Having trouble? <button onclick="state.quickConnect={};renderConnectTab()" class="text-sky-500 hover:underline">Start over</button></p>' +
-        '</div>' +
-      '</div>';
-  }
-
-  window.qcCopyCode = function() {
-    var code = document.getElementById('qcFwdCode');
-    if (code) {
-      navigator.clipboard.writeText(code.textContent.trim()).then(function() {
-        showToast('Forwarding code copied!', 'success');
-      });
-    }
-  };
-
-  window.qcComplete = async function() {
-    var btn = document.getElementById('qcCompleteBtn');
-    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Activating...'; }
-    try {
-      await fetch('/api/secretary/quick-connect/complete', { method: 'POST', headers: authHeaders() });
-      if (state.phoneSetup) state.phoneSetup.connection_status = 'connected';
-      showToast('Your AI secretary is now LIVE!', 'success');
-      await loadStatus();
-    } catch(e) { showToast('Failed to activate', 'error'); }
-    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-check-double mr-2"></i>I\'ve Dialed It — Go Live!'; }
-  };
-
-  // ── Connected! (Step 4 — final state) ──
+  // ── Step 3: CONNECTED! (No more manual forwarding step) ──
+  // After SMS verification, the system auto-activates and sends setup details via text
   function renderQCComplete() {
     var el = document.getElementById('qcStepContent');
     if (!el) return;
@@ -812,7 +716,7 @@
     var qc = state.quickConnect || {};
     var bizPhone = qc.business_phone_display || formatPhone(qc.business_phone || ps.business_phone || '');
     var aiPhone = qc.ai_phone_display || formatPhone(qc.ai_phone_number || ps.assigned_phone_number || '');
-    var aiDigits = (qc.ai_phone_number || ps.assigned_phone_number || '').replace(/^\+1/, '').replace(/\D/g, '');
+    var smsSent = qc.sms_sent;
 
     el.innerHTML =
       '<div class="bg-white rounded-2xl border-2 border-green-200 shadow-sm p-8 text-center">' +
@@ -821,26 +725,54 @@
         '<h3 class="text-2xl font-extrabold text-gray-800 mb-2">Your AI Secretary is LIVE!</h3>' +
         '<p class="text-gray-500 mb-6">Every call to your business number is now backed by AI. Never miss a lead again.</p>' +
 
+        // SMS confirmation banner
+        (smsSent ?
+          '<div class="bg-sky-50 border border-sky-200 rounded-xl p-4 mb-6 text-left max-w-lg mx-auto">' +
+            '<p class="text-sm text-sky-800 font-semibold"><i class="fas fa-sms text-sky-500 mr-2"></i>Setup details texted to your phone</p>' +
+            '<p class="text-xs text-sky-600 mt-1">We\'ve sent your AI secretary number and forwarding instructions via text message to ' + bizPhone + '. Check your texts!</p>' +
+          '</div>'
+        : '') +
+
         '<div class="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-lg mx-auto mb-6">' +
           '<div class="bg-gray-50 rounded-xl p-4">' +
             '<p class="text-xs text-gray-500 uppercase tracking-wide">Your Business Number</p>' +
             '<div class="flex items-center gap-2 mt-1">' +
-              '<input type="tel" id="connectedBizPhone" value="' + esc(ps.business_phone || '') + '" class="flex-1 font-mono font-bold text-gray-800 text-lg bg-white border border-gray-300 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-sky-400 focus:border-sky-400">' +
+              '<input type="tel" id="connectedBizPhone" value="' + esc(ps.business_phone || qc.business_phone || '') + '" class="flex-1 font-mono font-bold text-gray-800 text-lg bg-white border border-gray-300 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-sky-400 focus:border-sky-400">' +
               '<button onclick="qcUpdateBizPhone()" class="px-3 py-2 bg-sky-100 text-sky-600 rounded-lg text-sm font-semibold hover:bg-sky-200 transition-all" title="Save"><i class="fas fa-save"></i></button>' +
             '</div>' +
             '<p class="text-xs text-gray-400 mt-1">Edit to update your number</p></div>' +
           '<div class="bg-sky-50 rounded-xl p-4">' +
             '<p class="text-xs text-sky-600 uppercase tracking-wide">AI Secretary Number</p>' +
-            '<p class="font-mono font-bold text-sky-800 text-lg mt-1">' + aiPhone + '</p></div>' +
+            '<p class="font-mono font-bold text-sky-800 text-lg mt-1">' + aiPhone + '</p>' +
+            '<button onclick="copyToClipboard(\'' + esc(qc.ai_phone_number || ps.assigned_phone_number || '') + '\')" class="text-xs text-sky-500 hover:text-sky-700 mt-1"><i class="fas fa-copy mr-1"></i>Copy</button></div>' +
+        '</div>' +
+
+        // How it works — the call flow explanation
+        '<div class="bg-emerald-50 border border-emerald-200 rounded-xl p-5 mb-6 text-left max-w-lg mx-auto">' +
+          '<p class="text-sm font-bold text-emerald-800 mb-3"><i class="fas fa-route mr-1"></i>How calls are handled:</p>' +
+          '<div class="space-y-2">' +
+            '<div class="flex items-start gap-3">' +
+              '<span class="flex-shrink-0 w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center text-xs font-bold">1</span>' +
+              '<p class="text-sm text-emerald-700">Customer calls your business number <strong>' + bizPhone + '</strong></p></div>' +
+            '<div class="flex items-start gap-3">' +
+              '<span class="flex-shrink-0 w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center text-xs font-bold">2</span>' +
+              '<p class="text-sm text-emerald-700"><strong>Your phone rings first</strong> — you always get first priority</p></div>' +
+            '<div class="flex items-start gap-3">' +
+              '<span class="flex-shrink-0 w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center text-xs font-bold">3</span>' +
+              '<p class="text-sm text-emerald-700">If you don\'t answer, the AI secretary picks up automatically</p></div>' +
+            '<div class="flex items-start gap-3">' +
+              '<span class="flex-shrink-0 w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center text-xs font-bold">4</span>' +
+              '<p class="text-sm text-emerald-700"><strong>You get an SMS summary</strong> of every AI-handled call</p></div>' +
+          '</div>' +
         '</div>' +
 
         '<div class="flex justify-center gap-3 mb-6">' +
           '<button onclick="secSetTab(\'setup\')" class="px-6 py-3 bg-sky-500 text-white rounded-xl font-semibold text-sm hover:bg-sky-600 transition-all shadow"><i class="fas fa-cog mr-2"></i>Edit Configuration</button>' +
           '<button onclick="secSetTab(\'calls\')" class="px-6 py-3 bg-gray-100 text-gray-700 rounded-xl font-semibold text-sm hover:bg-gray-200 transition-all"><i class="fas fa-phone-volume mr-2"></i>View Call Log</button>' +
+          '<button onclick="qcResendSetupSMS()" id="qcResendBtn" class="px-6 py-3 bg-purple-50 text-purple-700 rounded-xl font-semibold text-sm hover:bg-purple-100 transition-all border border-purple-200"><i class="fas fa-sms mr-2"></i>Resend Setup Text</button>' +
         '</div>' +
 
-        '<div class="bg-amber-50 border border-amber-200 rounded-xl p-4 text-left max-w-lg mx-auto">' +
-          '<p class="text-sm text-amber-700"><i class="fas fa-info-circle mr-1"></i><strong>To disable forwarding:</strong> Dial <span class="font-mono bg-white px-2 py-0.5 rounded">*73</span> from your business phone. To re-enable: Dial <span class="font-mono bg-white px-2 py-0.5 rounded">*72' + aiDigits + '</span></p></div>' +
+        '<p class="text-xs text-gray-400 text-center">Need help? Contact support or check the text message we sent to your phone for setup details.</p>' +
       '</div>';
   }
 
@@ -860,10 +792,26 @@
     } catch(e) { showToast('Network error', 'error'); }
   };
 
+  // Resend setup SMS with AI secretary details
+  window.qcResendSetupSMS = async function() {
+    var btn = document.getElementById('qcResendBtn');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Sending...'; }
+    try {
+      var res = await fetch('/api/secretary/quick-connect/resend-sms', { method: 'POST', headers: authHeaders() });
+      var data = await res.json();
+      if (data.success) {
+        showToast(data.message || 'Setup details sent to your phone!', 'success');
+      } else {
+        showToast(data.error || 'Failed to send', 'error');
+      }
+    } catch(e) { showToast('Network error', 'error'); }
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-sms mr-2"></i>Resend Setup Text'; }
+  };
+
   // LEGACY PLACEHOLDERS (kept for backward compat)
-  window.secTestConnection = function() { showToast('Use the Quick Connect flow instead', 'info'); };
+  window.secTestConnection = function() { showToast('Your phone is connected via text verification', 'info'); };
   window.secUpdateBizPhone = window.qcUpdateBizPhone;
-  window.secConfirmConnection = function() { showToast('Use the Quick Connect flow instead', 'info'); };
+  window.secConfirmConnection = function() { showToast('Your phone is connected via text verification', 'info'); };
 
   // ============================================================
   // CALLS TAB
