@@ -982,7 +982,6 @@ callCenterRoutes.get('/quick-connect/status', async (c) => {
     const config = results?.[0]
     if (!config) return c.json({ status: 'not_started' })
 
-    const aiDigits = (config.assigned_phone_number || '').replace(/^\+1/, '').replace(/\D/g, '')
     return c.json({
       status: config.connection_status || 'not_started',
       business_phone: config.business_phone || '',
@@ -993,8 +992,6 @@ callCenterRoutes.get('/quick-connect/status', async (c) => {
       is_active: !!config.is_active,
       has_trunk: !!config.livekit_inbound_trunk_id,
       has_dispatch: !!config.livekit_dispatch_rule_id,
-      forwarding_code: aiDigits ? `*72${aiDigits}` : '',
-      disable_forwarding_code: '*73',
       label: config.label || 'Primary Outbound Line',
     })
   } catch (e: any) {
@@ -1226,14 +1223,13 @@ callCenterRoutes.post('/quick-connect/verify', async (c) => {
     }
 
     const aiDigits = aiPhoneNumber.replace(/^\+1/, '').replace(/\D/g, '')
-    forwardingCode = `*72${aiDigits}`
 
-    // Update config
+    // Update config — mark as CONNECTED immediately (no manual forwarding step)
     await c.env.DB.prepare(`
       UPDATE cc_phone_config SET
         business_phone = ?,
         assigned_phone_number = ?,
-        connection_status = 'verified',
+        connection_status = 'connected',
         forwarding_method = ?,
         livekit_inbound_trunk_id = ?,
         livekit_dispatch_rule_id = ?,
@@ -1241,29 +1237,41 @@ callCenterRoutes.post('/quick-connect/verify', async (c) => {
         verification_expires = NULL,
         phone_verified = 1,
         phone_verified_at = datetime('now'),
+        is_active = 1,
         updated_at = datetime('now')
       WHERE id = (SELECT id FROM cc_phone_config ORDER BY id DESC LIMIT 1)
     `).bind(normalized, aiPhoneNumber, connectionMethod, trunkId || '', dispatchId || '').run()
 
+    const aiPhoneDisplay = formatPhoneDisplay(aiPhoneNumber)
+    const bizPhoneDisplay = formatPhoneDisplay(normalized)
+
+    // Send setup details via SMS
+    let smsSent = false
+    const twilioFromNumber = (c.env as any).TWILIO_PHONE_NUMBER
+    if (twilioSid && twilioAuth && twilioFromNumber) {
+      try {
+        await ccTwilioAPI(twilioSid, twilioAuth, 'POST', '/Messages', {
+          To: normalized,
+          From: twilioFromNumber,
+          Body: `RoofReporterAI Call Center is LIVE!\n\nYour AI call center number: ${aiPhoneDisplay}\n\nHow it works:\n- Calls to ${bizPhoneDisplay} ring your phone first\n- If you don't answer, AI sales agent picks up\n- You get an SMS summary after every AI-handled call\n\nYour AI call center is automatically connected and ready to go!\n\nManage at your Super Admin Dashboard`,
+        })
+        smsSent = true
+      } catch (err: any) {
+        console.error('[CC QuickConnect] Setup SMS failed:', err.message)
+      }
+    }
+
     return c.json({
-      success: true, verified: true,
+      success: true, verified: true, connected: true,
       business_phone: normalized,
-      business_phone_display: formatPhoneDisplay(normalized),
+      business_phone_display: bizPhoneDisplay,
       ai_phone_number: aiPhoneNumber,
-      ai_phone_display: formatPhoneDisplay(aiPhoneNumber),
+      ai_phone_display: aiPhoneDisplay,
       connection_method: connectionMethod,
-      trunk_id: trunkId,
-      dispatch_rule_id: dispatchId,
-      forwarding_code: forwardingCode,
-      disable_forwarding_code: '*73',
-      instructions: {
-        step1: `Pick up your business phone (${formatPhoneDisplay(normalized)})`,
-        step2: `Dial: ${forwardingCode}`,
-        step3: 'Wait for the confirmation tone (2 beeps)',
-        step4: 'Done! Calls forward to the AI sales agent.',
-        disable: 'To disable: Dial *73',
-      },
-      message: 'Phone verified and AI call center number assigned!',
+      sms_sent: smsSent,
+      message: smsSent
+        ? `Phone verified and AI call center is LIVE! Setup details texted to ${bizPhoneDisplay}.`
+        : `Phone verified and AI call center is LIVE! Your AI line is ${aiPhoneDisplay}.`,
     })
   } catch (e: any) {
     console.error('[CC QuickConnect] Setup error:', e)
@@ -1289,8 +1297,44 @@ callCenterRoutes.post('/quick-connect/disconnect', async (c) => {
     await c.env.DB.prepare(
       `UPDATE cc_phone_config SET connection_status = 'disconnected', is_active = 0, updated_at = datetime('now') WHERE id = (SELECT id FROM cc_phone_config ORDER BY id DESC LIMIT 1)`
     ).run()
-    return c.json({ success: true, message: 'Call center phone disconnected. Dial *73 to deactivate forwarding.' })
+    return c.json({ success: true, message: 'Call center phone disconnected.' })
   } catch (e: any) {
     return c.json({ error: e.message }, 500)
+  }
+})
+
+// POST /quick-connect/resend-sms — Resend setup details via SMS
+callCenterRoutes.post('/quick-connect/resend-sms', async (c) => {
+  try {
+    const config = await c.env.DB.prepare(
+      `SELECT business_phone, assigned_phone_number FROM cc_phone_config ORDER BY id DESC LIMIT 1`
+    ).first<any>()
+
+    if (!config?.business_phone || !config?.assigned_phone_number) {
+      return c.json({ error: 'Phone not configured yet.' }, 400)
+    }
+
+    const bizPhoneDisplay = formatPhoneDisplay(config.business_phone)
+    const aiPhoneDisplay = formatPhoneDisplay(config.assigned_phone_number)
+    const aiDigits = config.assigned_phone_number.replace(/^\+1/, '').replace(/\D/g, '')
+
+    const twilioSid = (c.env as any).TWILIO_ACCOUNT_SID
+    const twilioAuth = (c.env as any).TWILIO_AUTH_TOKEN
+    const twilioFromNumber = (c.env as any).TWILIO_PHONE_NUMBER
+
+    if (!twilioSid || !twilioAuth || !twilioFromNumber) {
+      return c.json({ error: 'SMS service not configured' }, 503)
+    }
+
+    await ccTwilioAPI(twilioSid, twilioAuth, 'POST', '/Messages', {
+      To: config.business_phone,
+      From: twilioFromNumber,
+      Body: `RoofReporterAI Call Center is LIVE!\n\nYour AI call center number: ${aiPhoneDisplay}\n\nHow it works:\n- Calls to ${bizPhoneDisplay} ring your phone first\n- If you don't answer, AI sales agent picks up\n- You get an SMS summary after every AI-handled call\n\nYour AI call center is automatically connected and ready to go!\n\nManage at your Super Admin Dashboard`,
+    })
+
+    return c.json({ success: true, message: `Setup details sent to ${bizPhoneDisplay}. Check your texts!` })
+  } catch (e: any) {
+    console.error('[CC QuickConnect] Resend SMS failed:', e.message)
+    return c.json({ error: 'Failed to send SMS.' }, 500)
   }
 })

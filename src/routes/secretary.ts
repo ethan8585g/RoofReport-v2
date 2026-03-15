@@ -2888,7 +2888,7 @@ secretaryRoutes.post('/quick-connect/verify', async (c) => {
           await twilioAPI(twilioSid, twilioAuth, 'POST', '/Messages', {
             To: normalized,
             From: twilioFromNumber,
-            Body: `RoofReporterAI Secretary is LIVE!\n\nYour AI answering number: ${aiPhoneDisplay}\n\nHow it works:\n- Customers call your business number ${bizPhoneDisplay}\n- If you can't answer, they're forwarded to ${aiPhoneDisplay}\n- AI greets them, answers questions & routes calls\n- You get an SMS summary after every AI-handled call\n\nTo set up no-answer forwarding on your phone:\nDial *72${aiDigits} from ${bizPhoneDisplay}\n\nTo disable anytime: Dial *73\n\nManage at: roofreporterai.com/customer/secretary`,
+            Body: `RoofReporterAI Secretary is LIVE!\n\nYour AI answering number: ${aiPhoneDisplay}\n\nHow it works:\n- Customers call your business number ${bizPhoneDisplay}\n- If you can't answer, calls are handled by your AI secretary at ${aiPhoneDisplay}\n- AI greets them, answers questions & routes calls\n- You get an SMS summary after every AI-handled call\n\nYour AI secretary is automatically connected and ready to go!\n\nManage at: roofreporterai.com/customer/secretary`,
           })
           smsSent = true
         } catch (err: any) {
@@ -2965,7 +2965,7 @@ secretaryRoutes.post('/quick-connect/resend-sms', async (c) => {
     await twilioAPI(twilioSid, twilioAuth, 'POST', '/Messages', {
       To: config.business_phone,
       From: twilioFromNumber,
-      Body: `RoofReporterAI Secretary is LIVE!\n\nYour AI answering number: ${aiPhoneDisplay}\n\nHow it works:\n- Customers call your business number ${bizPhoneDisplay}\n- If you can't answer, they're forwarded to ${aiPhoneDisplay}\n- AI greets them, answers questions & routes calls\n- You get an SMS summary after every AI-handled call\n\nTo set up no-answer forwarding on your phone:\nDial *72${aiDigits} from ${bizPhoneDisplay}\n\nTo disable anytime: Dial *73\n\nManage at: roofreporterai.com/customer/secretary`,
+      Body: `RoofReporterAI Secretary is LIVE!\n\nYour AI answering number: ${aiPhoneDisplay}\n\nHow it works:\n- Customers call your business number ${bizPhoneDisplay}\n- If you can't answer, calls are handled by your AI secretary at ${aiPhoneDisplay}\n- AI greets them, answers questions & routes calls\n- You get an SMS summary after every AI-handled call\n\nYour AI secretary is automatically connected and ready to go!\n\nManage at: roofreporterai.com/customer/secretary`,
     })
     return c.json({ success: true, message: `Setup details sent to ${bizPhoneDisplay}. Check your texts!` })
   } catch (err: any) {

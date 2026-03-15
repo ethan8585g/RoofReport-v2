@@ -35,6 +35,13 @@ const app = new Hono<{ Bindings: Bindings }>()
 // CORS for API routes
 app.use('/api/*', cors())
 
+// Cache control for static JS/CSS — prevent stale browser cache
+app.use('/static/*', async (c, next) => {
+  await next()
+  // Short cache with must-revalidate so browsers check for fresh versions
+  c.header('Cache-Control', 'public, max-age=300, must-revalidate')
+})
+
 // Analytics tracker injection middleware — auto-injects tracker.js + GA4 gtag.js into HTML pages
 // Skips API routes, static files, and the tracker itself
 // Enhanced for maximum tracking accuracy: consent mode, enhanced measurement, cross-domain, user ID linking

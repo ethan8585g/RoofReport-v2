@@ -1268,9 +1268,8 @@
       return renderPhoneConnected(ps);
     }
 
-    // Otherwise show the Quick Connect wizard
+    // Otherwise show the Quick Connect wizard (2 steps only — no forwarding step)
     if (ccPhoneState.step === 2) return renderPhoneStep2();
-    if (ccPhoneState.step === 3) return renderPhoneStep3();
     return renderPhoneStep1(ps);
   }
 
@@ -1339,54 +1338,8 @@
     '</div>';
   }
 
-  function renderPhoneStep3() {
-    var data = ccPhoneState.verifiedData || {};
-    var inst = data.instructions || {};
-    return '<div class="max-w-lg mx-auto">' +
-      '<div class="text-center mb-8">' +
-        '<div class="w-16 h-16 bg-gradient-to-br from-green-500 to-emerald-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg">' +
-          '<i class="fas fa-check text-white text-2xl"></i>' +
-        '</div>' +
-        '<h3 class="text-2xl font-black text-gray-900">Phone Verified!</h3>' +
-        '<p class="text-gray-500 mt-2">Activate call forwarding with one simple step:</p>' +
-      '</div>' +
-
-      '<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">' +
-        '<div class="grid grid-cols-2 gap-4 mb-6">' +
-          '<div class="bg-gray-50 rounded-xl p-4 text-center">' +
-            '<p class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Your Phone</p>' +
-            '<p class="text-lg font-black text-gray-900 mt-1">' + (data.business_phone_display || 'N/A') + '</p>' +
-          '</div>' +
-          '<div class="bg-orange-50 rounded-xl p-4 text-center">' +
-            '<p class="text-[10px] uppercase font-bold text-orange-400 tracking-wider">AI Call Center Line</p>' +
-            '<p class="text-lg font-black text-orange-600 mt-1">' + (data.ai_phone_display || 'N/A') + '</p>' +
-          '</div>' +
-        '</div>' +
-
-        '<div class="bg-gradient-to-r from-orange-500 to-red-600 rounded-xl p-5 text-white mb-4">' +
-          '<p class="text-sm font-bold mb-2"><i class="fas fa-phone mr-2"></i>Activate Forwarding</p>' +
-          '<div class="flex items-center gap-3">' +
-            '<code class="text-2xl font-black tracking-wider flex-1">' + (data.forwarding_code || '*72...') + '</code>' +
-            '<button onclick="window.ccCopyText(\'' + (data.forwarding_code || '') + '\')" class="bg-white/20 hover:bg-white/30 px-3 py-2 rounded-lg text-sm font-bold"><i class="fas fa-copy"></i></button>' +
-          '</div>' +
-          '<p class="text-orange-100 text-xs mt-2">Dial this from your business phone. Wait for 2 beeps.</p>' +
-        '</div>' +
-
-        '<div class="bg-gray-50 rounded-xl p-4 text-sm text-gray-600 space-y-1">' +
-          '<p><strong>1.</strong> ' + (inst.step1 || 'Pick up your business phone') + '</p>' +
-          '<p><strong>2.</strong> ' + (inst.step2 || 'Dial the code above') + '</p>' +
-          '<p><strong>3.</strong> ' + (inst.step3 || 'Wait for confirmation') + '</p>' +
-          '<p><strong>4.</strong> ' + (inst.step4 || 'Done!') + '</p>' +
-          '<p class="text-gray-400 mt-2 pt-2 border-t"><i class="fas fa-undo mr-1"></i> ' + (inst.disable || 'To disable: Dial *73') + '</p>' +
-        '</div>' +
-
-        '<button onclick="window.ccPhoneComplete()" id="ccCompleteBtn" ' +
-          'class="w-full mt-4 py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white font-bold rounded-xl hover:shadow-lg transition-all flex items-center justify-center gap-2">' +
-          '<i class="fas fa-check-double"></i> I\'ve Activated Forwarding — Go Live!' +
-        '</button>' +
-      '</div>' +
-    '</div>';
-  }
+  // Step 3 removed — after SMS verification, phone goes live immediately.
+  // No more manual *72 forwarding codes.
 
   function renderPhoneConnected(ps) {
     return '<div class="max-w-lg mx-auto">' +
@@ -1407,16 +1360,23 @@
           '<div class="bg-green-50 rounded-xl p-4 text-center">' +
             '<p class="text-[10px] uppercase font-bold text-green-500 tracking-wider">AI Line</p>' +
             '<p class="text-lg font-black text-green-600 mt-1">' + (ps.ai_phone_display || 'N/A') + '</p>' +
+            '<button onclick="window.ccCopyText(\'' + (ps.ai_phone_number || '') + '\')" class="text-xs text-green-500 hover:text-green-700 mt-1"><i class="fas fa-copy mr-1"></i>Copy</button>' +
           '</div>' +
+        '</div>' +
+
+        // SMS confirmation
+        '<div class="bg-sky-50 border border-sky-100 rounded-xl p-4 mb-4">' +
+          '<p class="text-sm text-sky-800 font-semibold"><i class="fas fa-sms text-sky-500 mr-2"></i>Setup details sent via text</p>' +
+          '<p class="text-xs text-sky-600 mt-1">We\'ve texted your phone with the AI call center number and setup details. Check your messages.</p>' +
         '</div>' +
 
         '<div class="bg-green-50 border border-green-100 rounded-xl p-4 mb-4">' +
           '<h4 class="font-bold text-green-800 text-sm mb-2"><i class="fas fa-route mr-2"></i>How calls work:</h4>' +
           '<ol class="text-sm text-green-700 space-y-1 list-decimal ml-4">' +
             '<li>Incoming call hits your business phone</li>' +
-            '<li>If not answered → forwards to AI line</li>' +
+            '<li>If not answered, forwards to AI line automatically</li>' +
             '<li>AI sales agent picks up and handles the call</li>' +
-            '<li>Call transcript and outcome logged to your dashboard</li>' +
+            '<li>You get an SMS summary + call logged to dashboard</li>' +
           '</ol>' +
         '</div>' +
 
@@ -1424,13 +1384,12 @@
           '<button onclick="window.ccPhoneDisconnect()" class="flex-1 py-2.5 border-2 border-red-200 text-red-600 rounded-xl text-sm font-bold hover:bg-red-50 transition-all">' +
             '<i class="fas fa-unlink mr-1"></i> Disconnect' +
           '</button>' +
+          '<button onclick="window.ccPhoneResendSMS()" class="flex-1 py-2.5 border-2 border-sky-200 text-sky-600 rounded-xl text-sm font-bold hover:bg-sky-50 transition-all">' +
+            '<i class="fas fa-sms mr-1"></i> Resend Setup Text' +
+          '</button>' +
           '<button onclick="window.ccPhoneReconnect()" class="flex-1 py-2.5 border-2 border-orange-200 text-orange-600 rounded-xl text-sm font-bold hover:bg-orange-50 transition-all">' +
             '<i class="fas fa-redo mr-1"></i> Reconfigure' +
           '</button>' +
-        '</div>' +
-
-        '<div class="mt-4 bg-gray-50 rounded-xl p-3 text-center">' +
-          '<p class="text-xs text-gray-500">Forwarding code: <code class="font-bold text-gray-700">' + (ps.forwarding_code || '*72...') + '</code> · Deactivate: <code class="font-bold text-gray-700">' + (ps.disable_forwarding_code || '*73') + '</code></p>' +
         '</div>' +
       '</div>' +
     '</div>';
@@ -1489,13 +1448,14 @@
     if (code.length !== 6) { document.getElementById('ccVerifyStatus').innerHTML = '<span class="text-red-500">Please enter all 6 digits</span>'; return; }
 
     var btn = document.getElementById('ccVerifyBtn');
-    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Verifying & Setting Up...'; }
-    document.getElementById('ccVerifyStatus').innerHTML = '<span class="text-orange-500"><i class="fas fa-spinner fa-spin mr-1"></i>Purchasing phone number & configuring...</span>';
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Verifying & Activating...'; }
+    document.getElementById('ccVerifyStatus').innerHTML = '<span class="text-orange-500"><i class="fas fa-spinner fa-spin mr-1"></i>Setting up your AI phone line...</span>';
 
     var res = await ccFetch('/api/call-center/quick-connect/verify', { method: 'POST', body: JSON.stringify({ phone_number: ccPhoneState.phoneNumber, code: code }) });
     if (res && res.success) {
-      ccPhoneState.verifiedData = res;
-      ccPhoneState.step = 3;
+      // Go straight to connected — no forwarding step needed
+      ccPhoneState.step = 1;
+      CC.data.phoneSetup = await ccFetch('/api/call-center/quick-connect/status');
       renderTab('phone-setup');
     } else {
       document.getElementById('ccVerifyStatus').innerHTML = '<span class="text-red-500"><i class="fas fa-exclamation-circle mr-1"></i>' + ((res && res.error) || 'Verification failed') + '</span>';
@@ -1519,28 +1479,29 @@
   };
 
   window.ccPhoneComplete = async function() {
-    var btn = document.getElementById('ccCompleteBtn');
-    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Activating...'; }
-
-    var res = await ccFetch('/api/call-center/quick-connect/complete', { method: 'POST', body: JSON.stringify({}) });
-    if (res && res.success) {
-      CC.data.phoneSetup = await ccFetch('/api/call-center/quick-connect/status');
-      ccPhoneState.step = 1;
-      renderTab('phone-setup');
-    } else {
-      alert((res && res.error) || 'Failed to activate.');
-      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-check-double mr-1"></i> I\'ve Activated Forwarding — Go Live!'; }
-    }
+    // Legacy — no longer needed, verify goes straight to connected
+    CC.data.phoneSetup = await ccFetch('/api/call-center/quick-connect/status');
+    ccPhoneState.step = 1;
+    renderTab('phone-setup');
   };
 
   window.ccPhoneDisconnect = async function() {
     if (!confirm('Disconnect the AI phone line? You can re-connect anytime.')) return;
     var res = await ccFetch('/api/call-center/quick-connect/disconnect', { method: 'POST', body: JSON.stringify({}) });
     if (res && res.success) {
-      alert('Phone line disconnected. Don\'t forget to dial *73 from your business phone to deactivate forwarding.');
+      alert('Phone line disconnected.');
       ccPhoneState = { step: 1, phoneNumber: '', verifiedData: null };
       CC.data.phoneSetup = await ccFetch('/api/call-center/quick-connect/status');
       renderTab('phone-setup');
+    }
+  };
+
+  window.ccPhoneResendSMS = async function() {
+    var res = await ccFetch('/api/call-center/quick-connect/resend-sms', { method: 'POST', body: JSON.stringify({}) });
+    if (res && res.success) {
+      alert(res.message || 'Setup details sent to your phone!');
+    } else {
+      alert((res && res.error) || 'Failed to send SMS.');
     }
   };
 
