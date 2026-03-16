@@ -105,6 +105,7 @@ gtag('config','${ga4Id}',{
     if (p === '/') return 'Landing';
     if (p.startsWith('/customer/dashboard')) return 'Dashboard';
     if (p.startsWith('/customer/login')) return 'Auth';
+    if (p.startsWith('/signup')) return 'Signup';
     if (p.startsWith('/customer/order')) return 'Order';
     if (p.startsWith('/customer/')) return 'CRM';
     if (p.startsWith('/portal')) return 'Portal';
@@ -496,6 +497,11 @@ app.get('/login', (c) => {
 // Customer Login/Register Page (email/password)
 app.get('/customer/login', (c) => {
   return c.html(getCustomerLoginHTML())
+})
+
+// Signup Wizard — 3-step onboarding (Business Info → Plan → Activate)
+app.get('/signup', (c) => {
+  return c.html(getSignupWizardHTML())
 })
 
 // Customer Dashboard
@@ -2499,7 +2505,7 @@ function getLandingPageHTML() {
         <a href="/blog" class="text-gray-300 hover:text-white text-sm font-medium transition-colors">Blog</a>
         <a href="/lander" class="text-gray-300 hover:text-white text-sm font-medium transition-colors">Get Started</a>
         <a href="#faq" class="text-gray-300 hover:text-white text-sm font-medium transition-colors">FAQ</a>
-        <a href="/customer/login" class="bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-semibold py-2 px-5 rounded-lg text-sm transition-all hover:scale-105 shadow-lg shadow-cyan-500/25">
+        <a href="/signup" class="bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-semibold py-2 px-5 rounded-lg text-sm transition-all hover:scale-105 shadow-lg shadow-cyan-500/25">
           <i class="fas fa-sign-in-alt mr-1"></i>Login
         </a>
       </div>
@@ -2519,7 +2525,7 @@ function getLandingPageHTML() {
         <a href="/blog" class="text-gray-300 hover:text-white text-sm py-2.5 px-3 rounded-lg hover:bg-white/5 transition-all" onclick="document.getElementById('mobile-menu').classList.add('hidden')">Blog</a>
         <a href="/lander" class="text-gray-300 hover:text-white text-sm py-2.5 px-3 rounded-lg hover:bg-white/5 transition-all" onclick="document.getElementById('mobile-menu').classList.add('hidden')">Get Started</a>
         <a href="#faq" class="text-gray-300 hover:text-white text-sm py-2.5 px-3 rounded-lg hover:bg-white/5 transition-all" onclick="document.getElementById('mobile-menu').classList.add('hidden')">FAQ</a>
-        <a href="/customer/login" class="bg-gradient-to-r from-cyan-500 to-blue-500 text-white font-semibold py-2.5 px-5 rounded-lg text-sm text-center mt-2"><i class="fas fa-sign-in-alt mr-1"></i>Login / Sign Up</a>
+        <a href="/signup" class="bg-gradient-to-r from-cyan-500 to-blue-500 text-white font-semibold py-2.5 px-5 rounded-lg text-sm text-center mt-2"><i class="fas fa-sign-in-alt mr-1"></i>Login / Sign Up</a>
       </div>
     </div>
   </nav>
@@ -2569,7 +2575,7 @@ function getLandingPageHTML() {
         <div>
           <h4 class="text-white font-semibold mb-4 text-sm uppercase tracking-wider">Get Started</h4>
           <p class="text-sm text-gray-500 mb-4">Start with 3 free reports. No credit card required.</p>
-          <a href="/customer/login" class="inline-block bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-semibold py-2.5 px-6 rounded-lg text-sm transition-all shadow-lg">
+          <a href="/signup" class="inline-block bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-semibold py-2.5 px-6 rounded-lg text-sm transition-all shadow-lg">
             Sign Up Free
           </a>
         </div>
@@ -2766,10 +2772,17 @@ function getCustomerLoginHTML() {
     </div>
 
     <!-- Links -->
-    <div class="text-center mt-6 space-y-2">
-      <a href="/login" class="text-brand-300 hover:text-white text-sm transition-colors"><i class="fas fa-shield-alt mr-1"></i>Admin Login</a>
-      <span class="text-brand-700 mx-2">|</span>
-      <a href="/" class="text-brand-300 hover:text-white text-sm transition-colors"><i class="fas fa-arrow-left mr-1"></i>Back to homepage</a>
+    <div class="text-center mt-6 space-y-3">
+      <div class="bg-white/80 backdrop-blur rounded-xl p-4 shadow-sm border border-gray-100">
+        <p class="text-sm text-gray-600 mb-2">New to RoofReporterAI?</p>
+        <a href="/signup" class="inline-flex items-center gap-2 bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-400 hover:to-emerald-400 text-white font-bold py-2.5 px-6 rounded-xl text-sm transition-all hover:scale-[1.02] shadow-lg shadow-green-500/25">
+          <i class="fas fa-rocket"></i>Start Free Trial — No Credit Card
+        </a>
+      </div>
+      <div class="space-x-4">
+        <a href="/login" class="text-gray-400 hover:text-gray-600 text-sm transition-colors"><i class="fas fa-shield-alt mr-1"></i>Admin Login</a>
+        <a href="/" class="text-gray-400 hover:text-gray-600 text-sm transition-colors"><i class="fas fa-arrow-left mr-1"></i>Back to homepage</a>
+      </div>
     </div>
   </div>
 
@@ -2947,6 +2960,58 @@ function getCustomerLoginHTML() {
 </html>`
 }
 
+// ============================================================
+// SIGNUP WIZARD — 3-Step Onboarding (Business Info → Plan → Activate)
+// ============================================================
+function getSignupWizardHTML() {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  ${getHeadTags()}
+  <title>Get Started - RoofReporterAI</title>
+  <meta name="description" content="Sign up for RoofReporterAI — AI-powered satellite roof measurement reports for Canadian roofing contractors. 14-day free trial.">
+  <style>
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .animate-fadeIn { animation: fadeIn 0.35s ease-out; }
+  </style>
+</head>
+<body class="bg-gradient-to-br from-slate-50 via-blue-50/30 to-white min-h-screen">
+  <!-- Minimal Top Bar -->
+  <div class="bg-white/80 backdrop-blur border-b border-gray-200/60">
+    <div class="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
+      <a href="/" class="flex items-center gap-2 hover:opacity-80 transition-opacity">
+        <span class="logo-mark logo-mark-light w-8 h-8"><img src="/static/logo.png" alt="RoofReporterAI"></span>
+        <span class="text-gray-800 font-bold text-lg">RoofReporterAI</span>
+      </a>
+      <a href="/customer/login" class="text-sm text-gray-500 hover:text-gray-700 transition-colors">
+        Already have an account? <span class="font-semibold text-blue-600">Sign in</span>
+      </a>
+    </div>
+  </div>
+
+  <!-- Wizard Container -->
+  <main class="max-w-5xl mx-auto px-4 py-8 sm:py-12">
+    <div id="wizard-root"></div>
+  </main>
+
+  <!-- Footer -->
+  <footer class="py-6 text-center text-xs text-gray-400 border-t border-gray-100">
+    <div class="max-w-5xl mx-auto px-4 flex flex-wrap justify-center gap-x-4 gap-y-1">
+      <a href="/terms" class="hover:text-gray-600">Terms</a>
+      <a href="/privacy" class="hover:text-gray-600">Privacy</a>
+      <span>&copy; ${new Date().getFullYear()} RoofReporterAI — Alberta, Canada</span>
+    </div>
+  </footer>
+
+  <script src="/static/js/signup-wizard.js?v=${BUILD_VERSION}"></script>
+  ${getRoverWidget()}
+</body>
+</html>`
+}
+
 function getCustomerDashboardHTML() {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -3060,7 +3125,7 @@ function getPricingPageHTML() {
       </a>
       <div class="flex items-center gap-4">
         <a href="/" class="text-brand-200 hover:text-white text-sm">Home</a>
-        <a href="/customer/login" class="bg-accent-500 hover:bg-accent-600 text-white font-semibold py-2 px-5 rounded-lg text-sm"><i class="fas fa-sign-in-alt mr-1"></i>Get Started</a>
+        <a href="/signup" class="bg-accent-500 hover:bg-accent-600 text-white font-semibold py-2 px-5 rounded-lg text-sm"><i class="fas fa-sign-in-alt mr-1"></i>Get Started</a>
       </div>
     </div>
   </nav>
@@ -3239,7 +3304,7 @@ function getBlogPostHTML() {
         <a href="/" class="text-brand-200 hover:text-white text-sm">Home</a>
         <a href="/pricing" class="text-brand-200 hover:text-white text-sm">Pricing</a>
         <a href="/blog" class="text-white font-semibold text-sm">Blog</a>
-        <a href="/customer/login" class="bg-accent-500 hover:bg-accent-600 text-white font-semibold py-2 px-5 rounded-lg text-sm"><i class="fas fa-sign-in-alt mr-1"></i>Get Started</a>
+        <a href="/signup" class="bg-accent-500 hover:bg-accent-600 text-white font-semibold py-2 px-5 rounded-lg text-sm"><i class="fas fa-sign-in-alt mr-1"></i>Get Started</a>
       </div>
       <button class="md:hidden text-white text-xl" onclick="document.getElementById('bp-mobile').classList.toggle('hidden')"><i class="fas fa-bars"></i></button>
     </div>
@@ -3247,7 +3312,7 @@ function getBlogPostHTML() {
       <div class="max-w-7xl mx-auto px-4 py-4 flex flex-col gap-3">
         <a href="/" class="text-brand-200 hover:text-white text-sm py-2">Home</a>
         <a href="/blog" class="text-white font-semibold text-sm py-2">Blog</a>
-        <a href="/customer/login" class="bg-accent-500 text-white font-semibold py-2.5 px-5 rounded-lg text-sm text-center mt-2"><i class="fas fa-sign-in-alt mr-1"></i>Get Started</a>
+        <a href="/signup" class="bg-accent-500 text-white font-semibold py-2.5 px-5 rounded-lg text-sm text-center mt-2"><i class="fas fa-sign-in-alt mr-1"></i>Get Started</a>
       </div>
     </div>
   </nav>
@@ -3274,7 +3339,7 @@ function getBlogPostHTML() {
       <h3 class="text-xl font-bold text-gray-900 mb-2">Ready to streamline your roof measurements?</h3>
       <p class="text-gray-600 mb-6 max-w-lg mx-auto">Join hundreds of roofing professionals who save hours on every estimate with AI-powered measurement reports.</p>
       <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
-        <a href="/customer/login" class="bg-accent-500 hover:bg-accent-600 text-white font-semibold py-3 px-8 rounded-lg transition-all hover:scale-105 shadow-lg shadow-accent-500/25"><i class="fas fa-rocket mr-2"></i>Start Free Trial</a>
+        <a href="/signup" class="bg-accent-500 hover:bg-accent-600 text-white font-semibold py-3 px-8 rounded-lg transition-all hover:scale-105 shadow-lg shadow-accent-500/25"><i class="fas fa-rocket mr-2"></i>Start Free Trial</a>
         <a href="/pricing" class="text-sky-600 hover:text-sky-700 font-semibold text-sm"><i class="fas fa-tag mr-1"></i>View Pricing</a>
       </div>
     </div>
@@ -3344,7 +3409,7 @@ function getLanderFunnelHTML() {
         <span class="logo-mark w-7 h-7"><img src="/static/logo.png" alt="RoofReporterAI"></span>
         <span class="text-white font-bold text-sm">RoofReporterAI</span>
       </a>
-      <a href="/customer/login" class="bg-gradient-to-r from-cyan-500 to-blue-500 text-white text-sm font-semibold py-1.5 px-4 rounded-lg hover:opacity-90 transition-opacity">Sign Up Free</a>
+      <a href="/signup" class="bg-gradient-to-r from-cyan-500 to-blue-500 text-white text-sm font-semibold py-1.5 px-4 rounded-lg hover:opacity-90 transition-opacity">Sign Up Free</a>
     </div>
   </nav>
 
@@ -3371,7 +3436,7 @@ function getLanderFunnelHTML() {
             Get a <strong class="text-white">professional roof measurement report</strong> from satellite imagery in under 60 seconds. Accurate area, pitch, edge breakdowns, and a full material BOM — everything you need to quote a job.
           </p>
 
-          <a href="/customer/login" class="group inline-flex items-center gap-3 bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-400 hover:to-emerald-400 text-white font-bold py-4 px-10 rounded-xl text-lg shadow-2xl shadow-green-500/25 transition-all hover:scale-[1.02] mb-6">
+          <a href="/signup" class="group inline-flex items-center gap-3 bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-400 hover:to-emerald-400 text-white font-bold py-4 px-10 rounded-xl text-lg shadow-2xl shadow-green-500/25 transition-all hover:scale-[1.02] mb-6">
             <i class="fas fa-rocket"></i>
             Claim Your 3 Free Reports
             <i class="fas fa-arrow-right text-sm group-hover:translate-x-1 transition-transform"></i>
@@ -3493,7 +3558,7 @@ function getLanderFunnelHTML() {
       <p class="text-lg text-gray-300 mb-10 max-w-xl mx-auto">
         Sign up in 30 seconds, get 3 free professional roof measurement reports, and access the full CRM — no credit card required.
       </p>
-      <a href="/customer/login" class="group inline-flex items-center gap-3 bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-400 hover:to-emerald-400 text-white font-bold py-4 px-12 rounded-xl text-lg shadow-2xl shadow-green-500/25 transition-all hover:scale-[1.02]">
+      <a href="/signup" class="group inline-flex items-center gap-3 bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-400 hover:to-emerald-400 text-white font-bold py-4 px-12 rounded-xl text-lg shadow-2xl shadow-green-500/25 transition-all hover:scale-[1.02]">
         <i class="fas fa-rocket"></i>
         Start Free Now
         <i class="fas fa-arrow-right text-sm group-hover:translate-x-1 transition-transform"></i>

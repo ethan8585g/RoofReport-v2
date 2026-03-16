@@ -862,6 +862,112 @@ customerAuthRoutes.post('/logout', async (c) => {
 })
 
 // ============================================================
+// SET SUBSCRIPTION TIER — Called during onboarding wizard (Step 3)
+// Updates the customer's subscription tier, trial period, and report limits
+// ============================================================
+customerAuthRoutes.post('/set-tier', async (c) => {
+  const token = c.req.header('Authorization')?.replace('Bearer ', '')
+  if (!token) return c.json({ error: 'Not authenticated' }, 401)
+
+  const session = await c.env.DB.prepare(`
+    SELECT customer_id FROM customer_sessions
+    WHERE session_token = ? AND expires_at > datetime('now')
+  `).bind(token).first<any>()
+
+  if (!session) return c.json({ error: 'Session expired' }, 401)
+
+  try {
+    const { tier, city, province } = await c.req.json()
+    
+    const validTiers: Record<string, { limit: number, name: string }> = {
+      'starter': { limit: 10, name: 'Starter' },
+      'professional': { limit: 50, name: 'Professional' },
+      'enterprise': { limit: 9999, name: 'Enterprise' }
+    }
+
+    const tierConfig = validTiers[tier] || validTiers['starter']
+    const trialEndsAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString()
+    const billingStart = new Date().toISOString()
+
+    // Generate a unique referral code for this customer
+    const referralCode = 'RR-' + crypto.randomUUID().slice(0, 8).toUpperCase()
+
+    await c.env.DB.prepare(`
+      UPDATE customers SET
+        subscription_tier = ?,
+        subscription_status = 'trial',
+        subscription_plan = ?,
+        trial_ends_at = ?,
+        monthly_report_limit = ?,
+        monthly_reports_used = 0,
+        billing_period_start = ?,
+        onboarding_completed = 1,
+        onboarding_step = 3,
+        referral_code = ?,
+        city = COALESCE(?, city),
+        province = COALESCE(?, province),
+        updated_at = datetime('now')
+      WHERE id = ?
+    `).bind(
+      tier || 'starter',
+      tierConfig.name,
+      trialEndsAt,
+      tierConfig.limit,
+      billingStart,
+      referralCode,
+      city || null,
+      province || null,
+      session.customer_id
+    ).run()
+
+    // Log the tier selection
+    await c.env.DB.prepare(`
+      INSERT INTO user_activity_log (company_id, action, details)
+      VALUES (1, 'tier_selected', ?)
+    `).bind(`Customer #${session.customer_id} selected ${tierConfig.name} plan (trial until ${trialEndsAt})`).run()
+
+    return c.json({
+      success: true,
+      tier: tier || 'starter',
+      tier_name: tierConfig.name,
+      monthly_limit: tierConfig.limit,
+      trial_ends_at: trialEndsAt,
+      referral_code: referralCode
+    })
+  } catch (err: any) {
+    return c.json({ error: 'Failed to set tier', details: err.message }, 500)
+  }
+})
+
+// ============================================================
+// VALIDATE EMAIL — Quick check if email is already taken
+// Used by signup wizard for real-time validation
+// ============================================================
+customerAuthRoutes.post('/validate-email', async (c) => {
+  try {
+    const { email } = await c.req.json()
+    if (!email) return c.json({ error: 'Email required' }, 400)
+
+    const cleanEmail = email.toLowerCase().trim()
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      return c.json({ valid: false, error: 'Invalid email format' })
+    }
+
+    const existing = await c.env.DB.prepare(
+      'SELECT id FROM customers WHERE email = ?'
+    ).bind(cleanEmail).first()
+
+    return c.json({ 
+      valid: !existing, 
+      available: !existing,
+      message: existing ? 'This email is already registered. Please sign in instead.' : 'Email available'
+    })
+  } catch (err: any) {
+    return c.json({ error: 'Validation failed', details: err.message }, 500)
+  }
+})
+
+// ============================================================
 // CUSTOMER ORDERS (orders belonging to this customer)
 // ============================================================
 customerAuthRoutes.get('/orders', async (c) => {
