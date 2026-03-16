@@ -1042,6 +1042,25 @@ crmRoutes.post('/proposals/:id/send', async (c) => {
     emailError = 'Customer has no email address on file.'
   }
 
+  // Schedule follow-up reminders before returning
+  try {
+    const followup48h = new Date(Date.now() + 48 * 3600000).toISOString()
+    const followup7d = new Date(Date.now() + 7 * 24 * 3600000).toISOString()
+    await c.env.DB.prepare(
+      "INSERT INTO scheduled_tasks (owner_id, task_type, target_type, target_id, scheduled_for, metadata) VALUES (?, 'proposal_followup', 'proposal', ?, ?, '{\"reminder\": \"48h\"}')"
+    ).bind(ownerId, parseInt(id), followup48h).run()
+    await c.env.DB.prepare(
+      "INSERT INTO scheduled_tasks (owner_id, task_type, target_type, target_id, scheduled_for, metadata) VALUES (?, 'proposal_followup', 'proposal', ?, ?, '{\"reminder\": \"7d\"}')"
+    ).bind(ownerId, parseInt(id), followup7d).run()
+  } catch {}
+
+  // Track in revenue pipeline
+  try {
+    await c.env.DB.prepare(
+      "INSERT INTO revenue_pipeline (owner_id, stage, amount, entity_type, entity_id, customer_name, property_address) VALUES (?, 'proposal_sent', ?, 'proposal', ?, ?, ?)"
+    ).bind(ownerId, parseFloat(proposal.total_amount || 0), proposal.id, proposal.customer_name || '', proposal.property_address || '').run()
+  } catch {}
+
   return c.json({
     success: true,
     share_token: shareToken,
@@ -1054,6 +1073,7 @@ crmRoutes.post('/proposals/:id/send', async (c) => {
 
 // ============================================================
 // PROPOSAL ACCEPT/DECLINE — Public endpoint (no auth, uses share_token)
+// Auto-creates invoice on acceptance + notifications + webhook
 // ============================================================
 crmRoutes.post('/proposals/respond/:token', async (c) => {
   const token = c.req.param('token')
@@ -1064,7 +1084,9 @@ crmRoutes.post('/proposals/respond/:token', async (c) => {
   }
 
   const proposal = await c.env.DB.prepare(
-    'SELECT id, status FROM crm_proposals WHERE share_token = ?'
+    `SELECT cp.*, cc.name as customer_name, cc.email as customer_email
+     FROM crm_proposals cp LEFT JOIN crm_customers cc ON cc.id = cp.crm_customer_id
+     WHERE cp.share_token = ?`
   ).bind(token).first<any>()
 
   if (!proposal) return c.json({ error: 'Proposal not found' }, 404)
@@ -1079,7 +1101,491 @@ crmRoutes.post('/proposals/respond/:token', async (c) => {
     UPDATE crm_proposals SET status = ?, ${dateCol} = datetime('now'), customer_signature = ?, updated_at = datetime('now') WHERE id = ?
   `).bind(newStatus, signature || null, proposal.id).run()
 
-  return c.json({ success: true, status: newStatus })
+  // Cancel pending follow-ups for this proposal
+  try {
+    await c.env.DB.prepare(
+      "UPDATE scheduled_tasks SET status = 'cancelled' WHERE target_type = 'proposal' AND target_id = ? AND status = 'pending'"
+    ).bind(proposal.id).run()
+  } catch {}
+
+  // Create notification for the roofer
+  try {
+    const notifType = action === 'accept' ? 'proposal_accepted' : 'proposal_declined'
+    const notifTitle = action === 'accept'
+      ? `Proposal Accepted! ${proposal.customer_name} accepted ${proposal.proposal_number}`
+      : `Proposal Declined — ${proposal.customer_name} declined ${proposal.proposal_number}`
+    const notifMsg = action === 'accept'
+      ? `${proposal.customer_name} accepted your $${parseFloat(proposal.total_amount || 0).toFixed(2)} proposal for ${proposal.title}. An invoice has been auto-created.`
+      : `${proposal.customer_name} declined your proposal for ${proposal.title}. Consider following up with an alternative offer.`
+    await c.env.DB.prepare(
+      "INSERT INTO notifications (owner_id, type, title, message, link) VALUES (?, ?, ?, ?, ?)"
+    ).bind(proposal.owner_id, notifType, notifTitle, notifMsg, `/proposal/view/${token}`).run()
+  } catch {}
+
+  // Auto-create invoice on acceptance
+  let autoInvoiceId = null
+  if (action === 'accept') {
+    try {
+      // Get line items from proposal
+      const propItems = await c.env.DB.prepare(
+        'SELECT * FROM crm_proposal_items WHERE proposal_id = ? ORDER BY sort_order'
+      ).bind(proposal.id).all<any>()
+
+      const invoiceNumber = 'INV-' + new Date().toISOString().slice(0, 10).replace(/-/g, '') + '-' + Math.floor(Math.random() * 9999).toString().padStart(4, '0')
+      const dueDate = new Date()
+      dueDate.setDate(dueDate.getDate() + 30)
+
+      const subtotal = parseFloat(proposal.subtotal || proposal.total_amount || 0)
+      const taxRate = parseFloat(proposal.tax_rate || 5)
+      const taxAmount = parseFloat(proposal.tax_amount || (subtotal * taxRate / 100))
+      const total = parseFloat(proposal.total_amount || (subtotal + taxAmount))
+
+      // Find or create the customer in the main customers table
+      let mainCustomerId = null
+      if (proposal.customer_email) {
+        const existing = await c.env.DB.prepare(
+          'SELECT id FROM customers WHERE email = ?'
+        ).bind(proposal.customer_email).first<any>()
+        mainCustomerId = existing?.id
+      }
+
+      const invResult = await c.env.DB.prepare(`
+        INSERT INTO invoices (invoice_number, customer_id, subtotal, tax_rate, tax_amount, total, status, due_date, notes, terms, created_by)
+        VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?, 'Payment due within 30 days.', 'auto-from-proposal')
+      `).bind(
+        invoiceNumber, mainCustomerId,
+        Math.round(subtotal * 100) / 100, taxRate, Math.round(taxAmount * 100) / 100,
+        Math.round(total * 100) / 100, dueDate.toISOString().slice(0, 10),
+        `Auto-generated from accepted proposal ${proposal.proposal_number}`
+      ).run()
+
+      autoInvoiceId = invResult.meta.last_row_id
+
+      // Copy line items to invoice
+      if (propItems.results?.length && autoInvoiceId) {
+        for (let i = 0; i < propItems.results.length; i++) {
+          const it = propItems.results[i]
+          const amt = Math.round((it.quantity || 1) * (it.unit_price || 0) * 100) / 100
+          await c.env.DB.prepare(
+            'INSERT INTO invoice_items (invoice_id, description, quantity, unit_price, amount, sort_order) VALUES (?, ?, ?, ?, ?, ?)'
+          ).bind(autoInvoiceId, it.description, it.quantity || 1, it.unit_price || 0, amt, i).run()
+        }
+      }
+
+      // Link invoice back to proposal
+      await c.env.DB.prepare(
+        "UPDATE crm_proposals SET auto_invoice_id = ? WHERE id = ?"
+      ).bind(autoInvoiceId, proposal.id).run()
+    } catch (invErr: any) {
+      console.error('[Auto-Invoice] Error:', invErr.message)
+    }
+  }
+
+  // Fire webhooks
+  try {
+    const hooks = await c.env.DB.prepare(
+      "SELECT * FROM webhooks WHERE owner_id = ? AND event_type = ? AND is_active = 1"
+    ).bind(proposal.owner_id, action === 'accept' ? 'proposal_accepted' : 'proposal_declined').all<any>()
+    for (const hook of hooks.results || []) {
+      fetch(hook.url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Webhook-Secret': hook.secret || '' },
+        body: JSON.stringify({ event: newStatus, proposal_id: proposal.id, proposal_number: proposal.proposal_number, customer: proposal.customer_name, total: proposal.total_amount, auto_invoice_id: autoInvoiceId })
+      }).catch(() => {})
+    }
+  } catch {}
+
+  // Track in revenue pipeline
+  try {
+    await c.env.DB.prepare(
+      "INSERT INTO revenue_pipeline (owner_id, stage, amount, entity_type, entity_id, customer_name, property_address) VALUES (?, ?, ?, 'proposal', ?, ?, ?)"
+    ).bind(proposal.owner_id, action === 'accept' ? 'proposal_accepted' : 'proposal_declined', parseFloat(proposal.total_amount || 0), proposal.id, proposal.customer_name || '', proposal.property_address || '').run()
+  } catch {}
+
+  return c.json({ success: true, status: newStatus, auto_invoice_id: autoInvoiceId })
+})
+
+// ============================================================
+// TIERED PROPOSAL CREATION — Create Good/Better/Best proposals from pricing engine
+// ============================================================
+crmRoutes.post('/proposals/create-tiered', async (c) => {
+  const cust = await getCustomer(c)
+  if (!cust) return c.json({ error: 'Auth required' }, 401)
+
+  const body = await c.req.json()
+  const { customer_id, property_address, scope_of_work, measurements, report_id, tiers } = body
+
+  if (!customer_id || !tiers || !Array.isArray(tiers) || tiers.length === 0) {
+    return c.json({ error: 'customer_id and tiers array required' }, 400)
+  }
+
+  const groupId = 'GRP-' + Date.now().toString(36) + Math.random().toString(36).substring(2, 8)
+  const proposalIds: number[] = []
+  const shareTokens: string[] = []
+  const tierLabels = ['Good', 'Better', 'Best']
+
+  try {
+    for (let i = 0; i < tiers.length; i++) {
+      const tier = tiers[i]
+      const label = tier.label || tierLabels[i] || `Tier ${i + 1}`
+      const proposalNumber = 'PRP-' + new Date().toISOString().slice(0, 10).replace(/-/g, '') + '-' + Math.floor(Math.random() * 9999).toString().padStart(4, '0')
+      const shareToken = [...Array(16)].map(() => Math.random().toString(36)[2]).join('')
+      
+      const validUntil = new Date()
+      validUntil.setDate(validUntil.getDate() + 30)
+
+      const result = await c.env.DB.prepare(`
+        INSERT INTO crm_proposals (
+          owner_id, crm_customer_id, proposal_number, title, property_address,
+          scope_of_work, materials_detail, subtotal, tax_rate, tax_amount, total_amount,
+          status, valid_until, share_token, proposal_group_id, tier_label, tier_order,
+          source_report_id, source_type, pricing_engine_data, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+      `).bind(
+        cust.ownerId, customer_id, proposalNumber,
+        `${label} Roofing Package — ${property_address || 'Roof Project'}`,
+        property_address || '',
+        scope_of_work || tier.scope || `Complete ${label.toLowerCase()} roofing package with professional installation.`,
+        tier.materials_detail || '',
+        Math.round((tier.subtotal || 0) * 100) / 100,
+        tier.tax_rate || 5,
+        Math.round((tier.tax_amount || 0) * 100) / 100,
+        Math.round((tier.total || 0) * 100) / 100,
+        validUntil.toISOString().slice(0, 10),
+        shareToken, groupId, label, i + 1,
+        report_id || null,
+        report_id ? 'report_auto' : 'pricing_engine',
+        JSON.stringify(tier.engine_data || {})
+      ).run()
+
+      const propId = result.meta.last_row_id as number
+      proposalIds.push(propId)
+      shareTokens.push(shareToken)
+
+      // Insert line items
+      if (tier.items && Array.isArray(tier.items)) {
+        for (let j = 0; j < tier.items.length; j++) {
+          const item = tier.items[j]
+          await c.env.DB.prepare(
+            'INSERT INTO crm_proposal_items (proposal_id, description, quantity, unit, unit_price, amount, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)'
+          ).bind(propId, item.description, item.quantity || 1, item.unit || 'ea', item.unitPrice || 0, item.amount || 0, j).run()
+        }
+      }
+
+      // Track in revenue pipeline
+      await c.env.DB.prepare(
+        "INSERT INTO revenue_pipeline (owner_id, stage, amount, entity_type, entity_id, customer_name, property_address) VALUES (?, 'lead', ?, 'proposal', ?, ?, ?)"
+      ).bind(cust.ownerId, tier.total || 0, propId, body.customer_name || '', property_address || '').run()
+    }
+
+    return c.json({
+      success: true,
+      group_id: groupId,
+      proposal_ids: proposalIds,
+      share_tokens: shareTokens,
+      public_link: `/proposal/compare/${groupId}`
+    })
+  } catch (err: any) {
+    return c.json({ error: 'Failed to create tiered proposals: ' + err.message }, 500)
+  }
+})
+
+// ============================================================
+// REPORT → PROPOSAL PIPELINE — Generate proposals from a roof report
+// ============================================================
+crmRoutes.post('/proposals/from-report', async (c) => {
+  const cust = await getCustomer(c)
+  if (!cust) return c.json({ error: 'Auth required' }, 401)
+
+  const { report_id, customer_id, customer_name, property_address } = await c.req.json()
+  if (!report_id) return c.json({ error: 'report_id required' }, 400)
+
+  try {
+    // Fetch the report raw data
+    const report = await c.env.DB.prepare(
+      'SELECT * FROM reports WHERE id = ? AND customer_id = ?'
+    ).bind(report_id, cust.ownerId).first<any>()
+
+    if (!report) return c.json({ error: 'Report not found' }, 404)
+
+    // Parse measurements from report
+    let rawData: any = {}
+    try { rawData = JSON.parse(report.api_response_raw || '{}') } catch {}
+
+    const trace = rawData.trace_measurement || rawData
+    const edgeSummary = trace.edge_summary || rawData.edge_summary || {}
+
+    const measurements = {
+      total_area: parseFloat(trace.total_area_sqft || trace.total_area || report.total_area || 0),
+      perimeter: parseFloat(edgeSummary.total_perimeter || trace.perimeter || 0),
+      ridge_length: parseFloat(edgeSummary.ridge || trace.ridge_length || 0),
+      hip_length: parseFloat(edgeSummary.hip || trace.hip_length || 0),
+      valley_length: parseFloat(edgeSummary.valley || trace.valley_length || 0),
+      eave_length: parseFloat(edgeSummary.eave || trace.eave_length || 0),
+      rake_length: parseFloat(edgeSummary.rake || trace.rake_length || 0),
+      step_flashing: parseFloat(edgeSummary.step_flashing || trace.step_flashing || 0),
+      drip_edge: parseFloat(edgeSummary.drip_edge || trace.drip_edge || edgeSummary.eave || 0) + parseFloat(edgeSummary.rake || 0),
+      ice_shield: parseFloat(edgeSummary.eave || trace.eave_length || 0),
+      pitch: trace.predominant_pitch || trace.pitch || '6/12',
+      facets: parseInt(trace.facet_count || trace.facets || 0)
+    }
+
+    // Get pricing presets
+    let presets: any = null
+    try {
+      const ps = await c.env.DB.prepare(
+        "SELECT value FROM settings WHERE key = 'pricing_presets' AND customer_id = ?"
+      ).bind(cust.ownerId).first<any>()
+      if (ps?.value) presets = JSON.parse(ps.value)
+    } catch {}
+
+    // Forward to pricing engine
+    const pricingResp = await fetch(new URL('/api/invoices/pricing/calculate', c.req.url).href, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Cookie': c.req.header('cookie') || '' },
+      body: JSON.stringify({ measurements, presets, tiered: true })
+    })
+
+    if (!pricingResp.ok) {
+      // Fallback: calculate locally with simple estimates
+      const area = measurements.total_area || 1500
+      const squares = area / 100
+      const wasteMultiplier = 1.15
+
+      const buildTier = (shingleCost: number, laborCost: number, label: string) => {
+        const materialSubtotal = (squares * wasteMultiplier * shingleCost) + 
+          (squares * wasteMultiplier * 25) +
+          (measurements.drip_edge * 1.5) +
+          (measurements.ridge_length * 3.25) +
+          (measurements.valley_length * 2.75)
+        const laborTotal = squares * laborCost
+        const tearOff = squares * 45
+        const disposal = squares * 25
+        const subtotal = materialSubtotal + laborTotal + tearOff + disposal
+        const tax = subtotal * 0.05
+        return {
+          label,
+          subtotal: Math.round(subtotal * 100) / 100,
+          tax_rate: 5,
+          tax_amount: Math.round(tax * 100) / 100,
+          total: Math.round((subtotal + tax) * 100) / 100,
+          items: [
+            { description: `${label} Shingles (${(squares * wasteMultiplier).toFixed(1)} sq)`, quantity: Math.ceil(squares * wasteMultiplier), unit: 'sq', unitPrice: shingleCost, amount: Math.round(squares * wasteMultiplier * shingleCost * 100) / 100 },
+            { description: 'Underlayment', quantity: Math.ceil(squares * wasteMultiplier), unit: 'sq', unitPrice: 25, amount: Math.round(squares * wasteMultiplier * 25 * 100) / 100 },
+            { description: 'Drip Edge', quantity: Math.round(measurements.drip_edge), unit: 'ft', unitPrice: 1.50, amount: Math.round(measurements.drip_edge * 1.50 * 100) / 100 },
+            { description: 'Ridge Caps', quantity: Math.round(measurements.ridge_length), unit: 'ft', unitPrice: 3.25, amount: Math.round(measurements.ridge_length * 3.25 * 100) / 100 },
+            { description: 'Valley Flashing', quantity: Math.round(measurements.valley_length), unit: 'ft', unitPrice: 2.75, amount: Math.round(measurements.valley_length * 2.75 * 100) / 100 },
+            { description: 'Labor', quantity: Math.ceil(squares), unit: 'sq', unitPrice: laborCost, amount: Math.round(squares * laborCost * 100) / 100 },
+            { description: 'Tear-Off & Disposal', quantity: Math.ceil(squares), unit: 'sq', unitPrice: 70, amount: Math.round(squares * 70 * 100) / 100 }
+          ]
+        }
+      }
+
+      const tieredData = [
+        buildTier(125, 160, 'Good'),
+        buildTier(145, 180, 'Better'),
+        buildTier(185, 220, 'Best')
+      ]
+
+      return c.json({
+        success: true,
+        measurements,
+        tiers: tieredData,
+        report_id,
+        source: 'local_fallback'
+      })
+    }
+
+    const pricingData = await pricingResp.json() as any
+    
+    // Format as tiers for the frontend
+    if (pricingData.tiered) {
+      const tiers = Object.entries(pricingData.tiered).map(([key, value]: [string, any]) => ({
+        label: key.charAt(0).toUpperCase() + key.slice(1),
+        subtotal: value.subtotal,
+        tax_rate: value.taxRate || 5,
+        tax_amount: value.taxAmount,
+        total: value.total,
+        items: value.lineItems || [],
+        engine_data: value
+      }))
+      return c.json({ success: true, measurements, tiers, report_id, source: 'pricing_engine' })
+    }
+
+    return c.json({ success: true, measurements, single_proposal: pricingData, report_id })
+  } catch (err: any) {
+    return c.json({ error: 'Pipeline error: ' + err.message }, 500)
+  }
+})
+
+// ============================================================
+// NOTIFICATIONS — In-app notification endpoints
+// ============================================================
+crmRoutes.get('/notifications', async (c) => {
+  const cust = await getCustomer(c)
+  if (!cust) return c.json({ error: 'Auth required' }, 401)
+
+  const limit = parseInt(c.req.query('limit') || '20')
+  const unread_only = c.req.query('unread') === '1'
+  
+  try {
+    const query = unread_only
+      ? 'SELECT * FROM notifications WHERE owner_id = ? AND is_read = 0 ORDER BY created_at DESC LIMIT ?'
+      : 'SELECT * FROM notifications WHERE owner_id = ? ORDER BY created_at DESC LIMIT ?'
+    
+    const { results } = await c.env.DB.prepare(query).bind(cust.ownerId, limit).all<any>()
+    
+    const countResult = await c.env.DB.prepare(
+      'SELECT COUNT(*) as cnt FROM notifications WHERE owner_id = ? AND is_read = 0'
+    ).bind(cust.ownerId).first<any>()
+
+    return c.json({ notifications: results || [], unread_count: countResult?.cnt || 0 })
+  } catch {
+    return c.json({ notifications: [], unread_count: 0 })
+  }
+})
+
+crmRoutes.post('/notifications/:id/read', async (c) => {
+  const cust = await getCustomer(c)
+  if (!cust) return c.json({ error: 'Auth required' }, 401)
+  const id = c.req.param('id')
+  
+  if (id === 'all') {
+    await c.env.DB.prepare(
+      "UPDATE notifications SET is_read = 1 WHERE owner_id = ? AND is_read = 0"
+    ).bind(cust.ownerId).run()
+  } else {
+    await c.env.DB.prepare(
+      "UPDATE notifications SET is_read = 1 WHERE id = ? AND owner_id = ?"
+    ).bind(parseInt(id), cust.ownerId).run()
+  }
+  return c.json({ success: true })
+})
+
+// ============================================================
+// WEBHOOKS MANAGEMENT — CRUD for webhook endpoints
+// ============================================================
+crmRoutes.get('/webhooks', async (c) => {
+  const cust = await getCustomer(c)
+  if (!cust) return c.json({ error: 'Auth required' }, 401)
+  const { results } = await c.env.DB.prepare(
+    'SELECT * FROM webhooks WHERE owner_id = ? ORDER BY created_at DESC'
+  ).bind(cust.ownerId).all<any>()
+  return c.json({ webhooks: results || [] })
+})
+
+crmRoutes.post('/webhooks', async (c) => {
+  const cust = await getCustomer(c)
+  if (!cust) return c.json({ error: 'Auth required' }, 401)
+  const { event_type, url, secret } = await c.req.json()
+  if (!event_type || !url) return c.json({ error: 'event_type and url required' }, 400)
+
+  const result = await c.env.DB.prepare(
+    'INSERT INTO webhooks (owner_id, event_type, url, secret) VALUES (?, ?, ?, ?)'
+  ).bind(cust.ownerId, event_type, url, secret || '').run()
+  return c.json({ success: true, id: result.meta.last_row_id })
+})
+
+crmRoutes.delete('/webhooks/:id', async (c) => {
+  const cust = await getCustomer(c)
+  if (!cust) return c.json({ error: 'Auth required' }, 401)
+  await c.env.DB.prepare(
+    'DELETE FROM webhooks WHERE id = ? AND owner_id = ?'
+  ).bind(parseInt(c.req.param('id')), cust.ownerId).run()
+  return c.json({ success: true })
+})
+
+// ============================================================
+// REVENUE PIPELINE ANALYTICS — Funnel data for dashboard
+// ============================================================
+crmRoutes.get('/analytics/pipeline', async (c) => {
+  const cust = await getCustomer(c)
+  if (!cust) return c.json({ error: 'Auth required' }, 401)
+
+  try {
+    // Stage counts and amounts
+    const stages = await c.env.DB.prepare(`
+      SELECT stage, COUNT(*) as count, SUM(amount) as total_amount
+      FROM revenue_pipeline WHERE owner_id = ?
+      GROUP BY stage ORDER BY 
+        CASE stage 
+          WHEN 'lead' THEN 1 WHEN 'proposal_sent' THEN 2 WHEN 'proposal_viewed' THEN 3
+          WHEN 'proposal_accepted' THEN 4 WHEN 'invoice_sent' THEN 5 WHEN 'invoice_paid' THEN 6
+        END
+    `).bind(cust.ownerId).all<any>()
+
+    // Recent 30 days proposals
+    const proposalStats = await c.env.DB.prepare(`
+      SELECT 
+        COUNT(*) as total,
+        SUM(CASE WHEN status = 'accepted' THEN 1 ELSE 0 END) as accepted,
+        SUM(CASE WHEN status = 'declined' THEN 1 ELSE 0 END) as declined,
+        SUM(CASE WHEN status IN ('sent','viewed') THEN 1 ELSE 0 END) as pending,
+        SUM(CASE WHEN status = 'accepted' THEN CAST(total_amount AS REAL) ELSE 0 END) as accepted_amount,
+        AVG(CASE WHEN status = 'accepted' THEN CAST(total_amount AS REAL) ELSE NULL END) as avg_deal_size
+      FROM crm_proposals WHERE owner_id = ? AND created_at >= date('now', '-30 days')
+    `).bind(cust.ownerId).first<any>()
+
+    // Invoice stats
+    const invoiceStats = await c.env.DB.prepare(`
+      SELECT 
+        COUNT(*) as total,
+        SUM(CASE WHEN status = 'paid' THEN 1 ELSE 0 END) as paid,
+        SUM(CASE WHEN status = 'paid' THEN CAST(total AS REAL) ELSE 0 END) as paid_amount,
+        SUM(CASE WHEN status IN ('sent','viewed','overdue') THEN CAST(total AS REAL) ELSE 0 END) as outstanding_amount
+      FROM invoices WHERE created_by IS NOT NULL AND created_at >= date('now', '-30 days')
+    `).first<any>()
+
+    // Conversion rate
+    const totalProposals = proposalStats?.total || 0
+    const acceptedProposals = proposalStats?.accepted || 0
+    const conversionRate = totalProposals > 0 ? Math.round((acceptedProposals / totalProposals) * 100) : 0
+
+    return c.json({
+      stages: stages.results || [],
+      proposals: proposalStats || {},
+      invoices: invoiceStats || {},
+      conversion_rate: conversionRate,
+      avg_deal_size: Math.round((proposalStats?.avg_deal_size || 0) * 100) / 100
+    })
+  } catch (err: any) {
+    return c.json({ stages: [], proposals: {}, invoices: {}, conversion_rate: 0, avg_deal_size: 0 })
+  }
+})
+
+// ============================================================
+// CUSTOMER PORTAL — Public proposal/invoice history for homeowners
+// ============================================================
+crmRoutes.get('/customer-portal/:email', async (c) => {
+  const email = decodeURIComponent(c.req.param('email'))
+  
+  try {
+    // Get all proposals for this customer email
+    const proposals = await c.env.DB.prepare(`
+      SELECT cp.id, cp.proposal_number, cp.title, cp.total_amount, cp.status, cp.share_token,
+             cp.created_at, cp.tier_label, cp.proposal_group_id
+      FROM crm_proposals cp
+      JOIN crm_customers cc ON cc.id = cp.crm_customer_id
+      WHERE cc.email = ?
+      ORDER BY cp.created_at DESC LIMIT 50
+    `).bind(email).all<any>()
+
+    // Get invoices
+    const invoices = await c.env.DB.prepare(`
+      SELECT i.id, i.invoice_number, i.total, i.status, i.due_date, i.created_at, i.paid_date
+      FROM invoices i
+      JOIN customers c ON c.id = i.customer_id
+      WHERE c.email = ?
+      ORDER BY i.created_at DESC LIMIT 50
+    `).bind(email).all<any>()
+
+    return c.json({
+      proposals: proposals.results || [],
+      invoices: invoices.results || []
+    })
+  } catch {
+    return c.json({ proposals: [], invoices: [] })
+  }
 })
 
 // ============================================================

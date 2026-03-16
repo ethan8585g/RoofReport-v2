@@ -29,6 +29,8 @@ import { callCenterRoutes } from './routes/call-center'
 import { metaConnectRoutes } from './routes/meta-connect'
 import { heygenRoutes } from './routes/heygen'
 import { aiAdminChatRoutes } from './routes/ai-admin-chat'
+import { pipelineRoutes } from './routes/pipeline'
+import { stripeRoutes } from './routes/stripe'
 import type { Bindings } from './types'
 
 const app = new Hono<{ Bindings: Bindings }>()
@@ -105,6 +107,7 @@ gtag('config','${ga4Id}',{
     if (p.startsWith('/customer/login')) return 'Auth';
     if (p.startsWith('/customer/order')) return 'Order';
     if (p.startsWith('/customer/')) return 'CRM';
+    if (p.startsWith('/portal')) return 'Portal';
     if (p.startsWith('/blog')) return 'Blog';
     if (p.startsWith('/pricing')) return 'Pricing';
     if (p.startsWith('/lander')) return 'Lander';
@@ -177,6 +180,8 @@ app.route('/api/ai', aiAnalysisRoutes)
 app.route('/api/auth', authRoutes)
 app.route('/api/customer', customerAuthRoutes)
 app.route('/api/invoices', invoiceRoutes)
+app.route('/api/pipeline', pipelineRoutes)
+app.route('/api/stripe', stripeRoutes)
 app.route('/api/square', squareRoutes)
 app.route('/api/crm', crmRoutes)
 app.route('/api/property-imagery', propertyImageryRoutes)
@@ -549,6 +554,341 @@ app.get('/customer/team', (c) => c.html(getTeamManagementPageHTML()))
 // Join Team — Accept invitation (public landing with auth redirect)
 app.get('/customer/join-team', (c) => c.html(getJoinTeamPageHTML()))
 
+// ============================================================
+// PUBLIC TIERED PROPOSAL COMPARISON — Good/Better/Best side-by-side
+// ============================================================
+app.get('/proposal/compare/:groupId', async (c) => {
+  try {
+    const groupId = c.req.param('groupId')
+    
+    // Get all proposals in this group
+    const proposalsResult = await c.env.DB.prepare(`
+      SELECT cp.*, cc.name as customer_name, cc.email as customer_email, cc.phone as customer_phone,
+             cc.address as customer_address, cc.city as customer_city, cc.province as customer_province, cc.postal_code as customer_postal
+      FROM crm_proposals cp
+      LEFT JOIN crm_customers cc ON cc.id = cp.crm_customer_id
+      WHERE cp.proposal_group_id = ?
+      ORDER BY cp.tier_order ASC
+    `).bind(groupId).all<any>()
+
+    const proposals = proposalsResult.results || []
+    if (proposals.length === 0) {
+      return c.html(`<!DOCTYPE html><html><head><title>Proposals Not Found</title><script src="https://cdn.tailwindcss.com"></script></head><body class="bg-gray-50 min-h-screen flex items-center justify-center"><div class="text-center"><div class="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4"><i class="fas fa-exclamation-triangle text-red-500 text-2xl"></i></div><h1 class="text-2xl font-bold text-gray-800 mb-2">Proposals Not Found</h1><p class="text-gray-500">This proposal link is invalid or has expired.</p></div></body></html>`)
+    }
+
+    // Increment view counts
+    for (const p of proposals) {
+      await c.env.DB.prepare(
+        "UPDATE crm_proposals SET view_count = COALESCE(view_count, 0) + 1, last_viewed_at = datetime('now'), status = CASE WHEN status = 'sent' THEN 'viewed' ELSE status END WHERE id = ?"
+      ).bind(p.id).run()
+    }
+
+    // Track view
+    const ip = c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || 'unknown'
+    const ua = c.req.header('user-agent') || ''
+    for (const p of proposals) {
+      try { await c.env.DB.prepare('INSERT INTO proposal_view_log (proposal_id, ip_address, user_agent, referrer) VALUES (?, ?, ?, ?)').bind(p.id, ip, ua.substring(0, 500), '').run() } catch {}
+    }
+
+    // Get owner branding
+    const owner = await c.env.DB.prepare(
+      'SELECT name, email, phone, brand_business_name, brand_logo_url, brand_primary_color, brand_secondary_color, brand_tagline, brand_phone, brand_email, brand_website, brand_address, brand_license_number, brand_insurance_info FROM customers WHERE id = ?'
+    ).bind(proposals[0].owner_id).first<any>()
+
+    const businessName = owner?.brand_business_name || owner?.name || 'RoofReporterAI'
+    const primaryColor = owner?.brand_primary_color || '#0369a1'
+    const secondaryColor = owner?.brand_secondary_color || '#0ea5e9'
+    const brandPhone = owner?.brand_phone || owner?.phone || ''
+    const brandEmail = owner?.brand_email || owner?.email || ''
+    const brandWebsite = owner?.brand_website || ''
+    const brandAddress = owner?.brand_address || ''
+    const brandLicense = owner?.brand_license_number || ''
+    const brandInsurance = owner?.brand_insurance_info || ''
+    const brandTagline = owner?.brand_tagline || ''
+    const logoUrl = owner?.brand_logo_url || ''
+    const customerName = proposals[0].customer_name || 'Customer'
+    const fullAddress = [proposals[0].property_address, proposals[0].customer_city, proposals[0].customer_province, proposals[0].customer_postal].filter(Boolean).join(', ')
+    const proposalDate = proposals[0].created_at ? new Date(proposals[0].created_at).toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' }) : ''
+    const validUntil = proposals[0].valid_until ? new Date(proposals[0].valid_until).toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' }) : ''
+
+    // Get line items for each
+    const proposalsWithItems = []
+    for (const p of proposals) {
+      const itemsResult = await c.env.DB.prepare('SELECT * FROM crm_proposal_items WHERE proposal_id = ? ORDER BY sort_order').bind(p.id).all()
+      proposalsWithItems.push({ ...p, items: itemsResult.results || [] })
+    }
+
+    const anyAccepted = proposals.some((p: any) => p.status === 'accepted')
+    const anyDeclined = proposals.some((p: any) => p.status === 'declined')
+    const isResponded = anyAccepted || anyDeclined
+
+    // Tier badge config
+    const tierConfig: Record<string, any> = {
+      'Good': { icon: 'fa-star', color: 'blue', bg: 'bg-blue-50', border: 'border-blue-200', badge: 'bg-blue-100 text-blue-700', gradient: 'from-blue-500 to-blue-600', desc: 'Quality roofing at an affordable price. Durable 25-year architectural shingles with standard installation.' },
+      'Better': { icon: 'fa-medal', color: 'purple', bg: 'bg-purple-50', border: 'border-purple-200', badge: 'bg-purple-100 text-purple-700', gradient: 'from-purple-500 to-purple-600', popular: true, desc: 'Our most popular package. Premium 30-year shingles with enhanced underlayment and superior craftsmanship.' },
+      'Best': { icon: 'fa-crown', color: 'amber', bg: 'bg-amber-50', border: 'border-amber-200', badge: 'bg-amber-100 text-amber-700', gradient: 'from-amber-500 to-amber-600', desc: 'Top-tier protection. Designer 50-year shingles with ice & water shield, lifetime warranty materials.' }
+    }
+
+    // Build tier cards HTML
+    let tierCardsHtml = ''
+    for (const p of proposalsWithItems) {
+      const tier = tierConfig[p.tier_label] || tierConfig['Good']
+      const isPopular = tier.popular
+      const pAccepted = p.status === 'accepted'
+      const pDeclined = p.status === 'declined'
+      
+      let itemsList = ''
+      for (const it of p.items as any[]) {
+        itemsList += `<li class="flex justify-between py-2 border-b border-gray-50 text-sm">
+          <span class="text-gray-600">${it.description}</span>
+          <span class="font-medium text-gray-800">$${parseFloat(it.amount).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+        </li>`
+      }
+
+      tierCardsHtml += `
+      <div class="relative ${isPopular ? 'md:-mt-4 md:mb-4' : ''}" data-tier="${p.tier_label}">
+        ${isPopular ? '<div class="absolute -top-4 left-1/2 -translate-x-1/2 z-10"><span class="bg-gradient-to-r from-purple-600 to-purple-500 text-white text-xs font-bold px-4 py-1.5 rounded-full shadow-lg uppercase tracking-wider"><i class="fas fa-fire mr-1"></i>Most Popular</span></div>' : ''}
+        <div class="bg-white rounded-2xl shadow-lg ${isPopular ? 'ring-2 ring-purple-400 shadow-purple-100' : 'border border-gray-200'} overflow-hidden h-full flex flex-col ${pAccepted ? 'ring-2 ring-green-400' : ''} ${pDeclined ? 'opacity-60' : ''}">
+          <!-- Tier Header -->
+          <div class="bg-gradient-to-r ${tier.gradient} px-6 py-5 text-white text-center">
+            <i class="fas ${tier.icon} text-2xl mb-2 opacity-80"></i>
+            <h3 class="text-xl font-bold">${p.tier_label}</h3>
+            <p class="text-white/70 text-xs mt-1">${tier.desc}</p>
+          </div>
+          
+          <!-- Price -->
+          <div class="px-6 py-5 text-center border-b border-gray-100">
+            <p class="text-4xl font-black text-gray-800">$${parseFloat(p.total_amount).toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
+            <p class="text-xs text-gray-400 mt-1">Total incl. ${p.tax_rate || 5}% GST</p>
+          </div>
+
+          <!-- Line Items -->
+          <div class="px-6 py-4 flex-1">
+            <ul class="space-y-0">${itemsList}</ul>
+            <div class="mt-4 pt-3 border-t border-gray-200 space-y-1 text-sm">
+              <div class="flex justify-between text-gray-500"><span>Subtotal</span><span>$${parseFloat(p.subtotal || 0).toFixed(2)}</span></div>
+              <div class="flex justify-between text-gray-500"><span>Tax (${p.tax_rate || 5}% GST)</span><span>$${parseFloat(p.tax_amount || 0).toFixed(2)}</span></div>
+              <div class="flex justify-between font-bold text-gray-800 pt-1 border-t border-gray-200"><span>Total</span><span>$${parseFloat(p.total_amount).toFixed(2)} CAD</span></div>
+            </div>
+          </div>
+
+          <!-- Action -->
+          <div class="px-6 pb-6">
+            ${pAccepted ? `
+              <div class="bg-green-50 border border-green-200 rounded-xl p-4 text-center">
+                <i class="fas fa-check-circle text-green-500 text-2xl mb-1"></i>
+                <p class="font-bold text-green-700 text-sm">Accepted</p>
+                ${p.accepted_at ? `<p class="text-green-500 text-xs mt-0.5">${new Date(p.accepted_at).toLocaleDateString('en-CA')}</p>` : ''}
+              </div>
+            ` : pDeclined ? `
+              <div class="bg-gray-100 rounded-xl p-4 text-center">
+                <p class="font-bold text-gray-500 text-sm">Declined</p>
+              </div>
+            ` : `
+              <button onclick="selectTier('${p.share_token}', '${p.tier_label}', ${parseFloat(p.total_amount).toFixed(2)})" class="w-full bg-gradient-to-r ${tier.gradient} hover:opacity-90 text-white py-3.5 rounded-xl font-bold text-sm transition-all hover:shadow-lg select-btn" data-token="${p.share_token}">
+                <i class="fas fa-check-circle mr-2"></i>Select ${p.tier_label} Package
+              </button>
+            `}
+          </div>
+        </div>
+      </div>`
+    }
+
+    return c.html(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Roofing Proposal — ${businessName}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
+  <style>
+    @media print { .no-print { display: none !important; } body { background: white; } }
+    .brand-gradient { background: linear-gradient(135deg, ${primaryColor}, ${secondaryColor}); }
+    .brand-text { color: ${primaryColor}; }
+    .signature-pad { border: 2px dashed #d1d5db; border-radius: 12px; height: 100px; cursor: crosshair; touch-action: none; }
+    .signature-pad.active { border-color: ${primaryColor}; }
+  </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+  <!-- Top bar -->
+  <div class="no-print fixed top-0 left-0 right-0 z-50 bg-white/90 backdrop-blur-sm border-b border-gray-200">
+    <div class="max-w-6xl mx-auto px-4 py-2 flex items-center justify-between">
+      <span class="text-sm text-gray-500"><i class="fas fa-file-signature mr-1"></i>Roofing Proposal</span>
+      <button onclick="window.print()" class="px-3 py-1.5 text-xs font-medium bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-700"><i class="fas fa-print mr-1"></i>Print</button>
+    </div>
+  </div>
+
+  <div class="max-w-6xl mx-auto px-4 pt-16 pb-12">
+    <!-- Company Header -->
+    <div class="brand-gradient rounded-2xl px-8 py-8 text-white relative overflow-hidden mb-8">
+      <div class="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -translate-y-32 translate-x-32"></div>
+      <div class="relative z-10 flex flex-col md:flex-row items-start justify-between gap-4">
+        <div>
+          ${logoUrl ? `<img src="${logoUrl}" alt="${businessName}" class="h-14 mb-3 rounded-lg bg-white/20 p-1">` : ''}
+          <h1 class="text-2xl md:text-3xl font-bold">${businessName}</h1>
+          ${brandTagline ? `<p class="text-white/70 text-sm mt-1">${brandTagline}</p>` : ''}
+        </div>
+        <div class="text-right text-sm space-y-0.5 text-white/80">
+          ${brandPhone ? `<p><i class="fas fa-phone mr-1.5"></i>${brandPhone}</p>` : ''}
+          ${brandEmail ? `<p><i class="fas fa-envelope mr-1.5"></i>${brandEmail}</p>` : ''}
+          ${brandWebsite ? `<p><i class="fas fa-globe mr-1.5"></i>${brandWebsite}</p>` : ''}
+          ${brandAddress ? `<p class="mt-2 text-white/60"><i class="fas fa-map-marker-alt mr-1.5"></i>${brandAddress}</p>` : ''}
+        </div>
+      </div>
+    </div>
+
+    <!-- Customer Info Bar -->
+    <div class="bg-white rounded-xl shadow-sm border border-gray-200 px-6 py-5 mb-8">
+      <div class="flex flex-col md:flex-row justify-between gap-4">
+        <div>
+          <p class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-1">Prepared For</p>
+          <p class="text-xl font-bold text-gray-800">${customerName}</p>
+          ${fullAddress ? `<p class="text-sm text-gray-500 mt-1"><i class="fas fa-map-marker-alt mr-1 text-red-400"></i>${fullAddress}</p>` : ''}
+        </div>
+        <div class="text-right space-y-1">
+          ${proposalDate ? `<p class="text-xs text-gray-400">Issued: ${proposalDate}</p>` : ''}
+          ${validUntil ? `<p class="text-xs text-gray-400">Valid Until: ${validUntil}</p>` : ''}
+        </div>
+      </div>
+    </div>
+
+    <!-- Section Title -->
+    <div class="text-center mb-8">
+      <h2 class="text-2xl font-bold text-gray-800">Choose Your Roofing Package</h2>
+      <p class="text-gray-500 mt-2 max-w-xl mx-auto">We've prepared three options to fit your budget and protection needs. All packages include professional installation, cleanup, and warranty.</p>
+    </div>
+
+    <!-- Tier Cards -->
+    <div class="grid md:grid-cols-${proposals.length} gap-6 mb-8 items-start">
+      ${tierCardsHtml}
+    </div>
+
+    <!-- Signature + Confirm Modal -->
+    <div id="confirmModal" class="hidden fixed inset-0 bg-black/50 z-[100] flex items-center justify-center no-print">
+      <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full mx-4 p-8">
+        <h3 class="text-xl font-bold text-gray-800 mb-2 text-center">Confirm Your Selection</h3>
+        <p class="text-center text-gray-500 text-sm mb-1">You selected the <strong id="selectedTierName" class="text-gray-800"></strong> package</p>
+        <p class="text-center text-2xl font-black brand-text mb-6" id="selectedTierPrice"></p>
+        
+        <!-- Signature -->
+        <div class="mb-5">
+          <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Your Signature (optional)</label>
+          <canvas id="signaturePad" class="signature-pad w-full bg-white" width="600" height="100"></canvas>
+          <div class="flex justify-end mt-1">
+            <button onclick="clearSignature()" class="text-xs text-gray-400 hover:text-gray-600"><i class="fas fa-eraser mr-1"></i>Clear</button>
+          </div>
+        </div>
+
+        <div class="flex gap-3">
+          <button onclick="confirmAccept()" id="confirmBtn" class="flex-1 brand-gradient text-white py-3.5 rounded-xl font-bold text-sm transition-all hover:opacity-90">
+            <i class="fas fa-check-circle mr-2"></i>Accept & Proceed
+          </button>
+          <button onclick="closeModal()" class="px-6 py-3.5 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-xl font-semibold text-sm">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    ${isResponded ? '' : `
+    <!-- Decline All -->
+    <div class="text-center mb-8 no-print">
+      <button onclick="declineAll()" class="text-sm text-gray-400 hover:text-gray-600 underline">Not interested? Decline all options</button>
+    </div>`}
+
+    <!-- Footer -->
+    <div class="bg-white rounded-xl border border-gray-200 p-6 mb-6">
+      <div class="grid md:grid-cols-3 gap-6 text-center">
+        <div><i class="fas fa-shield-alt text-green-500 text-2xl mb-2"></i><h4 class="font-bold text-gray-700 text-sm">Fully Insured</h4><p class="text-xs text-gray-400">Licensed, bonded & insured</p></div>
+        <div><i class="fas fa-certificate text-blue-500 text-2xl mb-2"></i><h4 class="font-bold text-gray-700 text-sm">Warranty Included</h4><p class="text-xs text-gray-400">Manufacturer + workmanship warranty</p></div>
+        <div><i class="fas fa-broom text-purple-500 text-2xl mb-2"></i><h4 class="font-bold text-gray-700 text-sm">Full Cleanup</h4><p class="text-xs text-gray-400">Magnetic nail sweep + debris haul</p></div>
+      </div>
+    </div>
+
+    ${brandLicense || brandInsurance ? `
+    <div class="text-center text-xs text-gray-400 space-y-0.5">
+      ${brandLicense ? `<p><i class="fas fa-id-card mr-1"></i>License: ${brandLicense}</p>` : ''}
+      ${brandInsurance ? `<p><i class="fas fa-shield-alt mr-1"></i>${brandInsurance}</p>` : ''}
+    </div>` : ''}
+    <div class="text-center mt-4 text-xs text-gray-400"><p>Powered by <span class="font-semibold">RoofReporterAI</span></p></div>
+  </div>
+
+  <script>
+    var selectedToken = null;
+    var selectedTier = null;
+    var selectedPrice = 0;
+
+    // Signature pad
+    var canvas, ctx, drawing = false, hasSignature = false;
+    function initSignaturePad() {
+      canvas = document.getElementById('signaturePad');
+      if (!canvas) return;
+      ctx = canvas.getContext('2d');
+      canvas.width = canvas.offsetWidth * 2;
+      canvas.height = 200;
+      ctx.scale(2, 2);
+      ctx.strokeStyle = '#1e293b';
+      ctx.lineWidth = 2;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      function getPos(e) { var r = canvas.getBoundingClientRect(); return { x: (e.touches ? e.touches[0].clientX : e.clientX) - r.left, y: (e.touches ? e.touches[0].clientY : e.clientY) - r.top }; }
+      canvas.addEventListener('mousedown', function(e) { drawing = true; ctx.beginPath(); var p = getPos(e); ctx.moveTo(p.x, p.y); });
+      canvas.addEventListener('mousemove', function(e) { if (!drawing) return; var p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); hasSignature = true; });
+      canvas.addEventListener('mouseup', function() { drawing = false; });
+      canvas.addEventListener('mouseleave', function() { drawing = false; });
+      canvas.addEventListener('touchstart', function(e) { e.preventDefault(); drawing = true; ctx.beginPath(); var p = getPos(e); ctx.moveTo(p.x, p.y); });
+      canvas.addEventListener('touchmove', function(e) { e.preventDefault(); if (!drawing) return; var p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); hasSignature = true; });
+      canvas.addEventListener('touchend', function() { drawing = false; });
+    }
+
+    function clearSignature() { if (ctx && canvas) { ctx.clearRect(0, 0, canvas.width, canvas.height); hasSignature = false; } }
+
+    function selectTier(token, tierName, price) {
+      selectedToken = token;
+      selectedTier = tierName;
+      selectedPrice = price;
+      document.getElementById('selectedTierName').textContent = tierName;
+      document.getElementById('selectedTierPrice').textContent = '$' + parseFloat(price).toLocaleString('en-CA', { minimumFractionDigits: 2 }) + ' CAD';
+      document.getElementById('confirmModal').classList.remove('hidden');
+      setTimeout(initSignaturePad, 100);
+    }
+
+    function closeModal() { document.getElementById('confirmModal').classList.add('hidden'); }
+
+    function confirmAccept() {
+      if (!selectedToken) return;
+      var signature = null;
+      if (hasSignature && canvas) { try { signature = canvas.toDataURL('image/png'); } catch(e) {} }
+      var btn = document.getElementById('confirmBtn');
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Processing...';
+
+      fetch('/api/crm/proposals/respond/' + selectedToken, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'accept', signature: signature })
+      })
+      .then(function(r) { return r.json(); })
+      .then(function(data) { if (data.success) { location.reload(); } else { alert(data.error || 'Error'); btn.disabled = false; btn.innerHTML = '<i class="fas fa-check-circle mr-2"></i>Accept & Proceed'; } })
+      .catch(function() { alert('Network error'); btn.disabled = false; btn.innerHTML = '<i class="fas fa-check-circle mr-2"></i>Accept & Proceed'; });
+    }
+
+    function declineAll() {
+      if (!confirm('Are you sure you want to decline all options?')) return;
+      var tokens = ${JSON.stringify(proposals.filter((p: any) => !['accepted', 'declined'].includes(p.status)).map((p: any) => p.share_token))};
+      var promises = tokens.map(function(t) {
+        return fetch('/api/crm/proposals/respond/' + t, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'decline' }) });
+      });
+      Promise.all(promises).then(function() { location.reload(); }).catch(function() { location.reload(); });
+    }
+  </script>
+</body>
+</html>`)
+  } catch (err: any) {
+    console.error('[Proposal Compare] Error:', err.message)
+    return c.html(`<!DOCTYPE html><html><head><title>Error</title><script src="https://cdn.tailwindcss.com"></script></head><body class="bg-gray-50 min-h-screen flex items-center justify-center"><div class="text-center"><h1 class="text-xl font-bold text-red-600">Error Loading Proposals</h1><p class="text-gray-500 mt-2">Please try refreshing the page.</p></div></body></html>`, 500)
+  }
+})
+
 // Public proposal view page — tracks views when customer opens shared link
 app.get('/proposal/view/:token', async (c) => {
   try {
@@ -914,6 +1254,298 @@ app.get('/proposal/view/:token', async (c) => {
     return c.html(`<!DOCTYPE html><html><head><title>Error</title><script src="https://cdn.tailwindcss.com"></script></head><body class="bg-gray-50 min-h-screen flex items-center justify-center"><div class="text-center"><h1 class="text-xl font-bold text-red-600">Error Loading Proposal</h1><p class="text-gray-500 mt-2">Please try refreshing the page.</p></div></body></html>`, 500)
   }
 })
+
+// ============================================================
+// PUBLIC INVOICE PAY PAGE — Customer views & pays invoice
+// ============================================================
+app.get('/invoice/pay/:id', async (c) => {
+  try {
+    const id = c.req.param('id')
+    const status = c.req.query('status')
+    const invoice = await c.env.DB.prepare(`
+      SELECT i.*, c.name as customer_name, c.email as customer_email
+      FROM invoices i LEFT JOIN customers c ON c.id = i.customer_id WHERE i.id = ?
+    `).bind(id).first<any>()
+
+    if (!invoice) return c.html(`<!DOCTYPE html><html><head><title>Invoice Not Found</title><script src="https://cdn.tailwindcss.com"></script></head><body class="bg-gray-50 min-h-screen flex items-center justify-center"><div class="text-center"><h1 class="text-2xl font-bold text-gray-800">Invoice Not Found</h1></div></body></html>`)
+
+    // Get line items
+    const items = await c.env.DB.prepare('SELECT * FROM invoice_items WHERE invoice_id = ? ORDER BY sort_order').bind(id).all()
+
+    const isPaid = invoice.status === 'paid' || status === 'success'
+    if (status === 'success' && invoice.status !== 'paid') {
+      await c.env.DB.prepare("UPDATE invoices SET status = 'paid', paid_date = date('now'), updated_at = datetime('now') WHERE id = ?").bind(id).run()
+    }
+
+    let itemsHtml = ''
+    for (const it of (items.results || []) as any[]) {
+      itemsHtml += `<tr class="border-b border-gray-100"><td class="py-3 px-2 text-gray-700">${it.description}</td><td class="py-3 px-2 text-center">${it.quantity}</td><td class="py-3 px-2 text-right">$${parseFloat(it.unit_price).toFixed(2)}</td><td class="py-3 px-2 text-right font-medium">$${parseFloat(it.amount).toFixed(2)}</td></tr>`
+    }
+
+    return c.html(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Invoice ${invoice.invoice_number}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100 min-h-screen py-8 px-4">
+  <div class="max-w-3xl mx-auto">
+    ${status === 'success' ? `<div class="bg-green-50 border border-green-200 rounded-xl p-6 mb-6 text-center"><i class="fas fa-check-circle text-green-500 text-4xl mb-2"></i><h2 class="text-xl font-bold text-green-800">Payment Successful!</h2><p class="text-green-600 text-sm mt-1">Thank you. Your payment has been received.</p></div>` : ''}
+    ${status === 'cancelled' ? `<div class="bg-amber-50 border border-amber-200 rounded-xl p-6 mb-6 text-center"><i class="fas fa-exclamation-circle text-amber-500 text-3xl mb-2"></i><h2 class="text-lg font-bold text-amber-800">Payment Cancelled</h2><p class="text-amber-600 text-sm mt-1">You can try again when ready.</p></div>` : ''}
+    <div class="bg-white rounded-2xl shadow-xl overflow-hidden">
+      <div class="bg-gradient-to-r from-sky-700 to-sky-600 px-8 py-6 text-white">
+        <div class="flex justify-between items-start">
+          <div><h1 class="text-2xl font-bold">INVOICE</h1><p class="text-sky-200 text-sm mt-1">#${invoice.invoice_number}</p></div>
+          <div class="text-right"><span class="inline-block px-3 py-1 rounded-full text-xs font-bold ${isPaid ? 'bg-green-500' : 'bg-white/20'}">${isPaid ? 'PAID' : (invoice.status || 'DRAFT').toUpperCase()}</span><p class="text-sky-200 text-xs mt-2">Due: ${invoice.due_date || 'N/A'}</p></div>
+        </div>
+      </div>
+      <div class="px-8 py-6">
+        <div class="grid md:grid-cols-2 gap-4 mb-6">
+          <div><p class="text-xs text-gray-400 uppercase mb-1">Bill To</p><p class="font-bold text-gray-800">${invoice.customer_name || 'Customer'}</p><p class="text-sm text-gray-500">${invoice.customer_email || ''}</p></div>
+          <div class="text-right"><p class="text-xs text-gray-400 uppercase mb-1">Total Due</p><p class="text-3xl font-black text-sky-700">$${parseFloat(invoice.total).toFixed(2)}</p><p class="text-xs text-gray-400">CAD</p></div>
+        </div>
+        ${itemsHtml ? `<table class="w-full text-sm mb-6"><thead><tr class="border-b-2 border-gray-200"><th class="text-left py-2 px-2 text-gray-500">Description</th><th class="text-center py-2 px-2 text-gray-500">Qty</th><th class="text-right py-2 px-2 text-gray-500">Price</th><th class="text-right py-2 px-2 text-gray-500">Amount</th></tr></thead><tbody>${itemsHtml}</tbody></table>` : ''}
+        <div class="border-t-2 border-gray-200 pt-4 space-y-2">
+          <div class="flex justify-between text-sm"><span class="text-gray-500">Subtotal</span><span>$${parseFloat(invoice.subtotal || 0).toFixed(2)}</span></div>
+          <div class="flex justify-between text-sm"><span class="text-gray-500">Tax (${invoice.tax_rate || 5}% GST)</span><span>$${parseFloat(invoice.tax_amount || 0).toFixed(2)}</span></div>
+          <div class="flex justify-between text-xl font-bold pt-2 border-t border-gray-200"><span class="text-sky-700">Total</span><span class="text-sky-700">$${parseFloat(invoice.total).toFixed(2)} CAD</span></div>
+        </div>
+        ${!isPaid ? `<div class="mt-8 text-center"><button onclick="payNow()" id="payBtn" class="bg-green-600 hover:bg-green-700 text-white px-10 py-4 rounded-xl font-bold text-lg shadow-lg transition-all hover:shadow-xl"><i class="fas fa-credit-card mr-2"></i>Pay Now — $${parseFloat(invoice.total).toFixed(2)} CAD</button><p class="text-xs text-gray-400 mt-2"><i class="fas fa-lock mr-1"></i>Secured by Stripe</p></div>` : ''}
+      </div>
+      ${invoice.notes ? `<div class="px-8 py-4 bg-gray-50 border-t"><p class="text-xs text-gray-400 uppercase mb-1">Notes</p><p class="text-sm text-gray-600">${invoice.notes}</p></div>` : ''}
+    </div>
+    <p class="text-center text-xs text-gray-400 mt-6">Powered by RoofReporterAI</p>
+  </div>
+  <script>
+    function payNow() {
+      var btn = document.getElementById('payBtn');
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Redirecting to payment...';
+      fetch('/api/invoices/${id}/payment-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      }).then(function(r) { return r.json(); }).then(function(data) {
+        if (data.payment_url) { window.location.href = data.payment_url; }
+        else { alert(data.error || 'Payment not available'); btn.disabled = false; btn.innerHTML = '<i class="fas fa-credit-card mr-2"></i>Pay Now'; }
+      }).catch(function() { alert('Network error'); btn.disabled = false; });
+    }
+  </script>
+</body>
+</html>`)
+  } catch { return c.html('<h1>Error</h1>', 500) }
+})
+
+// ============================================================
+// TERMS OF SERVICE
+// ============================================================
+app.get('/terms', (c) => {
+  return c.html(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Terms of Service — RoofReporterAI</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <div class="max-w-3xl mx-auto px-6 py-12">
+    <h1 class="text-3xl font-bold text-gray-900 mb-6">Terms of Service</h1>
+    <p class="text-sm text-gray-400 mb-8">Last updated: March 16, 2026</p>
+    <div class="prose prose-gray max-w-none space-y-6 text-gray-700 text-sm leading-relaxed">
+      <h2 class="text-lg font-bold text-gray-800">1. Acceptance of Terms</h2>
+      <p>By accessing or using RoofReporterAI ("Service"), you agree to be bound by these Terms of Service. If you do not agree to these terms, do not use the Service. The Service is operated by RoofReporterAI and is intended for roofing professionals and their customers in Canada and the United States.</p>
+
+      <h2 class="text-lg font-bold text-gray-800">2. Description of Service</h2>
+      <p>RoofReporterAI provides AI-powered roofing measurement reports, proposal generation, invoicing, CRM tools, and related services for roofing contractors. The Service uses Google Solar API, satellite imagery, and proprietary algorithms to generate roof measurements and material estimates.</p>
+
+      <h2 class="text-lg font-bold text-gray-800">3. Account Registration</h2>
+      <p>You must register an account to use the Service. You are responsible for maintaining the confidentiality of your account credentials and for all activities under your account. You must provide accurate and complete information during registration.</p>
+
+      <h2 class="text-lg font-bold text-gray-800">4. Measurement Accuracy Disclaimer</h2>
+      <p>Roof measurements provided by the Service are estimates based on satellite data and AI analysis. <strong>They are not a substitute for physical on-site measurements.</strong> RoofReporterAI does not guarantee the accuracy of measurements and shall not be liable for any discrepancies between estimated and actual measurements. Always verify measurements before ordering materials or committing to project costs.</p>
+
+      <h2 class="text-lg font-bold text-gray-800">5. Payment Terms</h2>
+      <p>Credit packs and subscriptions are charged at the time of purchase. Payments are processed securely via Stripe or Square. All prices are in Canadian Dollars (CAD) unless otherwise stated. Credit packs are non-refundable once report generation has begun. Subscription renewals are automatic unless cancelled before the renewal date.</p>
+
+      <h2 class="text-lg font-bold text-gray-800">6. Free Trial</h2>
+      <p>New accounts receive complimentary report credits as indicated during signup. No payment is required for trial reports. Trial credits have no cash value and expire after 90 days.</p>
+
+      <h2 class="text-lg font-bold text-gray-800">7. Intellectual Property</h2>
+      <p>Reports, proposals, and documents generated through the Service are owned by the account holder. The underlying technology, algorithms, UI designs, and branding remain the property of RoofReporterAI. You may not reverse-engineer, copy, or redistribute the Service.</p>
+
+      <h2 class="text-lg font-bold text-gray-800">8. Data & Privacy</h2>
+      <p>Your use of the Service is also governed by our <a href="/privacy" class="text-blue-600 underline">Privacy Policy</a>. By using the Service, you consent to the collection and use of information as described therein.</p>
+
+      <h2 class="text-lg font-bold text-gray-800">9. Limitation of Liability</h2>
+      <p>RoofReporterAI shall not be liable for any indirect, incidental, special, consequential, or punitive damages, or any loss of profits, revenue, data, or goodwill, whether in an action in contract, tort, or otherwise, arising from your use of the Service. Our total liability shall not exceed the amount paid by you in the 12 months preceding the claim.</p>
+
+      <h2 class="text-lg font-bold text-gray-800">10. Termination</h2>
+      <p>We reserve the right to suspend or terminate your account at any time for violation of these terms. You may close your account at any time by contacting support. Upon termination, your access to reports and data will be revoked after a 30-day grace period.</p>
+
+      <h2 class="text-lg font-bold text-gray-800">11. Governing Law</h2>
+      <p>These Terms are governed by the laws of the Province of Alberta, Canada, without regard to conflict of law principles. Any disputes shall be resolved in the courts of Alberta.</p>
+
+      <h2 class="text-lg font-bold text-gray-800">12. Contact</h2>
+      <p>For questions about these Terms, contact us at <strong>support@roofreporterai.com</strong></p>
+    </div>
+    <div class="mt-12 border-t pt-6 text-center text-xs text-gray-400">
+      <a href="/" class="text-blue-600 hover:underline">Back to RoofReporterAI</a> · <a href="/privacy" class="text-blue-600 hover:underline">Privacy Policy</a>
+    </div>
+  </div>
+</body>
+</html>`)
+})
+
+// ============================================================
+// PRIVACY POLICY
+// ============================================================
+app.get('/privacy', (c) => {
+  return c.html(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Privacy Policy — RoofReporterAI</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <div class="max-w-3xl mx-auto px-6 py-12">
+    <h1 class="text-3xl font-bold text-gray-900 mb-6">Privacy Policy</h1>
+    <p class="text-sm text-gray-400 mb-8">Last updated: March 16, 2026</p>
+    <div class="prose prose-gray max-w-none space-y-6 text-gray-700 text-sm leading-relaxed">
+      <h2 class="text-lg font-bold text-gray-800">1. Information We Collect</h2>
+      <p><strong>Account Information:</strong> Name, email address, phone number, company name, and business address provided during registration.</p>
+      <p><strong>Property Data:</strong> Street addresses, GPS coordinates, and satellite imagery data used to generate roof measurement reports.</p>
+      <p><strong>Payment Information:</strong> Credit card and billing details processed securely through Stripe and/or Square. We do not store credit card numbers on our servers.</p>
+      <p><strong>Usage Data:</strong> Pages visited, features used, report generation history, and device/browser information collected via Google Analytics 4.</p>
+
+      <h2 class="text-lg font-bold text-gray-800">2. How We Use Your Information</h2>
+      <p>We use your information to: (a) provide and improve the Service; (b) generate roof measurement reports and proposals; (c) process payments; (d) send transactional emails (invoices, proposals, receipts); (e) analyze usage patterns to improve the platform; (f) communicate service updates and new features.</p>
+
+      <h2 class="text-lg font-bold text-gray-800">3. Third-Party Services</h2>
+      <p>We share data with the following third-party services as necessary to operate the platform:</p>
+      <ul class="list-disc list-inside space-y-1">
+        <li><strong>Google Solar API / Maps:</strong> Property coordinates for satellite imagery and solar data</li>
+        <li><strong>Stripe / Square:</strong> Payment processing</li>
+        <li><strong>Google Analytics 4:</strong> Anonymous usage analytics</li>
+        <li><strong>Google Gmail API:</strong> Sending proposals and invoices on your behalf (when connected)</li>
+        <li><strong>Cloudflare:</strong> Hosting, CDN, and security</li>
+        <li><strong>LiveKit:</strong> AI phone call handling (when enabled)</li>
+      </ul>
+
+      <h2 class="text-lg font-bold text-gray-800">4. Data Retention</h2>
+      <p>Account data is retained for the duration of your account. Roof measurement reports are retained for 2 years after generation. Payment records are retained for 7 years as required by Canadian tax law. You may request deletion of your data at any time by contacting support.</p>
+
+      <h2 class="text-lg font-bold text-gray-800">5. Data Security</h2>
+      <p>We implement industry-standard security measures including HTTPS encryption, secure password hashing, OAuth 2.0 authentication, and Cloudflare DDoS protection. All data is stored on Cloudflare's globally distributed infrastructure with automatic encryption at rest.</p>
+
+      <h2 class="text-lg font-bold text-gray-800">6. Cookies</h2>
+      <p>We use essential cookies for authentication and session management. Google Analytics uses cookies for usage tracking. You may disable non-essential cookies in your browser settings.</p>
+
+      <h2 class="text-lg font-bold text-gray-800">7. Your Rights (PIPEDA Compliance)</h2>
+      <p>Under Canada's Personal Information Protection and Electronic Documents Act (PIPEDA), you have the right to: (a) access your personal information; (b) request correction of inaccurate data; (c) withdraw consent for data collection; (d) request deletion of your data. To exercise these rights, contact <strong>privacy@roofreporterai.com</strong>.</p>
+
+      <h2 class="text-lg font-bold text-gray-800">8. Children's Privacy</h2>
+      <p>The Service is not intended for individuals under 18 years of age. We do not knowingly collect personal information from minors.</p>
+
+      <h2 class="text-lg font-bold text-gray-800">9. Changes to This Policy</h2>
+      <p>We may update this Privacy Policy from time to time. We will notify registered users of material changes via email. Continued use of the Service after changes constitutes acceptance of the updated policy.</p>
+
+      <h2 class="text-lg font-bold text-gray-800">10. Contact</h2>
+      <p>For privacy inquiries: <strong>privacy@roofreporterai.com</strong></p>
+      <p>Data Protection Officer: RoofReporterAI, Alberta, Canada</p>
+    </div>
+    <div class="mt-12 border-t pt-6 text-center text-xs text-gray-400">
+      <a href="/" class="text-blue-600 hover:underline">Back to RoofReporterAI</a> · <a href="/terms" class="text-blue-600 hover:underline">Terms of Service</a>
+    </div>
+  </div>
+</body>
+</html>`)
+})
+
+// ============================================================
+// CUSTOMER PORTAL — Homeowner views their proposal & invoice history
+// ============================================================
+app.get('/portal/:email', async (c) => {
+  const email = decodeURIComponent(c.req.param('email'))
+  return c.html(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My Projects — RoofReporterAI</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <header class="bg-gradient-to-r from-sky-700 to-sky-600 text-white shadow">
+    <div class="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <i class="fas fa-hard-hat text-2xl"></i>
+        <div><h1 class="text-lg font-bold">My Roofing Projects</h1><p class="text-sky-200 text-xs">${email}</p></div>
+      </div>
+    </div>
+  </header>
+  <main class="max-w-4xl mx-auto px-4 py-8" id="portal-root">
+    <div class="flex items-center justify-center py-12"><div class="animate-spin w-8 h-8 border-4 border-sky-200 border-t-sky-600 rounded-full"></div><span class="ml-3 text-gray-500">Loading your projects...</span></div>
+  </main>
+  <script>
+    (async function() {
+      const root = document.getElementById('portal-root');
+      try {
+        const res = await fetch('/api/crm/customer-portal/${encodeURIComponent(email)}');
+        const data = await res.json();
+        
+        let html = '<div class="space-y-8">';
+        
+        // Proposals
+        html += '<section><h2 class="text-xl font-bold text-gray-800 mb-4"><i class="fas fa-file-signature mr-2 text-sky-600"></i>Proposals</h2>';
+        if (data.proposals && data.proposals.length > 0) {
+          html += '<div class="grid gap-4">';
+          data.proposals.forEach(function(p) {
+            var statusColor = { accepted: 'green', declined: 'red', sent: 'blue', viewed: 'yellow', draft: 'gray' }[p.status] || 'gray';
+            html += '<div class="bg-white rounded-xl border border-gray-200 p-5 hover:shadow-md transition-shadow">' +
+              '<div class="flex justify-between items-start">' +
+              '<div><h3 class="font-bold text-gray-800">' + p.title + '</h3>' +
+              '<p class="text-sm text-gray-500 mt-0.5">' + p.proposal_number + (p.tier_label ? ' · ' + p.tier_label : '') + '</p></div>' +
+              '<div class="text-right"><span class="inline-block px-2.5 py-0.5 rounded-full text-xs font-bold bg-' + statusColor + '-100 text-' + statusColor + '-700">' + (p.status || 'draft').toUpperCase() + '</span>' +
+              '<p class="text-lg font-bold text-gray-800 mt-1">$' + parseFloat(p.total_amount || 0).toLocaleString('en-CA', {minimumFractionDigits: 2}) + '</p></div></div>' +
+              (p.share_token ? '<div class="mt-3"><a href="/proposal/view/' + p.share_token + '" class="text-sm text-sky-600 hover:underline"><i class="fas fa-external-link-alt mr-1"></i>View Proposal</a></div>' : '') +
+              '</div>';
+          });
+          html += '</div>';
+        } else { html += '<p class="text-gray-400 text-sm">No proposals yet.</p>'; }
+        html += '</section>';
+        
+        // Invoices
+        html += '<section><h2 class="text-xl font-bold text-gray-800 mb-4"><i class="fas fa-file-invoice-dollar mr-2 text-green-600"></i>Invoices</h2>';
+        if (data.invoices && data.invoices.length > 0) {
+          html += '<div class="grid gap-4">';
+          data.invoices.forEach(function(inv) {
+            var statusColor = { paid: 'green', sent: 'blue', viewed: 'yellow', overdue: 'red', draft: 'gray' }[inv.status] || 'gray';
+            html += '<div class="bg-white rounded-xl border border-gray-200 p-5 hover:shadow-md transition-shadow">' +
+              '<div class="flex justify-between items-start">' +
+              '<div><h3 class="font-bold text-gray-800">' + inv.invoice_number + '</h3>' +
+              (inv.due_date ? '<p class="text-sm text-gray-500 mt-0.5">Due: ' + inv.due_date + '</p>' : '') + '</div>' +
+              '<div class="text-right"><span class="inline-block px-2.5 py-0.5 rounded-full text-xs font-bold bg-' + statusColor + '-100 text-' + statusColor + '-700">' + (inv.status || 'draft').toUpperCase() + '</span>' +
+              '<p class="text-lg font-bold text-gray-800 mt-1">$' + parseFloat(inv.total || 0).toLocaleString('en-CA', {minimumFractionDigits: 2}) + '</p></div></div>' +
+              '<div class="mt-3 flex gap-3"><a href="/invoice/pay/' + inv.id + '" class="text-sm text-sky-600 hover:underline"><i class="fas fa-external-link-alt mr-1"></i>View Invoice</a>' +
+              (inv.status !== 'paid' ? '<a href="/invoice/pay/' + inv.id + '" class="text-sm text-green-600 hover:underline"><i class="fas fa-credit-card mr-1"></i>Pay Now</a>' : '<span class="text-sm text-green-600"><i class="fas fa-check-circle mr-1"></i>Paid' + (inv.paid_date ? ' ' + inv.paid_date : '') + '</span>') +
+              '</div></div>';
+          });
+          html += '</div>';
+        } else { html += '<p class="text-gray-400 text-sm">No invoices yet.</p>'; }
+        html += '</section></div>';
+        
+        root.innerHTML = html;
+      } catch(e) {
+        root.innerHTML = '<div class="text-center py-12"><i class="fas fa-exclamation-triangle text-red-400 text-3xl mb-3"></i><p class="text-gray-600">Error loading your projects. Please try again.</p></div>';
+      }
+    })();
+  </script>
+</body>
+</html>`)
+})
+
 app.get('/customer/d2d', (c) => {
   const mapsKey = c.env.GOOGLE_MAPS_API_KEY || ''
   return c.html(getD2DPageHTML(mapsKey))
@@ -1153,8 +1785,11 @@ function getSuperAdminDashboardHTML() {
 <body class="bg-gray-100 min-h-screen">
   <!-- Super Admin Top Bar -->
   <header class="bg-slate-700 text-white shadow-xl sticky top-0 z-50">
-    <div class="max-w-full mx-auto px-6 h-14 flex items-center justify-between">
+    <div class="max-w-full mx-auto px-4 md:px-6 h-14 flex items-center justify-between">
       <div class="flex items-center gap-3">
+        <button onclick="document.getElementById('sa-sidebar').classList.toggle('hidden');document.getElementById('sa-sidebar').classList.toggle('fixed');document.getElementById('sa-sidebar').classList.toggle('inset-0');document.getElementById('sa-sidebar').classList.toggle('z-40');" class="md:hidden text-gray-300 hover:text-white">
+          <i class="fas fa-bars text-lg"></i>
+        </button>
         <div class="w-8 h-8 bg-red-600 rounded-lg flex items-center justify-center">
           <i class="fas fa-crown text-white text-sm"></i>
         </div>
@@ -1163,7 +1798,7 @@ function getSuperAdminDashboardHTML() {
           <span class="text-gray-400 text-[10px] block -mt-0.5">Super Admin Command Center</span>
         </div>
       </div>
-      <div class="flex items-center gap-4">
+      <div class="flex items-center gap-2 md:gap-4">
         <span id="saUserGreeting" class="text-gray-300 text-xs hidden">
           <i class="fas fa-crown mr-1 text-yellow-400"></i><span id="saUserName"></span>
           <span class="ml-1 px-1.5 py-0.5 bg-red-600/30 text-red-300 rounded text-[10px] font-bold">SUPER ADMIN</span>
@@ -1178,7 +1813,7 @@ function getSuperAdminDashboardHTML() {
 
   <div class="flex min-h-[calc(100vh-56px)]">
     <!-- Sidebar Navigation -->
-    <aside class="sa-sidebar w-64 bg-slate-800 border-r border-slate-700 flex-shrink-0">
+    <aside id="sa-sidebar" class="sa-sidebar w-64 bg-slate-800 border-r border-slate-700 flex-shrink-0 hidden md:block overflow-y-auto max-h-[calc(100vh-56px)]">
       <div class="p-4 space-y-1" id="sa-nav">
         <div class="sa-nav-item active rounded-xl px-4 py-3 flex items-center gap-3" onclick="saSetView('users', this)">
           <i class="fas fa-users w-5 text-center"></i>
@@ -1261,6 +1896,19 @@ function getSuperAdminDashboardHTML() {
           <i class="fas fa-phone-alt w-5 text-center"></i>
           <span class="label text-sm font-medium">Telephony / LiveKit</span>
         </div>
+        <div class="border-t border-gray-800 my-3"></div>
+        <div class="sa-nav-item rounded-xl px-4 py-3 flex items-center gap-3 text-gray-400" onclick="saSetView('revenue-pipeline', this)">
+          <i class="fas fa-funnel-dollar w-5 text-center"></i>
+          <span class="label text-sm font-medium">Revenue Pipeline</span>
+        </div>
+        <div class="sa-nav-item rounded-xl px-4 py-3 flex items-center gap-3 text-gray-400" onclick="saSetView('notifications-admin', this)">
+          <i class="fas fa-bell w-5 text-center"></i>
+          <span class="label text-sm font-medium">Notifications</span>
+        </div>
+        <div class="sa-nav-item rounded-xl px-4 py-3 flex items-center gap-3 text-gray-400" onclick="saSetView('webhooks', this)">
+          <i class="fas fa-plug w-5 text-center"></i>
+          <span class="label text-sm font-medium">Webhooks</span>
+        </div>
         <div class="sa-nav-item rounded-xl px-4 py-3 flex items-center gap-3 text-gray-400" onclick="saSetView('paywall', this)">
           <i class="fas fa-shield-alt w-5 text-center"></i>
           <span class="label text-sm font-medium">Paywall / App Store</span>
@@ -1278,7 +1926,7 @@ function getSuperAdminDashboardHTML() {
     </aside>
 
     <!-- Main Content -->
-    <main class="flex-1 p-6 overflow-y-auto">
+    <main class="flex-1 p-3 md:p-6 overflow-y-auto">
       <div id="sa-root"></div>
     </main>
   </div>

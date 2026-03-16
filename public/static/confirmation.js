@@ -140,6 +140,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       <!-- Actions -->
       <div class="flex flex-wrap gap-3 justify-center mt-8">
+        <button onclick="generateProposalFromReport('${orderId}', '${order.property_address || ''}', '${order.homeowner_name || ''}', '${order.homeowner_email || ''}', '${order.homeowner_phone || ''}')" class="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium" id="genProposalBtn">
+          <i class="fas fa-file-signature mr-2"></i>Generate Proposal
+        </button>
         <a href="/" class="px-6 py-3 bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors font-medium">
           <i class="fas fa-plus mr-2"></i>New Order
         </a>
@@ -1159,4 +1162,121 @@ function parsePitch(pitchStr) {
   // Handle "X deg" or raw number
   const deg = parseFloat(pitchStr);
   return isNaN(deg) ? 0 : deg;
+}
+
+// ============================================================
+// GENERATE PROPOSAL FROM REPORT — Report → Proposal Pipeline
+// ============================================================
+async function generateProposalFromReport(reportId, address, customerName, customerEmail, customerPhone) {
+  const btn = document.getElementById('genProposalBtn');
+  if (!btn) return;
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Generating Proposals...';
+
+  try {
+    // Step 1: Generate tiered pricing from the report
+    const token = localStorage.getItem('auth_token') || '';
+    const pipelineRes = await fetch('/api/crm/proposals/from-report', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({
+        report_id: reportId,
+        property_address: address,
+        customer_name: customerName
+      })
+    });
+
+    const pipelineData = await pipelineRes.json();
+    if (!pipelineData.success) {
+      throw new Error(pipelineData.error || 'Failed to generate pricing');
+    }
+
+    // Step 2: Create or find CRM customer
+    let customerId = null;
+    if (customerEmail || customerName) {
+      const custRes = await fetch('/api/crm/customers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+        body: JSON.stringify({ name: customerName || 'Customer', email: customerEmail || '', phone: customerPhone || '', address: address })
+      });
+      const custData = await custRes.json();
+      customerId = custData.id || custData.customer?.id;
+    }
+
+    if (!customerId) {
+      const listRes = await fetch('/api/crm/customers?search=' + encodeURIComponent(customerEmail || customerName || ''), {
+        headers: { 'Authorization': 'Bearer ' + token }
+      });
+      const listData = await listRes.json();
+      if (listData.customers && listData.customers.length > 0) {
+        customerId = listData.customers[0].id;
+      }
+    }
+
+    // Step 3: Create tiered proposals
+    const tiers = pipelineData.tiers || [];
+    if (tiers.length === 0 && pipelineData.single_proposal) {
+      tiers.push({ label: 'Standard', ...pipelineData.single_proposal });
+    }
+
+    const createRes = await fetch('/api/crm/proposals/create-tiered', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({
+        customer_id: customerId,
+        customer_name: customerName,
+        property_address: address,
+        scope_of_work: 'Complete roof replacement based on RoofReporterAI measurement report #' + reportId,
+        report_id: reportId,
+        measurements: pipelineData.measurements,
+        tiers: tiers
+      })
+    });
+
+    const createData = await createRes.json();
+    if (!createData.success) {
+      throw new Error(createData.error || 'Failed to create proposals');
+    }
+
+    // Step 4: Show success modal
+    const groupLink = createData.public_link;
+    const modal = document.createElement('div');
+    modal.className = 'fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4';
+    modal.innerHTML = '<div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-8">' +
+      '<div class="text-center">' +
+      '<div class="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">' +
+      '<i class="fas fa-check-circle text-green-500 text-3xl"></i></div>' +
+      '<h3 class="text-xl font-bold text-gray-800 mb-2">' + (tiers.length > 1 ? 'Good/Better/Best Proposals Created!' : 'Proposal Created!') + '</h3>' +
+      '<p class="text-gray-500 text-sm mb-6">' + (tiers.length > 1 ? 'Three tiered options ready for your customer' : 'Proposal ready for your customer') + '</p>' +
+      '<div class="space-y-3">' +
+      '<a href="' + groupLink + '" target="_blank" class="block w-full bg-sky-600 hover:bg-sky-700 text-white py-3 rounded-xl font-bold text-sm text-center">' +
+      '<i class="fas fa-external-link-alt mr-2"></i>Preview Proposal</a>' +
+      '<button onclick="copyProposalLink(\'' + window.location.origin + groupLink + '\')" class="block w-full bg-gray-100 hover:bg-gray-200 text-gray-700 py-3 rounded-xl font-bold text-sm">' +
+      '<i class="fas fa-link mr-2"></i>Copy Share Link</button>' +
+      '<button onclick="this.closest(\'.fixed\').remove()" class="block w-full text-gray-400 hover:text-gray-600 py-2 text-sm">Close</button>' +
+      '</div></div></div>';
+    document.body.appendChild(modal);
+
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-check-circle mr-2"></i>Proposals Created';
+    btn.classList.remove('bg-green-600', 'hover:bg-green-700');
+    btn.classList.add('bg-green-500');
+
+  } catch (err) {
+    alert('Error generating proposal: ' + (err.message || 'Unknown error'));
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-file-signature mr-2"></i>Generate Proposal';
+  }
+}
+
+function copyProposalLink(link) {
+  navigator.clipboard.writeText(link).then(function() {
+    var btns = document.querySelectorAll('button');
+    btns.forEach(function(b) {
+      if (b.textContent.includes('Copy Share Link')) {
+        b.innerHTML = '<i class="fas fa-check mr-2"></i>Copied!';
+        setTimeout(function() { b.innerHTML = '<i class="fas fa-link mr-2"></i>Copy Share Link'; }, 2000);
+      }
+    });
+  });
 }

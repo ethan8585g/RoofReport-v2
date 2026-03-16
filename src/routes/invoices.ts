@@ -641,3 +641,66 @@ invoiceRoutes.post('/:id/send-gmail', async (c) => {
     return c.json({ error: 'Failed to send invoice via Gmail', details: err.message }, 500)
   }
 })
+
+// ============================================================
+// GENERATE PAYMENT LINK — Create Stripe checkout for invoice
+// ============================================================
+invoiceRoutes.post('/:id/payment-link', async (c) => {
+  try {
+    const id = c.req.param('id')
+    const invoice = await c.env.DB.prepare(`
+      SELECT i.*, c.email as customer_email, c.name as customer_name, c.stripe_customer_id
+      FROM invoices i JOIN customers c ON c.id = i.customer_id WHERE i.id = ?
+    `).bind(id).first<any>()
+
+    if (!invoice) return c.json({ error: 'Invoice not found' }, 404)
+
+    const stripeKey = (c.env as any).STRIPE_SECRET_KEY
+    const squareToken = (c.env as any).SQUARE_ACCESS_TOKEN
+
+    if (stripeKey) {
+      // Create Stripe checkout session
+      const baseUrl = new URL(c.req.url).origin
+      const params = new URLSearchParams()
+      params.append('mode', 'payment')
+      params.append('success_url', `${baseUrl}/invoice/pay/${id}?status=success`)
+      params.append('cancel_url', `${baseUrl}/invoice/pay/${id}?status=cancelled`)
+      params.append('line_items[0][price_data][currency]', 'cad')
+      params.append('line_items[0][price_data][product_data][name]', `Invoice ${invoice.invoice_number}`)
+      params.append('line_items[0][price_data][unit_amount]', String(Math.round(parseFloat(invoice.total) * 100)))
+      params.append('line_items[0][quantity]', '1')
+      if (invoice.customer_email) params.append('customer_email', invoice.customer_email)
+      params.append('metadata[invoice_id]', String(id))
+      params.append('metadata[invoice_number]', invoice.invoice_number)
+
+      const resp = await fetch('https://api.stripe.com/v1/checkout/sessions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Basic ${btoa(stripeKey + ':')}`,
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: params.toString()
+      })
+      const session: any = await resp.json()
+
+      if (session.error) {
+        return c.json({ error: session.error.message || 'Stripe error' }, 500)
+      }
+
+      // Save payment link
+      const paymentUrl = session.url
+      await c.env.DB.prepare(
+        "UPDATE invoices SET payment_link = ?, updated_at = datetime('now') WHERE id = ?"
+      ).bind(paymentUrl, id).run()
+
+      return c.json({ success: true, payment_url: paymentUrl, provider: 'stripe' })
+    } else if (squareToken) {
+      // Square payment link would go here
+      return c.json({ error: 'Square payment links coming soon. Use Stripe for now.' }, 501)
+    } else {
+      return c.json({ error: 'No payment gateway configured. Add STRIPE_SECRET_KEY in settings.' }, 400)
+    }
+  } catch (err: any) {
+    return c.json({ error: 'Failed to create payment link', details: err.message }, 500)
+  }
+})

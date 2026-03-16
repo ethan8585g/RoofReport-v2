@@ -283,6 +283,9 @@ function renderContent() {
     case 'pricing-engine': root.innerHTML = renderPricingEngineView(); loadPricingPresets(); break;
     case 'invoices': root.innerHTML = renderInvoicesView(); break;
     case 'telephony': root.innerHTML = renderTelephonyView(); break;
+    case 'revenue-pipeline': root.innerHTML = renderRevenuePipelineView(); loadRevenuePipeline(); break;
+    case 'notifications-admin': root.innerHTML = renderNotificationsAdminView(); loadNotifications(); break;
+    case 'webhooks': root.innerHTML = renderWebhooksView(); loadWebhooks(); break;
     case 'paywall': root.innerHTML = renderPaywallView(); loadPaywallStatus(); break;
     default: root.innerHTML = renderUsersView();
   }
@@ -3911,4 +3914,292 @@ async function loadPaywallStatus() {
     var el = document.getElementById('paywall-content');
     if (el) el.innerHTML = '<div class="text-red-500">Failed to load paywall status</div>';
   }
+}
+
+// ============================================================
+// REVENUE PIPELINE — Conversion funnel & deal analytics
+// ============================================================
+function renderRevenuePipelineView() {
+  return `
+    <div class="mb-6">
+      <h2 class="text-2xl font-black text-gray-900"><i class="fas fa-funnel-dollar mr-2 text-green-500"></i>Revenue Pipeline</h2>
+      <p class="text-sm text-gray-500 mt-1">Track proposals through acceptance, invoicing, and payment</p>
+    </div>
+    <div id="pipeline-content">
+      <div class="flex items-center justify-center py-12">
+        <div class="w-8 h-8 border-4 border-green-200 border-t-green-600 rounded-full animate-spin"></div>
+        <span class="ml-3 text-gray-500">Loading pipeline data...</span>
+      </div>
+    </div>`;
+}
+
+async function loadRevenuePipeline() {
+  try {
+    const res = await saFetch('/api/crm/analytics/pipeline');
+    if (!res) return;
+    const d = await res.json();
+    const el = document.getElementById('pipeline-content');
+    if (!el) return;
+
+    const stages = d.stages || [];
+    const p = d.proposals || {};
+    const inv = d.invoices || {};
+    const convRate = d.conversion_rate || 0;
+    const avgDeal = d.avg_deal_size || 0;
+
+    // Funnel visualization
+    const stageNames = { lead: 'Leads', proposal_sent: 'Sent', proposal_viewed: 'Viewed', proposal_accepted: 'Accepted', invoice_sent: 'Invoiced', invoice_paid: 'Paid' };
+    const stageColors = { lead: 'blue', proposal_sent: 'sky', proposal_viewed: 'yellow', proposal_accepted: 'green', invoice_sent: 'purple', invoice_paid: 'emerald' };
+    const stageIcons = { lead: 'fa-user-plus', proposal_sent: 'fa-paper-plane', proposal_viewed: 'fa-eye', proposal_accepted: 'fa-check-circle', invoice_sent: 'fa-file-invoice', invoice_paid: 'fa-money-bill-wave' };
+
+    let funnelHtml = '<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">';
+    const allStages = ['lead', 'proposal_sent', 'proposal_viewed', 'proposal_accepted', 'invoice_sent', 'invoice_paid'];
+    for (const stg of allStages) {
+      const data = stages.find(function(s) { return s.stage === stg; }) || { count: 0, total_amount: 0 };
+      const col = stageColors[stg] || 'gray';
+      funnelHtml += '<div class="bg-white border border-gray-200 rounded-xl p-4 text-center hover:shadow-md transition-shadow">' +
+        '<i class="fas ' + (stageIcons[stg] || 'fa-circle') + ' text-2xl text-' + col + '-500 mb-2"></i>' +
+        '<p class="text-2xl font-black text-gray-800">' + (data.count || 0) + '</p>' +
+        '<p class="text-xs text-gray-500">' + (stageNames[stg] || stg) + '</p>' +
+        '<p class="text-xs font-bold text-' + col + '-600 mt-1">$' + parseFloat(data.total_amount || 0).toLocaleString('en-CA', {minimumFractionDigits: 0, maximumFractionDigits: 0}) + '</p>' +
+        '</div>';
+    }
+    funnelHtml += '</div>';
+
+    // KPI cards
+    let kpiHtml = '<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">' +
+      samc('Conversion Rate', convRate + '%', 'fa-percentage', 'green') +
+      samc('Avg Deal Size', '$' + avgDeal.toLocaleString('en-CA', {minimumFractionDigits: 0}), 'fa-dollar-sign', 'blue') +
+      samc('Revenue (30d)', '$' + parseFloat(inv.paid_amount || 0).toLocaleString('en-CA', {minimumFractionDigits: 0}), 'fa-money-bill-wave', 'emerald') +
+      samc('Outstanding', '$' + parseFloat(inv.outstanding_amount || 0).toLocaleString('en-CA', {minimumFractionDigits: 0}), 'fa-clock', 'amber') +
+      '</div>';
+
+    // Proposal stats
+    let proposalHtml = saSection('Proposal Performance (Last 30 Days)', 'fa-chart-pie', '<div class="grid grid-cols-2 md:grid-cols-4 gap-4">' +
+      '<div class="text-center p-4 bg-blue-50 rounded-xl"><p class="text-2xl font-bold text-blue-700">' + (p.total || 0) + '</p><p class="text-xs text-gray-500">Total Sent</p></div>' +
+      '<div class="text-center p-4 bg-green-50 rounded-xl"><p class="text-2xl font-bold text-green-700">' + (p.accepted || 0) + '</p><p class="text-xs text-gray-500">Accepted</p></div>' +
+      '<div class="text-center p-4 bg-red-50 rounded-xl"><p class="text-2xl font-bold text-red-700">' + (p.declined || 0) + '</p><p class="text-xs text-gray-500">Declined</p></div>' +
+      '<div class="text-center p-4 bg-yellow-50 rounded-xl"><p class="text-2xl font-bold text-yellow-700">' + (p.pending || 0) + '</p><p class="text-xs text-gray-500">Pending</p></div>' +
+      '</div>' +
+      '<div class="mt-4 bg-green-50 border border-green-200 rounded-lg p-4 text-center">' +
+      '<p class="text-sm text-gray-600">Accepted Revenue</p>' +
+      '<p class="text-3xl font-black text-green-700">$' + parseFloat(p.accepted_amount || 0).toLocaleString('en-CA', {minimumFractionDigits: 2}) + ' CAD</p>' +
+      '</div>');
+
+    el.innerHTML = funnelHtml + kpiHtml + proposalHtml;
+  } catch (e) {
+    var el = document.getElementById('pipeline-content');
+    if (el) el.innerHTML = '<div class="text-center py-8 text-gray-500"><i class="fas fa-info-circle mr-1"></i>No pipeline data yet. Send your first proposal to start tracking.</div>';
+  }
+}
+
+// ============================================================
+// NOTIFICATIONS ADMIN — View & manage notifications
+// ============================================================
+function renderNotificationsAdminView() {
+  return `
+    <div class="mb-6 flex items-center justify-between">
+      <div>
+        <h2 class="text-2xl font-black text-gray-900"><i class="fas fa-bell mr-2 text-amber-500"></i>Notifications</h2>
+        <p class="text-sm text-gray-500 mt-1">System alerts, proposal activity, and payment notifications</p>
+      </div>
+      <button onclick="markAllNotificationsRead()" class="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium text-gray-700">
+        <i class="fas fa-check-double mr-1"></i>Mark All Read
+      </button>
+    </div>
+    <div id="notifications-content">
+      <div class="flex items-center justify-center py-12">
+        <div class="w-8 h-8 border-4 border-amber-200 border-t-amber-600 rounded-full animate-spin"></div>
+        <span class="ml-3 text-gray-500">Loading notifications...</span>
+      </div>
+    </div>`;
+}
+
+async function loadNotifications() {
+  try {
+    const res = await saFetch('/api/crm/notifications');
+    if (!res) return;
+    const d = await res.json();
+    const el = document.getElementById('notifications-content');
+    if (!el) return;
+
+    const notifs = d.notifications || [];
+    const unread = d.unread_count || 0;
+
+    if (notifs.length === 0) {
+      el.innerHTML = '<div class="text-center py-12 bg-white rounded-xl border border-gray-200"><i class="fas fa-bell-slash text-gray-300 text-4xl mb-3"></i><p class="text-gray-500">No notifications yet</p></div>';
+      return;
+    }
+
+    const typeIcons = {
+      proposal_accepted: 'fa-check-circle text-green-500',
+      proposal_declined: 'fa-times-circle text-red-500',
+      invoice_paid: 'fa-money-bill-wave text-emerald-500',
+      lead_captured: 'fa-user-plus text-blue-500',
+      call_answered: 'fa-phone text-teal-500',
+      followup_due: 'fa-clock text-amber-500'
+    };
+
+    let html = '<div class="mb-4">' + samc('Unread', unread, 'fa-bell', 'amber') + '</div>';
+    html += '<div class="space-y-2">';
+    for (const n of notifs) {
+      const icon = typeIcons[n.type] || 'fa-info-circle text-gray-400';
+      const timeAgo = getTimeAgo(n.created_at);
+      html += '<div class="bg-white border border-gray-200 rounded-xl p-4 flex items-start gap-4 ' + (n.is_read ? 'opacity-60' : '') + ' hover:shadow-sm transition-shadow">' +
+        '<div class="w-10 h-10 rounded-full bg-gray-50 flex items-center justify-center flex-shrink-0"><i class="fas ' + icon + '"></i></div>' +
+        '<div class="flex-1 min-w-0">' +
+        '<p class="font-semibold text-gray-800 text-sm">' + (n.title || '') + '</p>' +
+        '<p class="text-gray-500 text-xs mt-0.5">' + (n.message || '') + '</p>' +
+        '<p class="text-gray-400 text-[10px] mt-1">' + timeAgo + '</p>' +
+        '</div>' +
+        (!n.is_read ? '<button onclick="markNotificationRead(' + n.id + ')" class="text-xs text-gray-400 hover:text-gray-600 flex-shrink-0"><i class="fas fa-check"></i></button>' : '') +
+        '</div>';
+    }
+    html += '</div>';
+    el.innerHTML = html;
+  } catch (e) {
+    var el = document.getElementById('notifications-content');
+    if (el) el.innerHTML = '<div class="text-red-500">Failed to load notifications</div>';
+  }
+}
+
+async function markNotificationRead(id) {
+  await saFetch('/api/crm/notifications/' + id + '/read', { method: 'POST' });
+  loadNotifications();
+}
+
+async function markAllNotificationsRead() {
+  await saFetch('/api/crm/notifications/all/read', { method: 'POST' });
+  loadNotifications();
+}
+
+function getTimeAgo(dateStr) {
+  if (!dateStr) return '';
+  var diff = Date.now() - new Date(dateStr).getTime();
+  var mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'Just now';
+  if (mins < 60) return mins + 'm ago';
+  var hrs = Math.floor(mins / 60);
+  if (hrs < 24) return hrs + 'h ago';
+  var days = Math.floor(hrs / 24);
+  if (days < 7) return days + 'd ago';
+  return new Date(dateStr).toLocaleDateString('en-CA');
+}
+
+// ============================================================
+// WEBHOOKS MANAGEMENT — Configure webhook endpoints
+// ============================================================
+function renderWebhooksView() {
+  return `
+    <div class="mb-6 flex items-center justify-between">
+      <div>
+        <h2 class="text-2xl font-black text-gray-900"><i class="fas fa-plug mr-2 text-purple-500"></i>Webhooks</h2>
+        <p class="text-sm text-gray-500 mt-1">Send real-time event notifications to external services (Slack, Zapier, etc.)</p>
+      </div>
+      <button onclick="showAddWebhookForm()" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-medium">
+        <i class="fas fa-plus mr-1"></i>Add Webhook
+      </button>
+    </div>
+    <div id="webhook-form" class="hidden mb-6 bg-white border border-gray-200 rounded-xl p-6">
+      <h3 class="font-bold text-gray-800 mb-4">New Webhook</h3>
+      <div class="grid md:grid-cols-2 gap-4 mb-4">
+        <div>
+          <label class="block text-xs font-semibold text-gray-500 mb-1">Event Type</label>
+          <select id="webhook-event" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+            <option value="proposal_accepted">Proposal Accepted</option>
+            <option value="proposal_declined">Proposal Declined</option>
+            <option value="invoice_paid">Invoice Paid</option>
+            <option value="lead_captured">Lead Captured</option>
+            <option value="call_answered">Call Answered</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-gray-500 mb-1">URL</label>
+          <input type="url" id="webhook-url" placeholder="https://hooks.slack.com/services/..." class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+        </div>
+      </div>
+      <div class="mb-4">
+        <label class="block text-xs font-semibold text-gray-500 mb-1">Secret (optional)</label>
+        <input type="text" id="webhook-secret" placeholder="Signing secret for verification" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+      </div>
+      <div class="flex gap-2">
+        <button onclick="saveWebhook()" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-medium">Save Webhook</button>
+        <button onclick="document.getElementById('webhook-form').classList.add('hidden')" class="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm font-medium">Cancel</button>
+      </div>
+    </div>
+    <div id="webhooks-content">
+      <div class="flex items-center justify-center py-12">
+        <div class="w-8 h-8 border-4 border-purple-200 border-t-purple-600 rounded-full animate-spin"></div>
+        <span class="ml-3 text-gray-500">Loading webhooks...</span>
+      </div>
+    </div>`;
+}
+
+function showAddWebhookForm() {
+  document.getElementById('webhook-form').classList.remove('hidden');
+}
+
+async function loadWebhooks() {
+  try {
+    const res = await saFetch('/api/crm/webhooks');
+    if (!res) return;
+    const d = await res.json();
+    const el = document.getElementById('webhooks-content');
+    if (!el) return;
+
+    const hooks = d.webhooks || [];
+    if (hooks.length === 0) {
+      el.innerHTML = '<div class="text-center py-12 bg-white rounded-xl border border-gray-200"><i class="fas fa-plug text-gray-300 text-4xl mb-3"></i><p class="text-gray-500">No webhooks configured</p><p class="text-gray-400 text-xs mt-1">Add a webhook to receive real-time notifications</p></div>';
+      return;
+    }
+
+    var html = '<div class="space-y-3">';
+    for (var h of hooks) {
+      var eventLabel = { proposal_accepted: 'Proposal Accepted', proposal_declined: 'Proposal Declined', invoice_paid: 'Invoice Paid', lead_captured: 'Lead Captured', call_answered: 'Call Answered' }[h.event_type] || h.event_type;
+      html += '<div class="bg-white border border-gray-200 rounded-xl p-4 flex items-center justify-between">' +
+        '<div class="flex items-center gap-3">' +
+        '<div class="w-10 h-10 rounded-full bg-purple-50 flex items-center justify-center"><i class="fas fa-plug text-purple-500"></i></div>' +
+        '<div><p class="font-semibold text-gray-800 text-sm">' + eventLabel + '</p><p class="text-gray-400 text-xs truncate max-w-xs">' + h.url + '</p></div>' +
+        '</div>' +
+        '<div class="flex items-center gap-2">' +
+        '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold ' + (h.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500') + '">' + (h.is_active ? 'ACTIVE' : 'INACTIVE') + '</span>' +
+        '<button onclick="deleteWebhook(' + h.id + ')" class="text-red-400 hover:text-red-600 text-xs"><i class="fas fa-trash"></i></button>' +
+        '</div></div>';
+    }
+    html += '</div>';
+    el.innerHTML = html;
+  } catch (e) {
+    var el = document.getElementById('webhooks-content');
+    if (el) el.innerHTML = '<div class="text-red-500">Failed to load webhooks</div>';
+  }
+}
+
+async function saveWebhook() {
+  var event_type = document.getElementById('webhook-event').value;
+  var url = document.getElementById('webhook-url').value;
+  var secret = document.getElementById('webhook-secret').value;
+  if (!url) { alert('URL is required'); return; }
+
+  try {
+    var res = await saFetch('/api/crm/webhooks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event_type: event_type, url: url, secret: secret })
+    });
+    var data = await res.json();
+    if (data.success) {
+      document.getElementById('webhook-form').classList.add('hidden');
+      document.getElementById('webhook-url').value = '';
+      document.getElementById('webhook-secret').value = '';
+      loadWebhooks();
+    } else {
+      alert(data.error || 'Failed to save');
+    }
+  } catch (e) { alert('Error saving webhook'); }
+}
+
+async function deleteWebhook(id) {
+  if (!confirm('Delete this webhook?')) return;
+  await saFetch('/api/crm/webhooks/' + id, { method: 'DELETE' });
+  loadWebhooks();
 }
