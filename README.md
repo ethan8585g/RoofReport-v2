@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Name**: RoofReporterAI
-- **Version**: 9.0 (Secretary AI Phone Onboarding + 3D Visualizer + Tiered Proposals)
+- **Version**: 9.1 (Onboarding Wizard + Subscription Tiers)
 - **Domain**: www.roofreporterai.com
 - **Production**: https://roofing-measurement-tool.pages.dev
 - **GitHub**: https://github.com/ethan8585g/roofreporter-ai-good-copy
@@ -133,7 +133,9 @@ Homeowner calls roofer → Roofer's Personal Cell
 | Route | Description |
 |-------|-------------|
 | `/` | Marketing landing page |
-| `/login` | Login/register |
+| `/signup` | **NEW** 3-step onboarding wizard |
+| `/login` | Admin login |
+| `/customer/login` | Customer login/register |
 | `/admin` | Admin dashboard |
 | `/customer/dashboard` | Customer portal (8-tile hub) |
 | `/customer/reports` | Roof report history |
@@ -158,6 +160,8 @@ Homeowner calls roofer → Roofer's Personal Cell
 | POST | `/api/crm/proposals/create-tiered` | Create Good/Better/Best proposals |
 | POST | `/api/crm/proposals/respond/:token` | Accept/decline proposal |
 | POST | `/api/square/create-payment-link` | Generate Square payment link |
+| POST | `/api/customer/validate-email` | **NEW** Real-time email availability check |
+| POST | `/api/customer/set-tier` | **NEW** Set subscription tier + trial period |
 | POST | `/api/admin/superadmin/onboarding/create` | Create customer + Secretary AI |
 | POST | `/api/admin/superadmin/service-invoices/create` | Create cold-call invoice |
 | GET | `/api/admin/superadmin/call-center/stats` | Call center metrics |
@@ -329,7 +333,20 @@ Homeowner calls roofer → Roofer's Personal Cell
 
 ## Version History
 
-### v9.0 (Current — 2026-03-16)
+### v9.1 (Current — 2026-03-16)
+- **Onboarding Wizard** — 3-step guided signup at `/signup` (Phase 1, Item 1)
+  - Step 1: Business Info (name, company, email verification, phone, city/province, password)
+  - Step 2: Plan Selection (Starter $49/mo, Professional $149/mo, Enterprise $499/mo)
+  - Step 3: Confirmation & 14-day free trial activation
+- Subscription tier system (Starter / Professional / Enterprise)
+- Feature comparison table across all tiers
+- Password strength indicator with visual feedback
+- Auto-redirect to dashboard after activation
+- Landing page CTAs now link to `/signup`
+- Migration 0044: subscription_tier, trial_ends_at, monthly_report_limit, referral_code columns
+- New API: POST /api/customer/validate-email, POST /api/customer/set-tier
+
+### v9.0 (2026-03-16)
 - Secretary AI phone onboarding (personal phone + agent phone separation)
 - Pre-configured LiveKit number for dev@reusecanada.ca (+14849649758)
 - Twilio/Vonage/Telnyx guidance for new customers
