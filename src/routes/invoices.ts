@@ -643,63 +643,72 @@ invoiceRoutes.post('/:id/send-gmail', async (c) => {
 })
 
 // ============================================================
-// GENERATE PAYMENT LINK — Create Stripe checkout for invoice
+// GENERATE PAYMENT LINK — Create Square checkout for invoice
 // ============================================================
 invoiceRoutes.post('/:id/payment-link', async (c) => {
   try {
     const id = c.req.param('id')
     const invoice = await c.env.DB.prepare(`
-      SELECT i.*, c.email as customer_email, c.name as customer_name, c.stripe_customer_id
+      SELECT i.*, c.email as customer_email, c.name as customer_name
       FROM invoices i JOIN customers c ON c.id = i.customer_id WHERE i.id = ?
     `).bind(id).first<any>()
 
     if (!invoice) return c.json({ error: 'Invoice not found' }, 404)
 
-    const stripeKey = (c.env as any).STRIPE_SECRET_KEY
     const squareToken = (c.env as any).SQUARE_ACCESS_TOKEN
+    const locationId = (c.env as any).SQUARE_LOCATION_ID
 
-    if (stripeKey) {
-      // Create Stripe checkout session
-      const baseUrl = new URL(c.req.url).origin
-      const params = new URLSearchParams()
-      params.append('mode', 'payment')
-      params.append('success_url', `${baseUrl}/invoice/pay/${id}?status=success`)
-      params.append('cancel_url', `${baseUrl}/invoice/pay/${id}?status=cancelled`)
-      params.append('line_items[0][price_data][currency]', 'cad')
-      params.append('line_items[0][price_data][product_data][name]', `Invoice ${invoice.invoice_number}`)
-      params.append('line_items[0][price_data][unit_amount]', String(Math.round(parseFloat(invoice.total) * 100)))
-      params.append('line_items[0][quantity]', '1')
-      if (invoice.customer_email) params.append('customer_email', invoice.customer_email)
-      params.append('metadata[invoice_id]', String(id))
-      params.append('metadata[invoice_number]', invoice.invoice_number)
-
-      const resp = await fetch('https://api.stripe.com/v1/checkout/sessions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Basic ${btoa(stripeKey + ':')}`,
-          'Content-Type': 'application/x-www-form-urlencoded'
-        },
-        body: params.toString()
-      })
-      const session: any = await resp.json()
-
-      if (session.error) {
-        return c.json({ error: session.error.message || 'Stripe error' }, 500)
-      }
-
-      // Save payment link
-      const paymentUrl = session.url
-      await c.env.DB.prepare(
-        "UPDATE invoices SET payment_link = ?, updated_at = datetime('now') WHERE id = ?"
-      ).bind(paymentUrl, id).run()
-
-      return c.json({ success: true, payment_url: paymentUrl, provider: 'stripe' })
-    } else if (squareToken) {
-      // Square payment link would go here
-      return c.json({ error: 'Square payment links coming soon. Use Stripe for now.' }, 501)
-    } else {
-      return c.json({ error: 'No payment gateway configured. Add STRIPE_SECRET_KEY in settings.' }, 400)
+    if (!squareToken) {
+      return c.json({ error: 'Square payment not configured. Add SQUARE_ACCESS_TOKEN in settings.' }, 400)
     }
+
+    const baseUrl = new URL(c.req.url).origin
+    const idempotencyKey = `inv-${id}-${Date.now()}`
+    const amountCents = Math.round(parseFloat(invoice.total) * 100)
+
+    // Create Square Payment Link via Checkout API
+    const resp = await fetch('https://connect.squareup.com/v2/online-checkout/payment-links', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${squareToken}`,
+        'Square-Version': '2025-01-23',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        idempotency_key: idempotencyKey,
+        quick_pay: {
+          name: `Invoice ${invoice.invoice_number}`,
+          price_money: { amount: amountCents, currency: 'CAD' },
+          location_id: locationId || undefined
+        },
+        checkout_options: {
+          redirect_url: `${baseUrl}/invoice/pay/${id}?status=success`,
+          ask_for_shipping_address: false
+        },
+        pre_populated_data: {
+          buyer_email: invoice.customer_email || undefined
+        },
+        payment_note: `Payment for invoice ${invoice.invoice_number}`
+      })
+    })
+
+    const data: any = await resp.json()
+
+    if (data.errors) {
+      return c.json({ error: data.errors[0]?.detail || 'Square payment link error' }, 500)
+    }
+
+    const paymentUrl = data.payment_link?.url || data.payment_link?.long_url
+    if (!paymentUrl) {
+      return c.json({ error: 'Failed to generate payment link' }, 500)
+    }
+
+    // Save payment link
+    await c.env.DB.prepare(
+      "UPDATE invoices SET payment_link = ?, updated_at = datetime('now') WHERE id = ?"
+    ).bind(paymentUrl, id).run()
+
+    return c.json({ success: true, payment_url: paymentUrl, provider: 'square' })
   } catch (err: any) {
     return c.json({ error: 'Failed to create payment link', details: err.message }, 500)
   }

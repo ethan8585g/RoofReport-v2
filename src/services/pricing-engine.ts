@@ -99,10 +99,11 @@ export const DEFAULT_PRESETS: RoofPresetCosts = {
   tax_rate: 0.05,
 }
 
-// Good / Better / Best tier presets
+// Good / Better / Best tier presets — 3 shingle quality grades
 export const TIER_PRESETS = {
   good: {
     name: 'Good — 25yr 3-Tab Shingles',
+    description: 'Standard 3-tab shingles with 25-year manufacturer warranty. Economical, proven protection for budget-conscious homeowners.',
     shingles_per_square: 110.00,
     underlayment_per_square: 18.00,
     labor_per_square: 160.00,
@@ -110,6 +111,7 @@ export const TIER_PRESETS = {
   },
   better: {
     name: 'Better — 30yr Architectural',
+    description: 'Dimensional architectural shingles with 30-year warranty. Enhanced wind resistance (130 km/h), thicker profile, superior curb appeal.',
     shingles_per_square: 145.00,
     underlayment_per_square: 25.00,
     labor_per_square: 180.00,
@@ -117,6 +119,7 @@ export const TIER_PRESETS = {
   },
   best: {
     name: 'Best — 50yr Luxury / Designer',
+    description: 'Premium designer shingles with 50-year limited lifetime warranty. Impact-resistant (Class 4), best-in-class wind rating (210 km/h), ice & water shield included.',
     shingles_per_square: 225.00,
     underlayment_per_square: 35.00,
     labor_per_square: 210.00,

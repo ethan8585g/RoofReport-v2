@@ -108,6 +108,7 @@ gtag('config','${ga4Id}',{
     if (p.startsWith('/customer/order')) return 'Order';
     if (p.startsWith('/customer/')) return 'CRM';
     if (p.startsWith('/portal')) return 'Portal';
+    if (p.startsWith('/service-invoice')) return 'ServiceInvoice';
     if (p.startsWith('/blog')) return 'Blog';
     if (p.startsWith('/pricing')) return 'Pricing';
     if (p.startsWith('/lander')) return 'Lander';
@@ -622,11 +623,11 @@ app.get('/proposal/compare/:groupId', async (c) => {
     const anyDeclined = proposals.some((p: any) => p.status === 'declined')
     const isResponded = anyAccepted || anyDeclined
 
-    // Tier badge config
+    // Tier badge config — 3 qualities of roofing shingles
     const tierConfig: Record<string, any> = {
-      'Good': { icon: 'fa-star', color: 'blue', bg: 'bg-blue-50', border: 'border-blue-200', badge: 'bg-blue-100 text-blue-700', gradient: 'from-blue-500 to-blue-600', desc: 'Quality roofing at an affordable price. Durable 25-year architectural shingles with standard installation.' },
-      'Better': { icon: 'fa-medal', color: 'purple', bg: 'bg-purple-50', border: 'border-purple-200', badge: 'bg-purple-100 text-purple-700', gradient: 'from-purple-500 to-purple-600', popular: true, desc: 'Our most popular package. Premium 30-year shingles with enhanced underlayment and superior craftsmanship.' },
-      'Best': { icon: 'fa-crown', color: 'amber', bg: 'bg-amber-50', border: 'border-amber-200', badge: 'bg-amber-100 text-amber-700', gradient: 'from-amber-500 to-amber-600', desc: 'Top-tier protection. Designer 50-year shingles with ice & water shield, lifetime warranty materials.' }
+      'Good': { icon: 'fa-star', color: 'blue', bg: 'bg-blue-50', border: 'border-blue-200', badge: 'bg-blue-100 text-blue-700', gradient: 'from-blue-500 to-blue-600', desc: '25-Year 3-Tab Shingles — Standard flat-profile shingles. Proven, economical protection with manufacturer warranty.' },
+      'Better': { icon: 'fa-medal', color: 'purple', bg: 'bg-purple-50', border: 'border-purple-200', badge: 'bg-purple-100 text-purple-700', gradient: 'from-purple-500 to-purple-600', popular: true, desc: '30-Year Architectural — Dimensional laminate shingles with 130 km/h wind rating, thicker profile, and enhanced curb appeal.' },
+      'Best': { icon: 'fa-crown', color: 'amber', bg: 'bg-amber-50', border: 'border-amber-200', badge: 'bg-amber-100 text-amber-700', gradient: 'from-amber-500 to-amber-600', desc: '50-Year Designer / Luxury — Class 4 impact-resistant, 210 km/h wind rating, ice & water shield, limited lifetime warranty.' }
     }
 
     // Build tier cards HTML
@@ -1312,7 +1313,7 @@ app.get('/invoice/pay/:id', async (c) => {
           <div class="flex justify-between text-sm"><span class="text-gray-500">Tax (${invoice.tax_rate || 5}% GST)</span><span>$${parseFloat(invoice.tax_amount || 0).toFixed(2)}</span></div>
           <div class="flex justify-between text-xl font-bold pt-2 border-t border-gray-200"><span class="text-sky-700">Total</span><span class="text-sky-700">$${parseFloat(invoice.total).toFixed(2)} CAD</span></div>
         </div>
-        ${!isPaid ? `<div class="mt-8 text-center"><button onclick="payNow()" id="payBtn" class="bg-green-600 hover:bg-green-700 text-white px-10 py-4 rounded-xl font-bold text-lg shadow-lg transition-all hover:shadow-xl"><i class="fas fa-credit-card mr-2"></i>Pay Now — $${parseFloat(invoice.total).toFixed(2)} CAD</button><p class="text-xs text-gray-400 mt-2"><i class="fas fa-lock mr-1"></i>Secured by Stripe</p></div>` : ''}
+        ${!isPaid ? `<div class="mt-8 text-center"><button onclick="payNow()" id="payBtn" class="bg-green-600 hover:bg-green-700 text-white px-10 py-4 rounded-xl font-bold text-lg shadow-lg transition-all hover:shadow-xl"><i class="fas fa-credit-card mr-2"></i>Pay Now — $${parseFloat(invoice.total).toFixed(2)} CAD</button><p class="text-xs text-gray-400 mt-2"><i class="fas fa-lock mr-1"></i>Secured by Square</p></div>` : ''}
       </div>
       ${invoice.notes ? `<div class="px-8 py-4 bg-gray-50 border-t"><p class="text-xs text-gray-400 uppercase mb-1">Notes</p><p class="text-sm text-gray-600">${invoice.notes}</p></div>` : ''}
     </div>
@@ -1461,6 +1462,56 @@ app.get('/privacy', (c) => {
   </div>
 </body>
 </html>`)
+})
+
+// ============================================================
+// SERVICE INVOICE — Public payment page for cold-call invoices
+// ============================================================
+app.get('/service-invoice/:id', async (c) => {
+  try {
+    const id = c.req.param('id')
+    const status = c.req.query('status') || ''
+    const invoice = await c.env.DB.prepare(
+      'SELECT * FROM service_invoices WHERE id = ?'
+    ).bind(id).first<any>()
+    if (!invoice) return c.html('<html><body><h1>Invoice Not Found</h1></body></html>', 404)
+    const isPaid = invoice.status === 'paid'
+    const items = JSON.parse(invoice.items || '[]')
+    const itemsHtml = items.map((it: any) => `<tr class="border-b border-gray-100"><td class="py-2 px-2 text-gray-700 text-sm">${it.description}</td><td class="py-2 px-2 text-right text-gray-700 text-sm">$${parseFloat(it.price || it.amount || 0).toFixed(2)}</td></tr>`).join('')
+    return c.html(`<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Service Invoice ${invoice.invoice_number}</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
+</head><body class="bg-gray-100 min-h-screen py-8 px-4">
+<div class="max-w-3xl mx-auto">
+  ${status === 'success' ? '<div class="bg-green-50 border border-green-200 rounded-xl p-6 mb-6 text-center"><i class="fas fa-check-circle text-green-500 text-4xl mb-2"></i><h2 class="text-xl font-bold text-green-800">Payment Successful!</h2><p class="text-green-600 text-sm mt-1">Thank you for your payment.</p></div>' : ''}
+  <div class="bg-white rounded-2xl shadow-xl overflow-hidden">
+    <div class="bg-gradient-to-r from-amber-600 to-amber-500 px-8 py-6 text-white">
+      <div class="flex justify-between items-start">
+        <div><h1 class="text-2xl font-bold">SERVICE INVOICE</h1><p class="text-amber-100 text-sm mt-1">#${invoice.invoice_number}</p></div>
+        <div class="text-right"><span class="inline-block px-3 py-1 rounded-full text-xs font-bold ${isPaid ? 'bg-green-500' : 'bg-white/20'}">${isPaid ? 'PAID' : (invoice.status || 'DRAFT').toUpperCase()}</span><p class="text-amber-100 text-xs mt-2">Due: ${invoice.due_date || 'N/A'}</p></div>
+      </div>
+    </div>
+    <div class="px-8 py-6">
+      <div class="grid md:grid-cols-2 gap-4 mb-6">
+        <div><p class="text-xs text-gray-400 uppercase mb-1">Bill To</p><p class="font-bold text-gray-800">${invoice.customer_name || 'Customer'}</p><p class="text-sm text-gray-500">${invoice.customer_email || ''}</p></div>
+        <div class="text-right"><p class="text-xs text-gray-400 uppercase mb-1">Total Due</p><p class="text-3xl font-black text-amber-600">$${parseFloat(invoice.total).toFixed(2)}</p><p class="text-xs text-gray-400">CAD</p></div>
+      </div>
+      ${itemsHtml ? `<table class="w-full text-sm mb-6"><thead><tr class="border-b-2 border-gray-200"><th class="text-left py-2 px-2 text-gray-500">Description</th><th class="text-right py-2 px-2 text-gray-500">Amount</th></tr></thead><tbody>${itemsHtml}</tbody></table>` : ''}
+      <div class="border-t-2 border-gray-200 pt-4 space-y-2">
+        <div class="flex justify-between text-sm"><span class="text-gray-500">Subtotal</span><span>$${parseFloat(invoice.subtotal || 0).toFixed(2)}</span></div>
+        <div class="flex justify-between text-sm"><span class="text-gray-500">GST (${invoice.tax_rate || 5}%)</span><span>$${parseFloat(invoice.tax_amount || 0).toFixed(2)}</span></div>
+        <div class="flex justify-between text-xl font-bold pt-2 border-t border-gray-200"><span class="text-amber-600">Total</span><span class="text-amber-600">$${parseFloat(invoice.total).toFixed(2)} CAD</span></div>
+      </div>
+      ${!isPaid && invoice.payment_link ? `<div class="mt-8 text-center"><a href="${invoice.payment_link}" class="inline-block bg-green-600 hover:bg-green-700 text-white px-10 py-4 rounded-xl font-bold text-lg shadow-lg transition-all hover:shadow-xl"><i class="fas fa-credit-card mr-2"></i>Pay Now — $${parseFloat(invoice.total).toFixed(2)} CAD</a><p class="text-xs text-gray-400 mt-2"><i class="fas fa-lock mr-1"></i>Secured by Square</p></div>` : ''}
+    </div>
+    ${invoice.notes ? `<div class="px-8 py-4 bg-gray-50 border-t"><p class="text-xs text-gray-400 uppercase mb-1">Notes</p><p class="text-sm text-gray-600">${invoice.notes}</p></div>` : ''}
+  </div>
+  <p class="text-center text-xs text-gray-400 mt-6"><a href="/">RoofReporterAI</a> · Roofer Secretary AI Service</p>
+</div>
+</body></html>`)
+  } catch { return c.html('<h1>Error</h1>', 500) }
 })
 
 // ============================================================
@@ -1895,6 +1946,20 @@ function getSuperAdminDashboardHTML() {
         <div class="sa-nav-item rounded-xl px-4 py-3 flex items-center gap-3 text-gray-400" onclick="saSetView('telephony', this)">
           <i class="fas fa-phone-alt w-5 text-center"></i>
           <span class="label text-sm font-medium">Telephony / LiveKit</span>
+        </div>
+        <div class="border-t border-gray-800 my-3"></div>
+        <p class="px-4 py-1 text-[10px] text-gray-600 uppercase tracking-wider font-bold">Customer Ops</p>
+        <div class="sa-nav-item rounded-xl px-4 py-3 flex items-center gap-3 text-gray-400" onclick="saSetView('customer-onboarding', this)">
+          <i class="fas fa-user-cog w-5 text-center"></i>
+          <span class="label text-sm font-medium">Customer Onboarding</span>
+        </div>
+        <div class="sa-nav-item rounded-xl px-4 py-3 flex items-center gap-3 text-gray-400" onclick="saSetView('service-invoices', this)">
+          <i class="fas fa-file-invoice w-5 text-center"></i>
+          <span class="label text-sm font-medium">Cold Call Invoices</span>
+        </div>
+        <div class="sa-nav-item rounded-xl px-4 py-3 flex items-center gap-3 text-gray-400" onclick="saSetView('call-center-manage', this)">
+          <i class="fas fa-headset w-5 text-center"></i>
+          <span class="label text-sm font-medium">Call Center Mgmt</span>
         </div>
         <div class="border-t border-gray-800 my-3"></div>
         <div class="sa-nav-item rounded-xl px-4 py-3 flex items-center gap-3 text-gray-400" onclick="saSetView('revenue-pipeline', this)">

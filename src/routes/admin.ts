@@ -1696,3 +1696,310 @@ adminRoutes.post('/superadmin/telephony-sip-test', async (c) => {
   // For now, verify the config exists
   return c.json({ success: true, message: 'SIP configuration verified. Full connectivity test requires an active SIP trunk.' })
 })
+
+// ============================================================
+// CUSTOMER ONBOARDING — Create accounts + set up Secretary AI
+// ============================================================
+adminRoutes.get('/superadmin/onboarding/list', async (c) => {
+  try {
+    const { results } = await c.env.DB.prepare(`
+      SELECT oc.*, c.name as account_name, c.email as account_email
+      FROM onboarded_customers oc
+      LEFT JOIN customers c ON c.id = oc.customer_id
+      ORDER BY oc.created_at DESC LIMIT 100
+    `).all<any>()
+    return c.json({ customers: results || [] })
+  } catch {
+    return c.json({ customers: [] })
+  }
+})
+
+adminRoutes.post('/superadmin/onboarding/create', async (c) => {
+  const body = await c.req.json()
+  const { business_name, contact_name, email, phone, password, secretary_phone_number, call_forwarding_number, secretary_mode, notes } = body
+
+  if (!email || !password || !contact_name) {
+    return c.json({ error: 'Email, password, and contact name are required' }, 400)
+  }
+
+  try {
+    // Check if account already exists
+    const existing = await c.env.DB.prepare('SELECT id FROM customers WHERE email = ?').bind(email).first<any>()
+    if (existing) {
+      return c.json({ error: 'An account with this email already exists', customer_id: existing.id }, 400)
+    }
+
+    // Create the customer account (roofer user)
+    const { createHash } = await import('node:crypto')
+    const passwordHash = createHash ? undefined : password // Workers don't have crypto.createHash
+    // Use Web Crypto for password hashing
+    const encoder = new TextEncoder()
+    const data = encoder.encode(password + 'roofreporter_salt_2024')
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data)
+    const hashArray = Array.from(new Uint8Array(hashBuffer))
+    const hashedPassword = hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
+
+    const result = await c.env.DB.prepare(`
+      INSERT INTO customers (name, email, password, phone, role, tier, credits, is_active, created_at)
+      VALUES (?, ?, ?, ?, 'admin', 'pro', 5, 1, datetime('now'))
+    `).bind(contact_name, email, hashedPassword, phone || '').run()
+
+    const customerId = result.meta.last_row_id as number
+
+    // Set up branding
+    if (business_name) {
+      await c.env.DB.prepare(
+        "UPDATE customers SET brand_business_name = ? WHERE id = ?"
+      ).bind(business_name, customerId).run()
+    }
+
+    // Create secretary subscription entry if phone provided
+    let secretarySetup = false
+    if (secretary_phone_number) {
+      try {
+        await c.env.DB.prepare(`
+          INSERT INTO secretary_subscriptions (customer_id, status, phone_number, mode, created_at)
+          VALUES (?, 'active', ?, ?, datetime('now'))
+        `).bind(customerId, secretary_phone_number, secretary_mode || 'receptionist').run()
+
+        // Save secretary config
+        await c.env.DB.prepare(`
+          INSERT INTO secretary_config (customer_id, phone_number, forwarding_number, mode, greeting_text, is_active, created_at)
+          VALUES (?, ?, ?, ?, ?, 1, datetime('now'))
+          ON CONFLICT(customer_id) DO UPDATE SET phone_number = excluded.phone_number, forwarding_number = excluded.forwarding_number, mode = excluded.mode, is_active = 1, updated_at = datetime('now')
+        `).bind(customerId, secretary_phone_number, call_forwarding_number || '', secretary_mode || 'receptionist',
+          `Thank you for calling ${business_name || contact_name}. Our AI receptionist is here to help. How may I direct your call?`
+        ).run()
+
+        secretarySetup = true
+      } catch (secErr: any) {
+        console.error('[Onboarding] Secretary setup error:', secErr.message)
+      }
+    }
+
+    // Track onboarding record
+    await c.env.DB.prepare(`
+      INSERT INTO onboarded_customers (customer_id, business_name, contact_name, email, phone, secretary_enabled, secretary_phone_number, secretary_mode, call_forwarding_number, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(customerId, business_name || '', contact_name, email, phone || '',
+      secretarySetup ? 1 : 0, secretary_phone_number || '', secretary_mode || 'receptionist',
+      call_forwarding_number || '', notes || ''
+    ).run()
+
+    // Create notification for the new customer
+    await c.env.DB.prepare(
+      "INSERT INTO notifications (owner_id, type, title, message, link) VALUES (?, 'welcome', ?, ?, '/settings')"
+    ).bind(customerId,
+      'Welcome to RoofReporterAI!',
+      `Your account has been set up by our team. ${secretarySetup ? 'Your Roofer Secretary AI is active and ready to take calls!' : 'Log in to explore your dashboard.'}`
+    ).run()
+
+    return c.json({
+      success: true,
+      customer_id: customerId,
+      email,
+      secretary_setup: secretarySetup,
+      login_url: '/login',
+      message: `Account created for ${contact_name}. ${secretarySetup ? 'Secretary AI is active on ' + secretary_phone_number : 'Secretary can be set up later.'}`
+    })
+  } catch (err: any) {
+    return c.json({ error: 'Failed to create account: ' + err.message }, 500)
+  }
+})
+
+// Toggle secretary AI on/off for onboarded customer
+adminRoutes.post('/superadmin/onboarding/:id/toggle-secretary', async (c) => {
+  const id = c.req.param('id')
+  const { enabled } = await c.req.json()
+  try {
+    await c.env.DB.prepare(
+      "UPDATE onboarded_customers SET secretary_enabled = ?, updated_at = datetime('now') WHERE id = ?"
+    ).bind(enabled ? 1 : 0, id).run()
+    return c.json({ success: true })
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500)
+  }
+})
+
+// ============================================================
+// SERVICE INVOICES — Cold call invoicing (Secretary AI subscriptions, setup fees)
+// ============================================================
+adminRoutes.get('/superadmin/service-invoices', async (c) => {
+  try {
+    const { results } = await c.env.DB.prepare(
+      'SELECT * FROM service_invoices ORDER BY created_at DESC LIMIT 100'
+    ).all<any>()
+    return c.json({ invoices: results || [] })
+  } catch {
+    return c.json({ invoices: [] })
+  }
+})
+
+adminRoutes.post('/superadmin/service-invoices/create', async (c) => {
+  const body = await c.req.json()
+  const { customer_email, customer_name, customer_phone, items, notes, due_date } = body
+
+  if (!customer_email || !items || !Array.isArray(items) || items.length === 0) {
+    return c.json({ error: 'Customer email and at least one line item required' }, 400)
+  }
+
+  const invoiceNumber = 'SVC-' + new Date().toISOString().slice(0, 10).replace(/-/g, '') + '-' + Math.floor(Math.random() * 9999).toString().padStart(4, '0')
+  const subtotal = items.reduce((sum: number, it: any) => sum + (parseFloat(it.price) || parseFloat(it.amount) || 0), 0)
+  const taxRate = 5
+  const taxAmount = Math.round(subtotal * taxRate / 100 * 100) / 100
+  const total = Math.round((subtotal + taxAmount) * 100) / 100
+  const dueDateStr = due_date || (() => { const d = new Date(); d.setDate(d.getDate() + 15); return d.toISOString().slice(0, 10) })()
+
+  try {
+    const result = await c.env.DB.prepare(`
+      INSERT INTO service_invoices (invoice_number, customer_email, customer_name, customer_phone, items, subtotal, tax_rate, tax_amount, total, due_date, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(invoiceNumber, customer_email, customer_name || '', customer_phone || '',
+      JSON.stringify(items), subtotal, taxRate, taxAmount, total,
+      dueDateStr, notes || ''
+    ).run()
+
+    return c.json({
+      success: true,
+      id: result.meta.last_row_id,
+      invoice_number: invoiceNumber,
+      total,
+      payment_link: `/service-invoice/${result.meta.last_row_id}`
+    })
+  } catch (err: any) {
+    return c.json({ error: 'Failed to create invoice: ' + err.message }, 500)
+  }
+})
+
+adminRoutes.post('/superadmin/service-invoices/:id/send', async (c) => {
+  const id = c.req.param('id')
+  const invoice = await c.env.DB.prepare('SELECT * FROM service_invoices WHERE id = ?').bind(id).first<any>()
+  if (!invoice) return c.json({ error: 'Invoice not found' }, 404)
+
+  // Generate Square payment link
+  const squareToken = (c.env as any).SQUARE_ACCESS_TOKEN
+  const locationId = (c.env as any).SQUARE_LOCATION_ID
+  let paymentLink = ''
+
+  if (squareToken) {
+    try {
+      const baseUrl = new URL(c.req.url).origin
+      const amountCents = Math.round(invoice.total * 100)
+      const resp = await fetch('https://connect.squareup.com/v2/online-checkout/payment-links', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${squareToken}`,
+          'Square-Version': '2025-01-23',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          idempotency_key: `svc-${id}-${Date.now()}`,
+          quick_pay: {
+            name: `Service Invoice ${invoice.invoice_number}`,
+            price_money: { amount: amountCents, currency: 'CAD' },
+            location_id: locationId || undefined
+          },
+          checkout_options: {
+            redirect_url: `${baseUrl}/service-invoice/${id}?status=success`
+          },
+          pre_populated_data: { buyer_email: invoice.customer_email }
+        })
+      })
+      const data: any = await resp.json()
+      paymentLink = data.payment_link?.url || data.payment_link?.long_url || ''
+    } catch {}
+  }
+
+  await c.env.DB.prepare(
+    "UPDATE service_invoices SET status = 'sent', sent_at = datetime('now'), payment_link = ?, updated_at = datetime('now') WHERE id = ?"
+  ).bind(paymentLink, id).run()
+
+  return c.json({ success: true, payment_link: paymentLink, invoice_number: invoice.invoice_number })
+})
+
+// ============================================================
+// CALL CENTER MANAGEMENT — Track calls, manage sales scripts
+// ============================================================
+adminRoutes.get('/superadmin/call-center/stats', async (c) => {
+  try {
+    const today = await c.env.DB.prepare(`
+      SELECT COUNT(*) as total_calls,
+        SUM(CASE WHEN call_status='connected' OR call_status='completed' THEN 1 ELSE 0 END) as connected,
+        SUM(call_duration_seconds) as total_duration,
+        SUM(CASE WHEN call_outcome='interested' OR call_outcome='demo_scheduled' THEN 1 ELSE 0 END) as hot_leads,
+        SUM(CASE WHEN call_outcome='converted' THEN 1 ELSE 0 END) as converted
+      FROM cc_call_logs WHERE date(started_at) = date('now')
+    `).first<any>()
+
+    const week = await c.env.DB.prepare(`
+      SELECT COUNT(*) as total_calls,
+        SUM(CASE WHEN call_status='connected' OR call_status='completed' THEN 1 ELSE 0 END) as connected,
+        SUM(CASE WHEN call_outcome='demo_scheduled' THEN 1 ELSE 0 END) as demos,
+        SUM(CASE WHEN call_outcome='converted' THEN 1 ELSE 0 END) as converted
+      FROM cc_call_logs WHERE started_at >= date('now', '-7 days')
+    `).first<any>()
+
+    const recentCalls = await c.env.DB.prepare(`
+      SELECT cl.*, p.company_name, p.contact_name
+      FROM cc_call_logs cl
+      LEFT JOIN cc_prospects p ON p.id = cl.prospect_id
+      ORDER BY cl.started_at DESC LIMIT 50
+    `).all<any>()
+
+    const agents = await c.env.DB.prepare(`
+      SELECT agent_name, COUNT(*) as total_calls,
+        SUM(CASE WHEN call_status='connected' OR call_status='completed' THEN 1 ELSE 0 END) as connects,
+        SUM(CASE WHEN call_outcome='demo_scheduled' THEN 1 ELSE 0 END) as demos,
+        AVG(call_duration_seconds) as avg_duration
+      FROM cc_call_logs WHERE started_at >= date('now', '-7 days')
+      GROUP BY agent_name ORDER BY total_calls DESC
+    `).all<any>()
+
+    return c.json({
+      today: today || {},
+      week: week || {},
+      recent_calls: recentCalls.results || [],
+      agent_performance: agents.results || []
+    })
+  } catch {
+    return c.json({ today: {}, week: {}, recent_calls: [], agent_performance: [] })
+  }
+})
+
+adminRoutes.get('/superadmin/sales-scripts', async (c) => {
+  try {
+    const { results } = await c.env.DB.prepare(
+      'SELECT * FROM sales_scripts ORDER BY category, created_at DESC'
+    ).all<any>()
+    return c.json({ scripts: results || [] })
+  } catch {
+    return c.json({ scripts: [] })
+  }
+})
+
+adminRoutes.post('/superadmin/sales-scripts', async (c) => {
+  const { name, category, script_body, notes } = await c.req.json()
+  if (!name || !script_body) return c.json({ error: 'Name and script body required' }, 400)
+
+  const result = await c.env.DB.prepare(
+    'INSERT INTO sales_scripts (name, category, script_body, notes) VALUES (?, ?, ?, ?)'
+  ).bind(name, category || 'cold_call', script_body, notes || '').run()
+
+  return c.json({ success: true, id: result.meta.last_row_id })
+})
+
+adminRoutes.put('/superadmin/sales-scripts/:id', async (c) => {
+  const id = c.req.param('id')
+  const { name, category, script_body, notes, is_active } = await c.req.json()
+
+  await c.env.DB.prepare(
+    "UPDATE sales_scripts SET name = ?, category = ?, script_body = ?, notes = ?, is_active = ?, updated_at = datetime('now') WHERE id = ?"
+  ).bind(name || '', category || 'cold_call', script_body || '', notes || '', is_active !== undefined ? (is_active ? 1 : 0) : 1, id).run()
+
+  return c.json({ success: true })
+})
+
+adminRoutes.delete('/superadmin/sales-scripts/:id', async (c) => {
+  await c.env.DB.prepare('DELETE FROM sales_scripts WHERE id = ?').bind(c.req.param('id')).run()
+  return c.json({ success: true })
+})

@@ -199,10 +199,23 @@ reportsRoutes.get('/:orderId/segments', async (c) => {
 // GET /:orderId/html — Rendered report HTML (no auth for iframes)
 // ============================================================
 reportsRoutes.get('/:orderId/html', async (c) => {
-  const row = await repo.getReportHtml(c.env.DB, c.req.param('orderId'))
+  const orderId = c.req.param('orderId')
+  const row = await repo.getReportHtml(c.env.DB, orderId)
   if (!row) return c.json({ error: 'Report not found' }, 404)
-  const html = resolveHtml(row.professional_report_html, row.api_response_raw)
+  let html = resolveHtml(row.professional_report_html, row.api_response_raw)
   if (!html) return c.json({ error: 'Report data not available' }, 404)
+
+  // Append damage report page if it exists
+  try {
+    const dmgRow = await c.env.DB.prepare(
+      'SELECT damage_report_html FROM reports WHERE order_id = ? AND damage_report_html IS NOT NULL AND damage_report_html != ?'
+    ).bind(orderId, '').first<any>()
+    if (dmgRow?.damage_report_html) {
+      // Insert before </html>
+      html = html.replace('</html>', dmgRow.damage_report_html + '\n</html>')
+    }
+  } catch {}
+
   return c.html(html)
 })
 
@@ -1638,6 +1651,202 @@ reportsRoutes.post('/recovery/stuck', async (c) => {
     recovered_orders: recovered,
     message: recovered.length > 0 ? `Recovered ${recovered.length} stuck report(s)` : 'No stuck reports found'
   })
+})
+
+// ============================================================
+// AI DAMAGE REPORT — Gemini satellite imagery analysis for roof damage
+// Analyzes for hail damage, missing shingles, wear, and generates
+// a damage summary designed as a sales tool for roofers
+// ============================================================
+reportsRoutes.post('/:orderId/damage-report', async (c) => {
+  const orderId = c.req.param('orderId')
+
+  const report = await repo.getReportForVision(c.env.DB, orderId)
+  if (!report) return c.json({ error: 'Report not found' }, 404)
+  const order = await repo.getOrderById(c.env.DB, orderId)
+
+  // Get satellite image
+  let imgUrl = report.satellite_image_url as string | null
+  if (!imgUrl && report.api_response_raw) {
+    try { const d = JSON.parse(report.api_response_raw); imgUrl = d.imagery?.satellite_overhead_url || d.imagery?.satellite_url } catch {}
+  }
+  if (!imgUrl && order?.latitude && order?.longitude) {
+    imgUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${order.latitude},${order.longitude}&zoom=20&size=640x640&scale=2&maptype=satellite&key=${c.env.GOOGLE_MAPS_API_KEY}`
+  }
+  if (!imgUrl) return c.json({ error: 'No satellite image available for damage analysis' }, 400)
+
+  const geminiKey = c.env.GEMINI_ENHANCE_API_KEY || (c.env as any).GOOGLE_VERTEX_API_KEY
+  if (!geminiKey) return c.json({ error: 'Gemini API key not configured' }, 400)
+
+  try {
+    // Fetch the satellite image
+    const imgResp = await fetch(imgUrl)
+    if (!imgResp.ok) throw new Error('Failed to fetch satellite image')
+    const imgBuffer = await imgResp.arrayBuffer()
+    const imgBase64 = btoa(String.fromCharCode(...new Uint8Array(imgBuffer)))
+    const mimeType = imgResp.headers.get('content-type') || 'image/jpeg'
+
+    // Call Gemini with damage analysis prompt
+    const geminiResp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            parts: [
+              { inline_data: { mime_type: mimeType, data: imgBase64 } },
+              { text: `You are an expert roof condition inspector analyzing this satellite/aerial image of a residential roof in Alberta, Canada. Your goal is to create a DAMAGE ASSESSMENT REPORT that helps a roofing contractor close deals.
+
+ANALYZE THE IMAGE FOR:
+1. HAIL DAMAGE indicators — Look for: random dent patterns, circular marks, granule displacement patterns, bruised/dimpled shingles
+2. MISSING SHINGLES — Exposed underlayment, gaps in shingle coverage, dark patches where shingles should be
+3. WIND DAMAGE — Lifted tabs, creased or bent shingles, flipped shingle sections
+4. AGING/WEAR — Curling shingles, granule loss (dark streaks), fading, color inconsistency
+5. STRUCTURAL ISSUES — Sagging ridge, wave patterns, ponding evidence
+6. MOSS/ALGAE/DEBRIS — Green growth, dark streaks (algae), debris accumulation
+7. FLASHING CONDITION — Rust stains, gaps at penetrations, deteriorated valley metal
+8. GUTTER/EDGE — Detached gutters, fascia damage, drip edge issues
+
+For each finding, provide:
+- description: What you see
+- severity: "low" | "moderate" | "high" | "critical"
+- location: Where on the roof
+- recommendation: What should be done
+
+Then write a DAMAGE SUMMARY (2-3 paragraphs) that:
+- Summarizes the overall condition in plain language a homeowner understands
+- Emphasizes urgency where appropriate ("Alberta's freeze-thaw cycles will worsen this...")
+- Mentions that addressing issues now prevents costly interior water damage
+- Notes that insurance may cover hail/storm damage claims
+- Uses professional but persuasive tone (subtle sales tool, not aggressive)
+
+Respond in this exact JSON format:
+{
+  "overall_condition": "poor" | "fair" | "good" | "excellent",
+  "overall_score": 1-10,
+  "urgency_level": "routine" | "soon" | "urgent" | "emergency",
+  "findings": [
+    { "type": "hail_damage|missing_shingles|wind_damage|aging|structural|moss_algae|flashing|gutter", "description": "...", "severity": "low|moderate|high|critical", "location": "...", "recommendation": "..." }
+  ],
+  "damage_summary": "... 2-3 paragraph summary for the homeowner ...",
+  "insurance_note": "... note about potential insurance claim eligibility ...",
+  "estimated_remaining_life": "X-Y years",
+  "recommended_action": "... what should the homeowner do next ..."
+}` }
+            ]
+          }],
+          generationConfig: { temperature: 0.3, maxOutputTokens: 4096 }
+        })
+      }
+    )
+
+    const geminiData: any = await geminiResp.json()
+    const textContent = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || ''
+
+    // Parse JSON from Gemini response
+    let analysis: any = {}
+    try {
+      const jsonMatch = textContent.match(/\{[\s\S]*\}/)
+      if (jsonMatch) analysis = JSON.parse(jsonMatch[0])
+    } catch {
+      analysis = { overall_condition: 'unknown', overall_score: 5, findings: [], damage_summary: textContent, urgency_level: 'routine' }
+    }
+
+    // Generate the damage report HTML page
+    const findings = analysis.findings || []
+    const severityColors: Record<string, string> = { critical: '#dc2626', high: '#ea580c', moderate: '#d97706', low: '#65a30d' }
+    const severityBg: Record<string, string> = { critical: '#fef2f2', high: '#fff7ed', moderate: '#fffbeb', low: '#f7fee7' }
+
+    let findingsHtml = ''
+    for (const f of findings) {
+      const col = severityColors[f.severity] || '#6b7280'
+      const bg = severityBg[f.severity] || '#f9fafb'
+      findingsHtml += `
+        <div style="display:flex;gap:12px;padding:10px;background:${bg};border-radius:8px;border-left:4px solid ${col};margin-bottom:8px">
+          <div style="flex:1">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+              <span style="background:${col};color:#fff;font-size:9px;font-weight:700;padding:2px 8px;border-radius:12px;text-transform:uppercase">${f.severity}</span>
+              <span style="font-size:11px;font-weight:700;color:#1e293b;text-transform:capitalize">${(f.type || '').replace(/_/g, ' ')}</span>
+            </div>
+            <p style="font-size:10px;color:#475569;margin:0;line-height:1.4">${f.description}</p>
+            <p style="font-size:9px;color:#94a3b8;margin:4px 0 0 0"><b>Location:</b> ${f.location || 'General'} · <b>Action:</b> ${f.recommendation || 'Inspection recommended'}</p>
+          </div>
+        </div>`
+    }
+
+    const conditionColors: Record<string, string> = { poor: '#dc2626', fair: '#d97706', good: '#65a30d', excellent: '#16a34a' }
+    const condColor = conditionColors[analysis.overall_condition] || '#6b7280'
+    const urgencyColors: Record<string, string> = { emergency: '#dc2626', urgent: '#ea580c', soon: '#d97706', routine: '#65a30d' }
+    const urgColor = urgencyColors[analysis.urgency_level] || '#6b7280'
+
+    const damageHtml = `
+<div class="page" style="page-break-before:always">
+  <div style="padding:28px;flex:1">
+    <div style="text-align:center;margin-bottom:20px">
+      <h2 style="font-size:20px;font-weight:800;color:#0f172a;margin:0">AI Roof Damage Assessment</h2>
+      <p style="font-size:11px;color:#64748b;margin:4px 0 0 0">Satellite Imagery Analysis — Powered by Gemini AI</p>
+    </div>
+
+    <div style="display:flex;gap:12px;margin-bottom:16px">
+      <div style="flex:1;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:16px;text-align:center">
+        <p style="font-size:9px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;margin:0">Overall Condition</p>
+        <p style="font-size:24px;font-weight:900;color:${condColor};margin:4px 0 0 0;text-transform:uppercase">${analysis.overall_condition || 'N/A'}</p>
+        <p style="font-size:10px;color:#64748b;margin:2px 0 0 0">Score: ${analysis.overall_score || '?'}/10</p>
+      </div>
+      <div style="flex:1;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:16px;text-align:center">
+        <p style="font-size:9px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;margin:0">Urgency Level</p>
+        <p style="font-size:24px;font-weight:900;color:${urgColor};margin:4px 0 0 0;text-transform:uppercase">${analysis.urgency_level || 'N/A'}</p>
+        <p style="font-size:10px;color:#64748b;margin:2px 0 0 0">Est. Life: ${analysis.estimated_remaining_life || 'Unknown'}</p>
+      </div>
+      <div style="flex:1;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:16px;text-align:center">
+        <p style="font-size:9px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;margin:0">Issues Found</p>
+        <p style="font-size:24px;font-weight:900;color:#0f172a;margin:4px 0 0 0">${findings.length}</p>
+        <p style="font-size:10px;color:#64748b;margin:2px 0 0 0">${findings.filter((f: any) => f.severity === 'critical' || f.severity === 'high').length} high priority</p>
+      </div>
+    </div>
+
+    <div style="margin-bottom:16px">
+      <h3 style="font-size:12px;font-weight:700;color:#0f172a;margin:0 0 8px 0;text-transform:uppercase;letter-spacing:0.5px">Damage Findings</h3>
+      ${findingsHtml || '<p style="font-size:11px;color:#64748b;text-align:center;padding:20px">No significant damage detected from satellite imagery</p>'}
+    </div>
+
+    <div style="background:linear-gradient(135deg,#f0f9ff,#e0f2fe);border:1px solid #bae6fd;border-radius:12px;padding:16px;margin-bottom:12px">
+      <h3 style="font-size:12px;font-weight:700;color:#0369a1;margin:0 0 8px 0">Damage Assessment Summary</h3>
+      <p style="font-size:10px;color:#334155;line-height:1.6;margin:0;white-space:pre-line">${analysis.damage_summary || 'Detailed analysis pending.'}</p>
+    </div>
+
+    ${analysis.insurance_note ? `
+    <div style="background:#fefce8;border:1px solid #fde68a;border-radius:8px;padding:12px;margin-bottom:12px">
+      <p style="font-size:10px;color:#92400e;margin:0"><b>Insurance Note:</b> ${analysis.insurance_note}</p>
+    </div>` : ''}
+
+    ${analysis.recommended_action ? `
+    <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:12px">
+      <p style="font-size:10px;color:#166534;margin:0"><b>Recommended Action:</b> ${analysis.recommended_action}</p>
+    </div>` : ''}
+  </div>
+  <div class="page-footer" style="background:#dc2626">
+    <span style="color:#fff;font-size:7px;letter-spacing:0.5px">AI DAMAGE ASSESSMENT</span>
+    <span style="color:#fca5a5;font-size:7px">This analysis is AI-generated from satellite imagery and should be confirmed by on-site inspection</span>
+  </div>
+</div>`
+
+    // Save to database
+    await c.env.DB.prepare(
+      "UPDATE reports SET damage_report_html = ?, damage_analysis_json = ?, updated_at = datetime('now') WHERE order_id = ?"
+    ).bind(damageHtml, JSON.stringify(analysis), orderId).run()
+
+    return c.json({
+      success: true,
+      analysis,
+      damage_html: damageHtml,
+      satellite_url: imgUrl
+    })
+  } catch (err: any) {
+    console.error('[Damage Report] Error:', err.message)
+    return c.json({ error: 'Damage analysis failed: ' + err.message }, 500)
+  }
 })
 
 // ============================================================

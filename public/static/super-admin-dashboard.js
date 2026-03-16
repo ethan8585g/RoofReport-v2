@@ -179,6 +179,28 @@ async function loadView(view) {
           if (telRes) SA.data.telephony = await telRes.json();
         } catch(e) { SA.data.telephony = {}; }
         break;
+      case 'customer-onboarding':
+        try {
+          const obRes = await saFetch('/api/admin/superadmin/onboarding/list');
+          if (obRes) SA.data.onboarding = await obRes.json();
+        } catch(e) { SA.data.onboarding = { customers: [] }; }
+        break;
+      case 'service-invoices':
+        try {
+          const siRes = await saFetch('/api/admin/superadmin/service-invoices');
+          if (siRes) SA.data.service_invoices = await siRes.json();
+        } catch(e) { SA.data.service_invoices = { invoices: [] }; }
+        break;
+      case 'call-center-manage':
+        try {
+          const [ccStatsRes, ccScriptsRes] = await Promise.all([
+            saFetch('/api/admin/superadmin/call-center/stats'),
+            saFetch('/api/admin/superadmin/sales-scripts')
+          ]);
+          if (ccStatsRes) SA.data.cc_stats = await ccStatsRes.json();
+          if (ccScriptsRes) SA.data.cc_scripts = await ccScriptsRes.json();
+        } catch(e) { SA.data.cc_stats = {}; SA.data.cc_scripts = { scripts: [] }; }
+        break;
     }
   } catch (e) {
     console.error('Load error:', e);
@@ -287,6 +309,9 @@ function renderContent() {
     case 'notifications-admin': root.innerHTML = renderNotificationsAdminView(); loadNotifications(); break;
     case 'webhooks': root.innerHTML = renderWebhooksView(); loadWebhooks(); break;
     case 'paywall': root.innerHTML = renderPaywallView(); loadPaywallStatus(); break;
+    case 'customer-onboarding': root.innerHTML = renderCustomerOnboardingView(); break;
+    case 'service-invoices': root.innerHTML = renderServiceInvoicesView(); break;
+    case 'call-center-manage': root.innerHTML = renderCallCenterManageView(); break;
     default: root.innerHTML = renderUsersView();
   }
 }
@@ -4202,4 +4227,330 @@ async function deleteWebhook(id) {
   if (!confirm('Delete this webhook?')) return;
   await saFetch('/api/crm/webhooks/' + id, { method: 'DELETE' });
   loadWebhooks();
+}
+
+// ============================================================
+// CUSTOMER ONBOARDING — Provision accounts + Secretary AI
+// ============================================================
+function renderCustomerOnboardingView() {
+  var d = SA.data.onboarding || {};
+  var customers = d.customers || [];
+  var rows = customers.map(function(c) {
+    var secBadge = c.secretary_enabled ? '<span class="px-2 py-0.5 bg-green-100 text-green-800 rounded-full text-xs font-medium">Active</span>' : '<span class="px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full text-xs font-medium">Off</span>';
+    var modeBadge = c.secretary_mode === 'always_on' ? '<span class="text-xs text-blue-600 font-medium">Always On</span>' : c.secretary_mode === 'answering_service' ? '<span class="text-xs text-purple-600 font-medium">Answering</span>' : '<span class="text-xs text-sky-600 font-medium">Receptionist</span>';
+    return '<tr class="border-b border-gray-100 hover:bg-gray-50">' +
+      '<td class="px-4 py-3"><div class="font-bold text-gray-800 text-sm">' + (c.business_name || c.contact_name || 'N/A') + '</div><div class="text-xs text-gray-500">' + (c.email || '') + '</div></td>' +
+      '<td class="px-4 py-3 text-sm text-gray-600">' + (c.phone || '-') + '</td>' +
+      '<td class="px-4 py-3 text-center">' + secBadge + '</td>' +
+      '<td class="px-4 py-3 text-center">' + modeBadge + '</td>' +
+      '<td class="px-4 py-3 text-sm text-gray-500">' + (c.secretary_phone_number || '-') + '</td>' +
+      '<td class="px-4 py-3 text-sm text-gray-500">' + (c.call_forwarding_number || '-') + '</td>' +
+      '<td class="px-4 py-3 text-xs text-gray-400">' + fmtDate(c.created_at) + '</td>' +
+      '<td class="px-4 py-3"><button onclick="toggleSecretaryMode(' + c.id + ', ' + (c.secretary_enabled ? 0 : 1) + ')" class="text-xs ' + (c.secretary_enabled ? 'text-red-600 hover:text-red-800' : 'text-green-600 hover:text-green-800') + ' font-medium">' + (c.secretary_enabled ? '<i class="fas fa-power-off mr-1"></i>Disable' : '<i class="fas fa-play mr-1"></i>Enable') + '</button></td>' +
+      '</tr>';
+  }).join('');
+
+  return '<div class="mb-6"><h2 class="text-2xl font-black text-gray-900"><i class="fas fa-user-cog mr-2 text-indigo-500"></i>Customer Onboarding</h2><p class="text-sm text-gray-500 mt-1">Provision new customer accounts, set up Secretary AI, manage call forwarding</p></div>' +
+    '<div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">' +
+    '<div class="flex items-center justify-between mb-4"><h3 class="font-bold text-gray-800 text-lg">Create New Customer</h3></div>' +
+    '<div id="onboard-form" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">' +
+    '<div><label class="text-xs text-gray-500 font-medium block mb-1">Business Name</label><input id="ob-business" class="w-full border rounded-lg px-3 py-2 text-sm" placeholder="ABC Roofing Ltd"></div>' +
+    '<div><label class="text-xs text-gray-500 font-medium block mb-1">Contact Name</label><input id="ob-name" class="w-full border rounded-lg px-3 py-2 text-sm" placeholder="John Smith"></div>' +
+    '<div><label class="text-xs text-gray-500 font-medium block mb-1">Email *</label><input id="ob-email" class="w-full border rounded-lg px-3 py-2 text-sm" placeholder="john@abcroofing.ca" type="email"></div>' +
+    '<div><label class="text-xs text-gray-500 font-medium block mb-1">Phone</label><input id="ob-phone" class="w-full border rounded-lg px-3 py-2 text-sm" placeholder="+1 403 555 1234"></div>' +
+    '<div><label class="text-xs text-gray-500 font-medium block mb-1">Password *</label><input id="ob-password" class="w-full border rounded-lg px-3 py-2 text-sm" placeholder="Secure password" type="text"></div>' +
+    '<div><label class="text-xs text-gray-500 font-medium block mb-1">Secretary AI Mode</label><select id="ob-sec-mode" class="w-full border rounded-lg px-3 py-2 text-sm"><option value="receptionist">Receptionist</option><option value="answering_service">Answering Service</option><option value="always_on">Always On</option></select></div>' +
+    '<div><label class="text-xs text-gray-500 font-medium block mb-1">LiveKit Phone # (Secretary AI)</label><input id="ob-sec-phone" class="w-full border rounded-lg px-3 py-2 text-sm" placeholder="+1 403 555 9999"></div>' +
+    '<div><label class="text-xs text-gray-500 font-medium block mb-1">Call Forwarding # (Customer Cell)</label><input id="ob-fwd-phone" class="w-full border rounded-lg px-3 py-2 text-sm" placeholder="+1 403 555 8888"></div>' +
+    '<div><label class="text-xs text-gray-500 font-medium block mb-1">Notes</label><input id="ob-notes" class="w-full border rounded-lg px-3 py-2 text-sm" placeholder="Optional notes"></div>' +
+    '</div>' +
+    '<div class="flex items-center gap-3"><label class="flex items-center gap-2 text-sm"><input type="checkbox" id="ob-enable-sec" checked> Enable Secretary AI on creation</label></div>' +
+    '<button onclick="createOnboardingCustomer()" class="mt-4 bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-xl font-bold text-sm transition-all shadow-md"><i class="fas fa-user-plus mr-2"></i>Create Account & Setup Secretary AI</button>' +
+    '</div>' +
+    '<div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">' +
+    '<div class="p-4 border-b bg-gray-50"><h3 class="font-bold text-gray-800">Onboarded Customers (' + customers.length + ')</h3></div>' +
+    (customers.length === 0 ? '<div class="p-8 text-center text-gray-400"><i class="fas fa-users text-3xl mb-3 opacity-30"></i><p>No customers onboarded yet</p></div>' :
+    '<div class="overflow-x-auto"><table class="w-full"><thead><tr class="bg-gray-50 text-xs text-gray-500 uppercase"><th class="px-4 py-3 text-left">Customer</th><th class="px-4 py-3 text-left">Phone</th><th class="px-4 py-3 text-center">Secretary</th><th class="px-4 py-3 text-center">Mode</th><th class="px-4 py-3 text-left">AI Phone #</th><th class="px-4 py-3 text-left">Fwd To</th><th class="px-4 py-3 text-left">Onboarded</th><th class="px-4 py-3 text-left">Action</th></tr></thead><tbody>' + rows + '</tbody></table></div>') +
+    '</div>';
+}
+
+async function createOnboardingCustomer() {
+  var email = document.getElementById('ob-email').value;
+  var password = document.getElementById('ob-password').value;
+  if (!email || !password) { alert('Email and Password are required'); return; }
+
+  var body = {
+    business_name: document.getElementById('ob-business').value,
+    contact_name: document.getElementById('ob-name').value,
+    email: email,
+    phone: document.getElementById('ob-phone').value,
+    password: password,
+    secretary_mode: document.getElementById('ob-sec-mode').value,
+    secretary_phone_number: document.getElementById('ob-sec-phone').value,
+    call_forwarding_number: document.getElementById('ob-fwd-phone').value,
+    notes: document.getElementById('ob-notes').value,
+    enable_secretary: document.getElementById('ob-enable-sec').checked
+  };
+
+  try {
+    var res = await saFetch('/api/admin/superadmin/onboarding/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    var data = await res.json();
+    if (data.success) {
+      alert('Customer account created successfully! Secretary AI ' + (body.enable_secretary ? 'enabled' : 'disabled') + '.');
+      loadView('customer-onboarding');
+    } else {
+      alert(data.error || 'Failed to create customer');
+    }
+  } catch(e) { alert('Error creating customer: ' + e.message); }
+}
+
+async function toggleSecretaryMode(id, enable) {
+  try {
+    await saFetch('/api/admin/superadmin/onboarding/' + id + '/toggle-secretary', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: enable })
+    });
+    loadView('customer-onboarding');
+  } catch(e) { alert('Error toggling secretary'); }
+}
+
+// ============================================================
+// SERVICE INVOICES — Cold-call customer invoicing
+// ============================================================
+function renderServiceInvoicesView() {
+  var d = SA.data.service_invoices || {};
+  var invoices = d.invoices || [];
+  var rows = invoices.map(function(inv) {
+    var sBadge = { draft: 'bg-gray-100 text-gray-600', sent: 'bg-blue-100 text-blue-700', viewed: 'bg-purple-100 text-purple-700', paid: 'bg-green-100 text-green-800', overdue: 'bg-red-100 text-red-700', cancelled: 'bg-gray-100 text-gray-400' };
+    return '<tr class="border-b border-gray-100 hover:bg-gray-50">' +
+      '<td class="px-4 py-3 text-sm font-mono font-bold text-gray-800">' + (inv.invoice_number || '-') + '</td>' +
+      '<td class="px-4 py-3"><div class="font-medium text-gray-800 text-sm">' + (inv.customer_name || 'N/A') + '</div><div class="text-xs text-gray-500">' + (inv.customer_email || '') + '</div></td>' +
+      '<td class="px-4 py-3 text-sm font-bold text-gray-800">$' + parseFloat(inv.total || 0).toFixed(2) + '</td>' +
+      '<td class="px-4 py-3 text-center"><span class="px-2 py-0.5 ' + (sBadge[inv.status] || 'bg-gray-100 text-gray-600') + ' rounded-full text-xs font-medium capitalize">' + (inv.status || 'draft') + '</span></td>' +
+      '<td class="px-4 py-3 text-xs text-gray-400">' + fmtDate(inv.created_at) + '</td>' +
+      '<td class="px-4 py-3">' +
+        (inv.status === 'draft' ? '<button onclick="sendServiceInvoice(' + inv.id + ')" class="text-xs text-blue-600 hover:text-blue-800 font-medium mr-2"><i class="fas fa-paper-plane mr-1"></i>Send</button>' : '') +
+        (inv.payment_link ? '<a href="' + inv.payment_link + '" target="_blank" class="text-xs text-green-600 hover:text-green-800 font-medium"><i class="fas fa-external-link-alt mr-1"></i>Payment Link</a>' : '') +
+      '</td></tr>';
+  }).join('');
+
+  return '<div class="mb-6"><h2 class="text-2xl font-black text-gray-900"><i class="fas fa-file-invoice mr-2 text-amber-500"></i>Cold Call Invoices</h2><p class="text-sm text-gray-500 mt-1">Send invoices for Roofer Secretary AI subscriptions and setup fees to cold-call customers</p></div>' +
+    '<div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">' +
+    '<h3 class="font-bold text-gray-800 text-lg mb-4">Create Service Invoice</h3>' +
+    '<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">' +
+    '<div><label class="text-xs text-gray-500 font-medium block mb-1">Customer Name</label><input id="si-name" class="w-full border rounded-lg px-3 py-2 text-sm" placeholder="John Smith"></div>' +
+    '<div><label class="text-xs text-gray-500 font-medium block mb-1">Customer Email *</label><input id="si-email" class="w-full border rounded-lg px-3 py-2 text-sm" placeholder="john@company.ca" type="email"></div>' +
+    '<div><label class="text-xs text-gray-500 font-medium block mb-1">Customer Phone</label><input id="si-phone" class="w-full border rounded-lg px-3 py-2 text-sm" placeholder="+1 403 555 1234"></div>' +
+    '</div>' +
+    '<div class="mb-4"><label class="text-xs text-gray-500 font-medium block mb-1">Line Items</label>' +
+    '<div id="si-items">' +
+    '<div class="flex gap-2 mb-2 si-item"><input class="flex-1 border rounded-lg px-3 py-2 text-sm si-desc" placeholder="Description" value="Roofer Secretary AI — Monthly Subscription"><input class="w-24 border rounded-lg px-3 py-2 text-sm text-right si-price" placeholder="Price" value="149.00" type="number" step="0.01"><button onclick="this.parentElement.remove()" class="text-red-400 hover:text-red-600 text-sm px-2"><i class="fas fa-trash"></i></button></div>' +
+    '<div class="flex gap-2 mb-2 si-item"><input class="flex-1 border rounded-lg px-3 py-2 text-sm si-desc" placeholder="Description" value="Secretary AI Setup Fee (One-Time)"><input class="w-24 border rounded-lg px-3 py-2 text-sm text-right si-price" placeholder="Price" value="299.00" type="number" step="0.01"><button onclick="this.parentElement.remove()" class="text-red-400 hover:text-red-600 text-sm px-2"><i class="fas fa-trash"></i></button></div>' +
+    '</div>' +
+    '<button onclick="addServiceInvoiceItem()" class="text-xs text-blue-600 hover:text-blue-800 font-medium mt-1"><i class="fas fa-plus mr-1"></i>Add Line Item</button></div>' +
+    '<div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">' +
+    '<div><label class="text-xs text-gray-500 font-medium block mb-1">Due Date</label><input id="si-due" class="w-full border rounded-lg px-3 py-2 text-sm" type="date"></div>' +
+    '<div><label class="text-xs text-gray-500 font-medium block mb-1">Notes</label><input id="si-notes" class="w-full border rounded-lg px-3 py-2 text-sm" placeholder="Optional invoice notes"></div>' +
+    '</div>' +
+    '<button onclick="createServiceInvoice()" class="bg-amber-600 hover:bg-amber-700 text-white px-6 py-2.5 rounded-xl font-bold text-sm transition-all shadow-md"><i class="fas fa-file-invoice mr-2"></i>Create Invoice</button>' +
+    '</div>' +
+    '<div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">' +
+    '<div class="p-4 border-b bg-gray-50"><h3 class="font-bold text-gray-800">Service Invoices (' + invoices.length + ')</h3></div>' +
+    (invoices.length === 0 ? '<div class="p-8 text-center text-gray-400"><i class="fas fa-file-invoice text-3xl mb-3 opacity-30"></i><p>No service invoices yet</p></div>' :
+    '<div class="overflow-x-auto"><table class="w-full"><thead><tr class="bg-gray-50 text-xs text-gray-500 uppercase"><th class="px-4 py-3 text-left">Invoice #</th><th class="px-4 py-3 text-left">Customer</th><th class="px-4 py-3 text-left">Total</th><th class="px-4 py-3 text-center">Status</th><th class="px-4 py-3 text-left">Created</th><th class="px-4 py-3 text-left">Actions</th></tr></thead><tbody>' + rows + '</tbody></table></div>') +
+    '</div>';
+}
+
+function addServiceInvoiceItem() {
+  var container = document.getElementById('si-items');
+  var row = document.createElement('div');
+  row.className = 'flex gap-2 mb-2 si-item';
+  row.innerHTML = '<input class="flex-1 border rounded-lg px-3 py-2 text-sm si-desc" placeholder="Description"><input class="w-24 border rounded-lg px-3 py-2 text-sm text-right si-price" placeholder="Price" type="number" step="0.01"><button onclick="this.parentElement.remove()" class="text-red-400 hover:text-red-600 text-sm px-2"><i class="fas fa-trash"></i></button>';
+  container.appendChild(row);
+}
+
+async function createServiceInvoice() {
+  var email = document.getElementById('si-email').value;
+  if (!email) { alert('Customer email is required'); return; }
+
+  var items = [];
+  document.querySelectorAll('.si-item').forEach(function(row) {
+    var desc = row.querySelector('.si-desc').value;
+    var price = parseFloat(row.querySelector('.si-price').value) || 0;
+    if (desc && price > 0) items.push({ description: desc, price: price });
+  });
+  if (items.length === 0) { alert('At least one line item is required'); return; }
+
+  var body = {
+    customer_name: document.getElementById('si-name').value,
+    customer_email: email,
+    customer_phone: document.getElementById('si-phone').value,
+    items: items,
+    due_date: document.getElementById('si-due').value,
+    notes: document.getElementById('si-notes').value
+  };
+
+  try {
+    var res = await saFetch('/api/admin/superadmin/service-invoices/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    var data = await res.json();
+    if (data.success) {
+      alert('Invoice ' + data.invoice_number + ' created! Total: $' + parseFloat(data.total).toFixed(2));
+      loadView('service-invoices');
+    } else {
+      alert(data.error || 'Failed to create invoice');
+    }
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function sendServiceInvoice(id) {
+  if (!confirm('Send this invoice to the customer via email with Square payment link?')) return;
+  try {
+    var res = await saFetch('/api/admin/superadmin/service-invoices/' + id + '/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    var data = await res.json();
+    if (data.success) {
+      alert('Invoice sent with payment link!');
+      loadView('service-invoices');
+    } else {
+      alert(data.error || 'Failed to send invoice');
+    }
+  } catch(e) { alert('Error sending: ' + e.message); }
+}
+
+// ============================================================
+// CALL CENTER MANAGEMENT — Track calls, manage sales scripts
+// ============================================================
+function renderCallCenterManageView() {
+  var stats = SA.data.cc_stats || {};
+  var scripts = (SA.data.cc_scripts || {}).scripts || [];
+  var today = stats.today || {};
+  var week = stats.week || {};
+  var recentCalls = stats.recent_calls || [];
+  var agents = stats.agent_performance || [];
+
+  var callRows = recentCalls.slice(0, 30).map(function(c) {
+    var outcome = c.call_outcome || 'unknown';
+    var oColor = { interested: 'text-green-600', demo_scheduled: 'text-blue-600', converted: 'text-emerald-700', not_interested: 'text-red-500', voicemail: 'text-gray-500', no_answer: 'text-gray-400', callback: 'text-purple-600' };
+    return '<tr class="border-b border-gray-100 hover:bg-gray-50 text-sm">' +
+      '<td class="px-3 py-2 text-gray-800 font-medium">' + (c.company_name || c.contact_name || 'Unknown') + '</td>' +
+      '<td class="px-3 py-2 text-gray-500">' + (c.agent_name || '-') + '</td>' +
+      '<td class="px-3 py-2 text-center"><span class="' + (oColor[outcome] || 'text-gray-500') + ' font-medium text-xs capitalize">' + outcome.replace('_', ' ') + '</span></td>' +
+      '<td class="px-3 py-2 text-gray-500 text-center">' + fmtSeconds(c.call_duration_seconds || 0) + '</td>' +
+      '<td class="px-3 py-2 text-gray-400 text-xs">' + fmtDateTime(c.started_at) + '</td>' +
+      '</tr>';
+  }).join('');
+
+  var agentRows = agents.map(function(a) {
+    return '<tr class="border-b border-gray-100">' +
+      '<td class="px-4 py-3 font-bold text-gray-800 text-sm">' + (a.agent_name || 'Unknown') + '</td>' +
+      '<td class="px-4 py-3 text-center text-sm">' + (a.total_calls || 0) + '</td>' +
+      '<td class="px-4 py-3 text-center text-sm text-green-600 font-medium">' + (a.connects || 0) + '</td>' +
+      '<td class="px-4 py-3 text-center text-sm text-blue-600 font-medium">' + (a.demos || 0) + '</td>' +
+      '<td class="px-4 py-3 text-center text-sm text-gray-500">' + fmtSeconds(a.avg_duration || 0) + '</td>' +
+      '</tr>';
+  }).join('');
+
+  var scriptsList = scripts.map(function(s) {
+    return '<div class="bg-gray-50 rounded-xl p-4 mb-3 border border-gray-100">' +
+      '<div class="flex items-center justify-between mb-2">' +
+      '<div><span class="font-bold text-gray-800 text-sm">' + s.name + '</span>' +
+      '<span class="ml-2 px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs capitalize">' + (s.category || 'cold_call').replace('_', ' ') + '</span>' +
+      (s.is_active ? '' : '<span class="ml-2 px-2 py-0.5 bg-red-100 text-red-600 rounded-full text-xs">Inactive</span>') +
+      '</div>' +
+      '<div class="flex gap-2">' +
+      '<button onclick="toggleScript(' + s.id + ', ' + (s.is_active ? 0 : 1) + ')" class="text-xs ' + (s.is_active ? 'text-red-500' : 'text-green-500') + '">' + (s.is_active ? '<i class="fas fa-pause"></i>' : '<i class="fas fa-play"></i>') + '</button>' +
+      '<button onclick="deleteScript(' + s.id + ')" class="text-xs text-gray-400 hover:text-red-500"><i class="fas fa-trash"></i></button>' +
+      '</div></div>' +
+      '<pre class="text-xs text-gray-600 whitespace-pre-wrap bg-white rounded-lg p-3 border max-h-40 overflow-y-auto">' + (s.script_body || '') + '</pre>' +
+      (s.notes ? '<p class="text-xs text-gray-400 mt-2"><i class="fas fa-sticky-note mr-1"></i>' + s.notes + '</p>' : '') +
+      '</div>';
+  }).join('');
+
+  return '<div class="mb-6"><h2 class="text-2xl font-black text-gray-900"><i class="fas fa-headset mr-2 text-cyan-500"></i>Call Center Management</h2><p class="text-sm text-gray-500 mt-1">Track all calls, agent performance, and manage sales scripts</p></div>' +
+    '<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">' +
+    samc('Today Calls', today.total_calls || 0, 'fa-phone', 'cyan', 'Connected: ' + (today.connected || 0)) +
+    samc('Hot Leads', today.hot_leads || 0, 'fa-fire', 'orange', 'Today') +
+    samc('Week Calls', week.total_calls || 0, 'fa-chart-bar', 'blue', 'Connected: ' + (week.connected || 0)) +
+    samc('Week Demos', week.demos || 0, 'fa-calendar-check', 'green', 'Converted: ' + (week.converted || 0)) +
+    '</div>' +
+    '<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">' +
+    '<div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">' +
+    '<div class="p-4 border-b bg-gray-50 flex items-center justify-between"><h3 class="font-bold text-gray-800">Recent Calls</h3><button onclick="loadView(\'call-center-manage\')" class="text-xs text-blue-600"><i class="fas fa-sync mr-1"></i>Refresh</button></div>' +
+    (recentCalls.length === 0 ? '<div class="p-6 text-center text-gray-400">No call logs yet</div>' :
+    '<div class="overflow-x-auto max-h-96 overflow-y-auto"><table class="w-full"><thead class="sticky top-0 bg-gray-50"><tr class="text-xs text-gray-500 uppercase"><th class="px-3 py-2 text-left">Prospect</th><th class="px-3 py-2 text-left">Agent</th><th class="px-3 py-2 text-center">Outcome</th><th class="px-3 py-2 text-center">Duration</th><th class="px-3 py-2 text-left">Time</th></tr></thead><tbody>' + callRows + '</tbody></table></div>') +
+    '</div>' +
+    '<div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">' +
+    '<div class="p-4 border-b bg-gray-50"><h3 class="font-bold text-gray-800">Agent Performance (7 Days)</h3></div>' +
+    (agents.length === 0 ? '<div class="p-6 text-center text-gray-400">No agent data</div>' :
+    '<div class="overflow-x-auto"><table class="w-full"><thead><tr class="bg-gray-50 text-xs text-gray-500 uppercase"><th class="px-4 py-3 text-left">Agent</th><th class="px-4 py-3 text-center">Calls</th><th class="px-4 py-3 text-center">Connects</th><th class="px-4 py-3 text-center">Demos</th><th class="px-4 py-3 text-center">Avg Duration</th></tr></thead><tbody>' + agentRows + '</tbody></table></div>') +
+    '</div></div>' +
+    '<div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">' +
+    '<div class="flex items-center justify-between mb-4"><h3 class="font-bold text-gray-800 text-lg"><i class="fas fa-scroll mr-2 text-blue-500"></i>Sales Scripts</h3>' +
+    '<button onclick="document.getElementById(\'new-script-form\').classList.toggle(\'hidden\')" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-sm font-medium"><i class="fas fa-plus mr-1"></i>New Script</button></div>' +
+    '<div id="new-script-form" class="hidden bg-blue-50 rounded-xl p-4 mb-4 border border-blue-100">' +
+    '<div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">' +
+    '<div><label class="text-xs text-gray-500 font-medium block mb-1">Script Name *</label><input id="ns-name" class="w-full border rounded-lg px-3 py-2 text-sm" placeholder="Cold Call - Intro Pitch"></div>' +
+    '<div><label class="text-xs text-gray-500 font-medium block mb-1">Category</label><select id="ns-category" class="w-full border rounded-lg px-3 py-2 text-sm"><option value="cold_call">Cold Call</option><option value="follow_up">Follow Up</option><option value="demo">Demo</option><option value="close">Close</option><option value="objection_handler">Objection Handler</option></select></div>' +
+    '</div>' +
+    '<div class="mb-3"><label class="text-xs text-gray-500 font-medium block mb-1">Script Body *</label><textarea id="ns-body" class="w-full border rounded-lg px-3 py-2 text-sm h-32" placeholder="Hi [Name], this is [Agent] from RoofReporterAI..."></textarea></div>' +
+    '<div class="mb-3"><label class="text-xs text-gray-500 font-medium block mb-1">Notes</label><input id="ns-notes" class="w-full border rounded-lg px-3 py-2 text-sm" placeholder="Optional notes about when to use"></div>' +
+    '<button onclick="createScript()" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-xl text-sm font-bold"><i class="fas fa-save mr-1"></i>Save Script</button>' +
+    '</div>' +
+    (scripts.length === 0 ? '<div class="text-center text-gray-400 py-6"><i class="fas fa-scroll text-3xl mb-3 opacity-30"></i><p>No sales scripts yet. Create one above.</p></div>' : scriptsList) +
+    '</div>';
+}
+
+async function createScript() {
+  var name = document.getElementById('ns-name').value;
+  var body = document.getElementById('ns-body').value;
+  if (!name || !body) { alert('Name and script body are required'); return; }
+
+  try {
+    var res = await saFetch('/api/admin/superadmin/sales-scripts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: name,
+        category: document.getElementById('ns-category').value,
+        script_body: body,
+        notes: document.getElementById('ns-notes').value
+      })
+    });
+    var data = await res.json();
+    if (data.success) {
+      loadView('call-center-manage');
+    } else {
+      alert(data.error || 'Failed to create script');
+    }
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function toggleScript(id, active) {
+  try {
+    await saFetch('/api/admin/superadmin/sales-scripts/' + id, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ is_active: active })
+    });
+    loadView('call-center-manage');
+  } catch(e) { alert('Error toggling script'); }
+}
+
+async function deleteScript(id) {
+  if (!confirm('Delete this sales script?')) return;
+  try {
+    await saFetch('/api/admin/superadmin/sales-scripts/' + id, { method: 'DELETE' });
+    loadView('call-center-manage');
+  } catch(e) { alert('Error deleting script'); }
 }

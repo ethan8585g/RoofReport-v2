@@ -143,6 +143,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         <button onclick="generateProposalFromReport('${orderId}', '${order.property_address || ''}', '${order.homeowner_name || ''}', '${order.homeowner_email || ''}', '${order.homeowner_phone || ''}')" class="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium" id="genProposalBtn">
           <i class="fas fa-file-signature mr-2"></i>Generate Proposal
         </button>
+        <button onclick="generateDamageReport('${orderId}')" class="px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium" id="genDamageBtn">
+          <i class="fas fa-exclamation-triangle mr-2"></i>Damage Report
+        </button>
         <a href="/" class="px-6 py-3 bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors font-medium">
           <i class="fas fa-plus mr-2"></i>New Order
         </a>
@@ -1279,4 +1282,81 @@ function copyProposalLink(link) {
       }
     });
   });
+}
+
+// ============================================================
+// DAMAGE REPORT — Gemini AI satellite imagery analysis
+// ============================================================
+async function generateDamageReport(orderId) {
+  var btn = document.getElementById('genDamageBtn');
+  if (!btn) return;
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Analyzing Satellite Image...';
+
+  try {
+    var token = localStorage.getItem('rc_token');
+    var headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+
+    var res = await fetch('/api/reports/' + orderId + '/damage-report', {
+      method: 'POST',
+      headers: headers
+    });
+    var data = await res.json();
+
+    if (!data.success) {
+      alert(data.error || 'Damage analysis failed');
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fas fa-exclamation-triangle mr-2"></i>Damage Report';
+      return;
+    }
+
+    var analysis = data.analysis || {};
+    var findings = analysis.findings || [];
+
+    // Show result modal
+    var condColors = { poor: 'text-red-600', fair: 'text-amber-600', good: 'text-green-600', excellent: 'text-emerald-600' };
+    var urgColors = { emergency: 'bg-red-600', urgent: 'bg-orange-600', soon: 'bg-amber-500', routine: 'bg-green-500' };
+
+    var findingsHtml = findings.map(function(f) {
+      var sevC = { critical: 'bg-red-100 text-red-700', high: 'bg-orange-100 text-orange-700', moderate: 'bg-amber-100 text-amber-700', low: 'bg-green-100 text-green-700' };
+      return '<div class="flex items-start gap-3 p-3 rounded-lg ' + (f.severity === 'critical' || f.severity === 'high' ? 'bg-red-50' : 'bg-gray-50') + '">' +
+        '<span class="shrink-0 px-2 py-0.5 rounded text-xs font-bold ' + (sevC[f.severity] || 'bg-gray-100 text-gray-600') + '">' + (f.severity || '').toUpperCase() + '</span>' +
+        '<div><p class="text-sm font-medium text-gray-800 capitalize">' + (f.type || '').replace(/_/g, ' ') + '</p>' +
+        '<p class="text-xs text-gray-600 mt-1">' + (f.description || '') + '</p>' +
+        '<p class="text-xs text-gray-400 mt-1"><b>Location:</b> ' + (f.location || 'General') + '</p></div></div>';
+    }).join('');
+
+    var modal = document.createElement('div');
+    modal.className = 'fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4';
+    modal.innerHTML =
+      '<div class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6">' +
+      '<div class="text-center mb-4">' +
+      '<div class="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-3">' +
+      '<i class="fas fa-search text-red-500 text-2xl"></i></div>' +
+      '<h3 class="text-xl font-bold text-gray-800">AI Damage Assessment Complete</h3>' +
+      '<p class="text-sm text-gray-500">Satellite imagery analyzed by Gemini AI</p></div>' +
+      '<div class="grid grid-cols-3 gap-3 mb-4">' +
+      '<div class="bg-gray-50 rounded-xl p-3 text-center"><p class="text-[10px] text-gray-400 uppercase">Condition</p><p class="text-lg font-black ' + (condColors[analysis.overall_condition] || 'text-gray-600') + ' capitalize">' + (analysis.overall_condition || 'N/A') + '</p><p class="text-xs text-gray-500">Score: ' + (analysis.overall_score || '?') + '/10</p></div>' +
+      '<div class="bg-gray-50 rounded-xl p-3 text-center"><p class="text-[10px] text-gray-400 uppercase">Urgency</p><p class="text-xs font-bold text-white mt-1 inline-block px-3 py-1 rounded-full ' + (urgColors[analysis.urgency_level] || 'bg-gray-500') + ' capitalize">' + (analysis.urgency_level || 'N/A') + '</p></div>' +
+      '<div class="bg-gray-50 rounded-xl p-3 text-center"><p class="text-[10px] text-gray-400 uppercase">Est. Remaining Life</p><p class="text-sm font-bold text-gray-800 mt-1">' + (analysis.estimated_remaining_life || 'Unknown') + '</p></div></div>' +
+      '<div class="space-y-2 mb-4">' + findingsHtml + '</div>' +
+      '<div class="bg-blue-50 rounded-xl p-4 mb-4 border border-blue-100"><h4 class="text-sm font-bold text-blue-800 mb-2">Damage Summary</h4><p class="text-xs text-gray-700 whitespace-pre-line leading-relaxed">' + (analysis.damage_summary || '') + '</p></div>' +
+      (analysis.insurance_note ? '<div class="bg-amber-50 rounded-xl p-3 mb-4 border border-amber-200"><p class="text-xs text-amber-800"><b>Insurance Note:</b> ' + analysis.insurance_note + '</p></div>' : '') +
+      (analysis.recommended_action ? '<div class="bg-green-50 rounded-xl p-3 mb-4 border border-green-200"><p class="text-xs text-green-800"><b>Recommended Action:</b> ' + analysis.recommended_action + '</p></div>' : '') +
+      '<div class="flex gap-3">' +
+      '<a href="/api/reports/' + orderId + '/html" target="_blank" class="flex-1 text-center bg-red-600 hover:bg-red-700 text-white py-3 rounded-xl font-bold text-sm"><i class="fas fa-file-pdf mr-2"></i>View in Full Report</a>' +
+      '<button onclick="this.closest(\'.fixed\').remove()" class="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 py-3 rounded-xl font-bold text-sm">Close</button></div></div>';
+    document.body.appendChild(modal);
+
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-check-circle mr-2"></i>Damage Report Ready';
+    btn.classList.remove('bg-red-600', 'hover:bg-red-700');
+    btn.classList.add('bg-red-500');
+
+  } catch (err) {
+    alert('Error: ' + (err.message || 'Unknown error'));
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-exclamation-triangle mr-2"></i>Damage Report';
+  }
 }
