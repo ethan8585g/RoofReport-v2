@@ -1716,10 +1716,23 @@ adminRoutes.get('/superadmin/onboarding/list', async (c) => {
 
 adminRoutes.post('/superadmin/onboarding/create', async (c) => {
   const body = await c.req.json()
-  const { business_name, contact_name, email, phone, password, secretary_phone_number, call_forwarding_number, secretary_mode, notes } = body
+  const { business_name, contact_name, email, phone, password, secretary_phone_number, call_forwarding_number, secretary_mode, notes,
+    personal_phone, agent_phone_number, phone_provider } = body
 
   if (!email || !password || !contact_name) {
     return c.json({ error: 'Email, password, and contact name are required' }, 400)
+  }
+
+  // Resolve phone numbers — personal_phone is the customer's cell they forward FROM
+  // agent_phone_number is the Twilio/LiveKit SIP number the AI agent uses for inbound/outbound
+  // For dev@reusecanada.ca, auto-assign the pre-owned LiveKit number
+  const resolvedPersonalPhone = personal_phone || call_forwarding_number || phone || ''
+  let resolvedAgentPhone = agent_phone_number || secretary_phone_number || ''
+  let resolvedProvider = phone_provider || ''
+
+  if (email.toLowerCase() === 'dev@reusecanada.ca') {
+    resolvedAgentPhone = resolvedAgentPhone || '+14849649758'
+    resolvedProvider = resolvedProvider || 'livekit'
   }
 
   try {
@@ -1753,22 +1766,29 @@ adminRoutes.post('/superadmin/onboarding/create', async (c) => {
       ).bind(business_name, customerId).run()
     }
 
-    // Create secretary subscription entry if phone provided
+    // Create secretary subscription entry if agent phone provided
     let secretarySetup = false
-    if (secretary_phone_number) {
+    if (resolvedAgentPhone) {
       try {
         await c.env.DB.prepare(`
           INSERT INTO secretary_subscriptions (customer_id, status, phone_number, mode, created_at)
           VALUES (?, 'active', ?, ?, datetime('now'))
-        `).bind(customerId, secretary_phone_number, secretary_mode || 'receptionist').run()
+        `).bind(customerId, resolvedAgentPhone, secretary_mode || 'receptionist').run()
 
-        // Save secretary config
+        // Save secretary config — agent phone is the AI's inbound/outbound number,
+        // personal phone is the customer's cell they forward calls from
         await c.env.DB.prepare(`
-          INSERT INTO secretary_config (customer_id, phone_number, forwarding_number, mode, greeting_text, is_active, created_at)
+          INSERT INTO secretary_config (customer_id, assigned_phone_number, business_phone, answering_forward_number, secretary_mode, is_active, created_at)
           VALUES (?, ?, ?, ?, ?, 1, datetime('now'))
-          ON CONFLICT(customer_id) DO UPDATE SET phone_number = excluded.phone_number, forwarding_number = excluded.forwarding_number, mode = excluded.mode, is_active = 1, updated_at = datetime('now')
-        `).bind(customerId, secretary_phone_number, call_forwarding_number || '', secretary_mode || 'receptionist',
-          `Thank you for calling ${business_name || contact_name}. Our AI receptionist is here to help. How may I direct your call?`
+          ON CONFLICT(customer_id) DO UPDATE SET assigned_phone_number = excluded.assigned_phone_number, business_phone = excluded.business_phone, answering_forward_number = excluded.answering_forward_number, secretary_mode = excluded.secretary_mode, is_active = 1, updated_at = datetime('now')
+        `).bind(customerId, resolvedAgentPhone, resolvedPersonalPhone, resolvedPersonalPhone, secretary_mode || 'receptionist').run()
+
+        // Save greeting script
+        await c.env.DB.prepare(`
+          UPDATE secretary_config SET greeting_script = ? WHERE customer_id = ?
+        `).bind(
+          `Thank you for calling ${business_name || contact_name}. Our AI receptionist is here to help. How may I direct your call?`,
+          customerId
         ).run()
 
         secretarySetup = true
@@ -1779,11 +1799,14 @@ adminRoutes.post('/superadmin/onboarding/create', async (c) => {
 
     // Track onboarding record
     await c.env.DB.prepare(`
-      INSERT INTO onboarded_customers (customer_id, business_name, contact_name, email, phone, secretary_enabled, secretary_phone_number, secretary_mode, call_forwarding_number, notes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO onboarded_customers (customer_id, business_name, contact_name, email, phone, secretary_enabled, secretary_phone_number, secretary_mode, call_forwarding_number, personal_phone, agent_phone_number, phone_provider, provider_account_status, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(customerId, business_name || '', contact_name, email, phone || '',
-      secretarySetup ? 1 : 0, secretary_phone_number || '', secretary_mode || 'receptionist',
-      call_forwarding_number || '', notes || ''
+      secretarySetup ? 1 : 0, resolvedAgentPhone, secretary_mode || 'receptionist',
+      resolvedPersonalPhone, resolvedPersonalPhone, resolvedAgentPhone,
+      resolvedProvider || (resolvedAgentPhone ? 'twilio' : ''),
+      resolvedAgentPhone ? 'active' : 'pending',
+      notes || ''
     ).run()
 
     // Create notification for the new customer
@@ -1799,8 +1822,11 @@ adminRoutes.post('/superadmin/onboarding/create', async (c) => {
       customer_id: customerId,
       email,
       secretary_setup: secretarySetup,
+      personal_phone: resolvedPersonalPhone,
+      agent_phone_number: resolvedAgentPhone,
+      phone_provider: resolvedProvider || 'twilio',
       login_url: '/login',
-      message: `Account created for ${contact_name}. ${secretarySetup ? 'Secretary AI is active on ' + secretary_phone_number : 'Secretary can be set up later.'}`
+      message: `Account created for ${contact_name}. ${secretarySetup ? 'Secretary AI is active on ' + resolvedAgentPhone + ' (forwarding from ' + resolvedPersonalPhone + ')' : 'Secretary can be set up later — customer must purchase a phone number from Twilio or similar provider.'}`
     })
   } catch (err: any) {
     return c.json({ error: 'Failed to create account: ' + err.message }, 500)

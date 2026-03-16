@@ -4236,58 +4236,143 @@ function renderCustomerOnboardingView() {
   var d = SA.data.onboarding || {};
   var customers = d.customers || [];
   var rows = customers.map(function(c) {
-    var secBadge = c.secretary_enabled ? '<span class="px-2 py-0.5 bg-green-100 text-green-800 rounded-full text-xs font-medium">Active</span>' : '<span class="px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full text-xs font-medium">Off</span>';
+    var secBadge = c.secretary_enabled ? '<span class="px-2 py-0.5 bg-green-100 text-green-800 rounded-full text-xs font-medium"><i class="fas fa-check-circle mr-1"></i>Active</span>' : '<span class="px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full text-xs font-medium">Off</span>';
     var modeBadge = c.secretary_mode === 'always_on' ? '<span class="text-xs text-blue-600 font-medium">Always On</span>' : c.secretary_mode === 'answering_service' ? '<span class="text-xs text-purple-600 font-medium">Answering</span>' : '<span class="text-xs text-sky-600 font-medium">Receptionist</span>';
+    var provBadge = c.phone_provider === 'livekit' ? '<span class="px-1.5 py-0.5 bg-violet-100 text-violet-700 rounded text-[10px] font-bold">LiveKit</span>' : c.phone_provider === 'twilio' ? '<span class="px-1.5 py-0.5 bg-red-100 text-red-700 rounded text-[10px] font-bold">Twilio</span>' : '<span class="px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded text-[10px]">N/A</span>';
     return '<tr class="border-b border-gray-100 hover:bg-gray-50">' +
       '<td class="px-4 py-3"><div class="font-bold text-gray-800 text-sm">' + (c.business_name || c.contact_name || 'N/A') + '</div><div class="text-xs text-gray-500">' + (c.email || '') + '</div></td>' +
-      '<td class="px-4 py-3 text-sm text-gray-600">' + (c.phone || '-') + '</td>' +
+      '<td class="px-4 py-3 text-sm text-gray-600"><div>' + (c.personal_phone || c.phone || '-') + '</div><div class="text-[10px] text-gray-400">Personal Cell</div></td>' +
+      '<td class="px-4 py-3 text-sm text-gray-600"><div class="font-mono">' + (c.agent_phone_number || c.secretary_phone_number || '-') + '</div><div class="text-[10px] text-gray-400">AI Agent #</div></td>' +
+      '<td class="px-4 py-3 text-center">' + provBadge + '</td>' +
       '<td class="px-4 py-3 text-center">' + secBadge + '</td>' +
       '<td class="px-4 py-3 text-center">' + modeBadge + '</td>' +
-      '<td class="px-4 py-3 text-sm text-gray-500">' + (c.secretary_phone_number || '-') + '</td>' +
-      '<td class="px-4 py-3 text-sm text-gray-500">' + (c.call_forwarding_number || '-') + '</td>' +
       '<td class="px-4 py-3 text-xs text-gray-400">' + fmtDate(c.created_at) + '</td>' +
       '<td class="px-4 py-3"><button onclick="toggleSecretaryMode(' + c.id + ', ' + (c.secretary_enabled ? 0 : 1) + ')" class="text-xs ' + (c.secretary_enabled ? 'text-red-600 hover:text-red-800' : 'text-green-600 hover:text-green-800') + ' font-medium">' + (c.secretary_enabled ? '<i class="fas fa-power-off mr-1"></i>Disable' : '<i class="fas fa-play mr-1"></i>Enable') + '</button></td>' +
       '</tr>';
   }).join('');
 
-  return '<div class="mb-6"><h2 class="text-2xl font-black text-gray-900"><i class="fas fa-user-cog mr-2 text-indigo-500"></i>Customer Onboarding</h2><p class="text-sm text-gray-500 mt-1">Provision new customer accounts, set up Secretary AI, manage call forwarding</p></div>' +
+  return '<div class="mb-6"><h2 class="text-2xl font-black text-gray-900"><i class="fas fa-user-cog mr-2 text-indigo-500"></i>Customer Onboarding — Roofer Secretary AI</h2><p class="text-sm text-gray-500 mt-1">Provision new customer accounts, assign phone numbers, and set up Secretary AI call forwarding</p></div>' +
+
+    // --- Twilio/Phone Provider Guide ---
+    '<div class="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-5 mb-6">' +
+    '<div class="flex items-start gap-3">' +
+    '<div class="w-10 h-10 bg-amber-100 rounded-xl flex items-center justify-center shrink-0"><i class="fas fa-phone-volume text-amber-600"></i></div>' +
+    '<div>' +
+    '<h3 class="font-bold text-amber-900 mb-1">Phone Number Setup Guide</h3>' +
+    '<p class="text-xs text-amber-800 leading-relaxed mb-3">Each Roofer Secretary AI customer needs <b>two phone numbers</b>:</p>' +
+    '<div class="grid md:grid-cols-2 gap-4">' +
+    '<div class="bg-white rounded-xl p-4 border border-amber-200">' +
+    '<div class="flex items-center gap-2 mb-2"><span class="w-6 h-6 bg-blue-100 rounded-full flex items-center justify-center text-xs font-bold text-blue-700">1</span><span class="font-bold text-gray-800 text-sm">Personal Phone Number</span></div>' +
+    '<p class="text-xs text-gray-600 leading-relaxed">The customer\'s <b>personal cell phone</b> they currently use for business. This is the number they will <b>forward calls FROM</b> when they can\'t answer (busy, after hours, etc.). The customer sets up call forwarding through their cell provider (Telus, Bell, Rogers, etc.).</p>' +
+    '</div>' +
+    '<div class="bg-white rounded-xl p-4 border border-amber-200">' +
+    '<div class="flex items-center gap-2 mb-2"><span class="w-6 h-6 bg-purple-100 rounded-full flex items-center justify-center text-xs font-bold text-purple-700">2</span><span class="font-bold text-gray-800 text-sm">Agent Phone Number (SIP/VoIP)</span></div>' +
+    '<p class="text-xs text-gray-600 leading-relaxed">A purchased SIP phone number the AI agent uses for <b>inbound and outbound</b> calls. Customers must purchase this from a provider like <b>Twilio</b>, <b>Vonage</b>, or <b>Telnyx</b>.</p>' +
+    '<div class="mt-2 p-2 bg-violet-50 rounded-lg border border-violet-200">' +
+    '<p class="text-[10px] text-violet-700 font-medium"><i class="fas fa-star mr-1"></i><b>dev@reusecanada.ca</b> uses pre-owned LiveKit number: <span class="font-mono">+1 (484) 964-9758</span></p>' +
+    '</div>' +
+    '</div>' +
+    '</div>' +
+    '<div class="mt-3 bg-white rounded-xl p-3 border border-amber-200">' +
+    '<p class="text-xs font-bold text-gray-700 mb-1"><i class="fas fa-external-link-alt mr-1 text-amber-600"></i>Recommended SIP Phone Providers:</p>' +
+    '<div class="flex flex-wrap gap-2">' +
+    '<a href="https://www.twilio.com/en-us/phone-numbers" target="_blank" class="px-3 py-1.5 bg-red-50 border border-red-200 rounded-lg text-xs font-bold text-red-700 hover:bg-red-100 transition-colors"><i class="fas fa-phone mr-1"></i>Twilio — Buy Phone Number</a>' +
+    '<a href="https://www.vonage.com/communications-apis/phone-numbers/" target="_blank" class="px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-lg text-xs font-bold text-blue-700 hover:bg-blue-100 transition-colors"><i class="fas fa-phone mr-1"></i>Vonage Numbers</a>' +
+    '<a href="https://telnyx.com/products/phone-numbers" target="_blank" class="px-3 py-1.5 bg-green-50 border border-green-200 rounded-lg text-xs font-bold text-green-700 hover:bg-green-100 transition-colors"><i class="fas fa-phone mr-1"></i>Telnyx Numbers</a>' +
+    '</div>' +
+    '<p class="text-[10px] text-gray-400 mt-2">After purchasing, enter the number in the "Agent Phone Number" field below. Configure SIP trunk credentials in the Secretary AI telephony settings.</p>' +
+    '</div>' +
+    '</div></div></div>' +
+
+    // --- Create New Customer Form ---
     '<div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">' +
-    '<div class="flex items-center justify-between mb-4"><h3 class="font-bold text-gray-800 text-lg">Create New Customer</h3></div>' +
-    '<div id="onboard-form" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">' +
+    '<div class="flex items-center justify-between mb-4"><h3 class="font-bold text-gray-800 text-lg"><i class="fas fa-user-plus mr-2 text-indigo-500"></i>Create New Customer</h3></div>' +
+    '<div id="onboard-form" class="space-y-4">' +
+
+    // Row 1: Basic info
+    '<div class="grid grid-cols-1 md:grid-cols-3 gap-4">' +
     '<div><label class="text-xs text-gray-500 font-medium block mb-1">Business Name</label><input id="ob-business" class="w-full border rounded-lg px-3 py-2 text-sm" placeholder="ABC Roofing Ltd"></div>' +
-    '<div><label class="text-xs text-gray-500 font-medium block mb-1">Contact Name</label><input id="ob-name" class="w-full border rounded-lg px-3 py-2 text-sm" placeholder="John Smith"></div>' +
+    '<div><label class="text-xs text-gray-500 font-medium block mb-1">Contact Name *</label><input id="ob-name" class="w-full border rounded-lg px-3 py-2 text-sm" placeholder="John Smith"></div>' +
     '<div><label class="text-xs text-gray-500 font-medium block mb-1">Email *</label><input id="ob-email" class="w-full border rounded-lg px-3 py-2 text-sm" placeholder="john@abcroofing.ca" type="email"></div>' +
-    '<div><label class="text-xs text-gray-500 font-medium block mb-1">Phone</label><input id="ob-phone" class="w-full border rounded-lg px-3 py-2 text-sm" placeholder="+1 403 555 1234"></div>' +
+    '</div>' +
+
+    // Row 2: Password + Secretary Mode
+    '<div class="grid grid-cols-1 md:grid-cols-3 gap-4">' +
     '<div><label class="text-xs text-gray-500 font-medium block mb-1">Password *</label><input id="ob-password" class="w-full border rounded-lg px-3 py-2 text-sm" placeholder="Secure password" type="text"></div>' +
     '<div><label class="text-xs text-gray-500 font-medium block mb-1">Secretary AI Mode</label><select id="ob-sec-mode" class="w-full border rounded-lg px-3 py-2 text-sm"><option value="receptionist">Receptionist</option><option value="answering_service">Answering Service</option><option value="always_on">Always On</option></select></div>' +
-    '<div><label class="text-xs text-gray-500 font-medium block mb-1">LiveKit Phone # (Secretary AI)</label><input id="ob-sec-phone" class="w-full border rounded-lg px-3 py-2 text-sm" placeholder="+1 403 555 9999"></div>' +
-    '<div><label class="text-xs text-gray-500 font-medium block mb-1">Call Forwarding # (Customer Cell)</label><input id="ob-fwd-phone" class="w-full border rounded-lg px-3 py-2 text-sm" placeholder="+1 403 555 8888"></div>' +
-    '<div><label class="text-xs text-gray-500 font-medium block mb-1">Notes</label><input id="ob-notes" class="w-full border rounded-lg px-3 py-2 text-sm" placeholder="Optional notes"></div>' +
+    '<div><label class="text-xs text-gray-500 font-medium block mb-1">Phone Provider</label><select id="ob-provider" class="w-full border rounded-lg px-3 py-2 text-sm"><option value="twilio">Twilio</option><option value="livekit">LiveKit (Pre-owned)</option><option value="vonage">Vonage</option><option value="telnyx">Telnyx</option></select></div>' +
     '</div>' +
-    '<div class="flex items-center gap-3"><label class="flex items-center gap-2 text-sm"><input type="checkbox" id="ob-enable-sec" checked> Enable Secretary AI on creation</label></div>' +
-    '<button onclick="createOnboardingCustomer()" class="mt-4 bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-xl font-bold text-sm transition-all shadow-md"><i class="fas fa-user-plus mr-2"></i>Create Account & Setup Secretary AI</button>' +
+
+    // Row 3: Phone Numbers — THE KEY FIELDS
+    '<div class="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-4 border border-blue-200">' +
+    '<h4 class="text-sm font-bold text-blue-800 mb-3"><i class="fas fa-phone-alt mr-1"></i>Phone Number Configuration</h4>' +
+    '<div class="grid grid-cols-1 md:grid-cols-2 gap-4">' +
+
+    '<div>' +
+    '<label class="text-xs text-gray-600 font-bold block mb-1"><span class="inline-flex items-center gap-1"><span class="w-5 h-5 bg-blue-100 rounded-full flex items-center justify-center text-[10px] font-bold text-blue-700">1</span> Personal Phone Number</span></label>' +
+    '<input id="ob-personal-phone" class="w-full border-2 border-blue-200 rounded-lg px-3 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-200" placeholder="+1 403 555 1234">' +
+    '<p class="text-[10px] text-gray-500 mt-1"><i class="fas fa-info-circle mr-1"></i>Customer\'s personal cell — they forward calls <b>FROM</b> this number when unavailable</p>' +
     '</div>' +
+
+    '<div>' +
+    '<label class="text-xs text-gray-600 font-bold block mb-1"><span class="inline-flex items-center gap-1"><span class="w-5 h-5 bg-purple-100 rounded-full flex items-center justify-center text-[10px] font-bold text-purple-700">2</span> Agent Phone Number (SIP)</span></label>' +
+    '<input id="ob-agent-phone" class="w-full border-2 border-purple-200 rounded-lg px-3 py-2.5 text-sm focus:border-purple-500 focus:ring-2 focus:ring-purple-200" placeholder="+1 484 964 9758">' +
+    '<p class="text-[10px] text-gray-500 mt-1"><i class="fas fa-robot mr-1"></i>Purchased Twilio/LiveKit number the AI agent uses for inbound/outbound calls</p>' +
+    '</div>' +
+
+    '</div>' +
+    '<div class="mt-3 p-2 bg-white rounded-lg border border-blue-100 flex items-center gap-2">' +
+    '<i class="fas fa-lightbulb text-amber-500 text-sm"></i>' +
+    '<p class="text-[10px] text-gray-600"><b>How it works:</b> Customer forwards their personal phone to the Agent Phone # when they can\'t answer. The AI Secretary picks up, handles the call, and routes/notifies as configured. Customer sets up forwarding via their cell provider (Telus: *21*[number]#, Rogers: **21*[number]#, Bell: *72[number]).</p>' +
+    '</div>' +
+    '</div>' +
+
+    // Row 4: Notes + Enable toggle
+    '<div class="grid grid-cols-1 md:grid-cols-2 gap-4">' +
+    '<div><label class="text-xs text-gray-500 font-medium block mb-1">Notes</label><input id="ob-notes" class="w-full border rounded-lg px-3 py-2 text-sm" placeholder="Optional notes about this customer"></div>' +
+    '<div class="flex items-end pb-1"><label class="flex items-center gap-2 text-sm"><input type="checkbox" id="ob-enable-sec" checked class="rounded"> Enable Secretary AI on creation</label></div>' +
+    '</div>' +
+
+    '</div>' +
+    '<button onclick="createOnboardingCustomer()" class="mt-5 bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-3 rounded-xl font-bold text-sm transition-all shadow-md hover:shadow-lg"><i class="fas fa-user-plus mr-2"></i>Create Account & Setup Secretary AI</button>' +
+    '</div>' +
+
+    // --- Onboarded Customers Table ---
     '<div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">' +
-    '<div class="p-4 border-b bg-gray-50"><h3 class="font-bold text-gray-800">Onboarded Customers (' + customers.length + ')</h3></div>' +
+    '<div class="p-4 border-b bg-gray-50 flex items-center justify-between"><h3 class="font-bold text-gray-800">Onboarded Customers (' + customers.length + ')</h3><button onclick="loadView(\'customer-onboarding\')" class="text-xs text-blue-600 hover:text-blue-800 font-medium"><i class="fas fa-sync mr-1"></i>Refresh</button></div>' +
     (customers.length === 0 ? '<div class="p-8 text-center text-gray-400"><i class="fas fa-users text-3xl mb-3 opacity-30"></i><p>No customers onboarded yet</p></div>' :
-    '<div class="overflow-x-auto"><table class="w-full"><thead><tr class="bg-gray-50 text-xs text-gray-500 uppercase"><th class="px-4 py-3 text-left">Customer</th><th class="px-4 py-3 text-left">Phone</th><th class="px-4 py-3 text-center">Secretary</th><th class="px-4 py-3 text-center">Mode</th><th class="px-4 py-3 text-left">AI Phone #</th><th class="px-4 py-3 text-left">Fwd To</th><th class="px-4 py-3 text-left">Onboarded</th><th class="px-4 py-3 text-left">Action</th></tr></thead><tbody>' + rows + '</tbody></table></div>') +
+    '<div class="overflow-x-auto"><table class="w-full"><thead><tr class="bg-gray-50 text-xs text-gray-500 uppercase"><th class="px-4 py-3 text-left">Customer</th><th class="px-4 py-3 text-left">Personal Phone</th><th class="px-4 py-3 text-left">Agent Phone #</th><th class="px-4 py-3 text-center">Provider</th><th class="px-4 py-3 text-center">Secretary</th><th class="px-4 py-3 text-center">Mode</th><th class="px-4 py-3 text-left">Onboarded</th><th class="px-4 py-3 text-left">Action</th></tr></thead><tbody>' + rows + '</tbody></table></div>') +
     '</div>';
 }
 
 async function createOnboardingCustomer() {
   var email = document.getElementById('ob-email').value;
   var password = document.getElementById('ob-password').value;
+  var contactName = document.getElementById('ob-name').value;
   if (!email || !password) { alert('Email and Password are required'); return; }
+  if (!contactName) { alert('Contact Name is required'); return; }
+
+  var personalPhone = document.getElementById('ob-personal-phone').value;
+  var agentPhone = document.getElementById('ob-agent-phone').value;
+
+  if (!personalPhone) { alert('Personal Phone Number is required — this is the customer\'s cell they forward calls FROM'); return; }
+  if (!agentPhone) {
+    if (!confirm('No Agent Phone Number entered. The customer will need to purchase a phone number from Twilio or similar provider before Secretary AI can make/receive calls. Continue anyway?')) return;
+  }
 
   var body = {
     business_name: document.getElementById('ob-business').value,
-    contact_name: document.getElementById('ob-name').value,
+    contact_name: contactName,
     email: email,
-    phone: document.getElementById('ob-phone').value,
+    phone: personalPhone,
     password: password,
     secretary_mode: document.getElementById('ob-sec-mode').value,
-    secretary_phone_number: document.getElementById('ob-sec-phone').value,
-    call_forwarding_number: document.getElementById('ob-fwd-phone').value,
+    personal_phone: personalPhone,
+    agent_phone_number: agentPhone,
+    phone_provider: document.getElementById('ob-provider').value,
+    // Map to legacy fields for backwards compatibility
+    secretary_phone_number: agentPhone,
+    call_forwarding_number: personalPhone,
     notes: document.getElementById('ob-notes').value,
     enable_secretary: document.getElementById('ob-enable-sec').checked
   };
@@ -4300,7 +4385,20 @@ async function createOnboardingCustomer() {
     });
     var data = await res.json();
     if (data.success) {
-      alert('Customer account created successfully! Secretary AI ' + (body.enable_secretary ? 'enabled' : 'disabled') + '.');
+      var msg = 'Customer account created for ' + contactName + '!\n\n';
+      if (data.secretary_setup) {
+        msg += 'Secretary AI: ACTIVE\n';
+        msg += 'Agent Phone: ' + (data.agent_phone_number || agentPhone) + '\n';
+        msg += 'Personal Phone: ' + (data.personal_phone || personalPhone) + '\n\n';
+        msg += 'NEXT STEP: Customer must configure call forwarding on their cell provider:\n';
+        msg += '  Telus: *21*' + (data.agent_phone_number || agentPhone).replace(/[^0-9+]/g, '') + '#\n';
+        msg += '  Rogers: **21*' + (data.agent_phone_number || agentPhone).replace(/[^0-9+]/g, '') + '#\n';
+        msg += '  Bell: *72' + (data.agent_phone_number || agentPhone).replace(/[^0-9+]/g, '') + '\n';
+      } else {
+        msg += 'Secretary AI: NOT ACTIVE (no agent phone number provided)\n';
+        msg += 'Customer must purchase a SIP phone number from Twilio/Vonage/Telnyx first.';
+      }
+      alert(msg);
       loadView('customer-onboarding');
     } else {
       alert(data.error || 'Failed to create customer');
