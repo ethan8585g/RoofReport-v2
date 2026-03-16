@@ -2,13 +2,13 @@
 
 ## Project Overview
 - **Name**: RoofReporterAI
-- **Version**: 9.1 (Onboarding Wizard + Subscription Tiers)
+- **Version**: 9.2 (Secretary AI LiveKit Integration + Manual Phone Config)
 - **Domain**: www.roofreporterai.com
 - **Production**: https://roofing-measurement-tool.pages.dev
 - **GitHub**: https://github.com/ethan8585g/roofreporter-ai-good-copy
 - **Platform**: Cloudflare Pages + Workers + D1
 - **Status**: Active
-- **Last Updated**: 2026-03-16
+- **Last Updated**: 2026-03-16 (v9.2)
 
 ## Core Platform Features
 
@@ -54,10 +54,14 @@
 
 ### 7. Roofer Secretary AI (LiveKit + Twilio/SIP)
 - AI receptionist powered by LiveKit voice agents
-- Inbound/outbound call handling
-- Call forwarding from customer's personal cell
-- Three modes: Receptionist, Answering Service, Always On
-- FAQ knowledge base, appointment booking, email notifications
+- **LIVE on production** — trunk `ST_acLimvCPo5ES`, dispatch `SDR_cZDM2nFXpW7o`
+- Inbound/outbound call handling via LiveKit SIP
+- Call forwarding: 780-983-3335 → +1(484) 964-9758 → LiveKit AI
+- Three modes: Directory, Never-Voicemail Answering, Full AI Secretary
+- Manual phone entry flow: enter business phone + purchased AI phone → save → forwarding instructions → confirm → deploy LiveKit agent
+- Edit Phone Configuration modal for connected-state changes
+- FAQ knowledge base, appointment booking, callbacks, email notifications
+- Rick's Roofing greeting script (2,009 chars) + Q&A (3,000 chars) + General Notes (2,337 chars) configured
 
 ---
 
@@ -162,6 +166,9 @@ Homeowner calls roofer → Roofer's Personal Cell
 | POST | `/api/square/create-payment-link` | Generate Square payment link |
 | POST | `/api/customer/validate-email` | **NEW** Real-time email availability check |
 | POST | `/api/customer/set-tier` | **NEW** Set subscription tier + trial period |
+| POST | `/api/secretary/quick-connect/save-phones` | **NEW** Save business + AI phone numbers (manual entry) |
+| POST | `/api/secretary/quick-connect/activate` | **UPDATED** Deploys LiveKit trunk + dispatch rule on activation |
+| GET | `/api/secretary/quick-connect/status` | Phone setup status with trunk/dispatch info |
 | POST | `/api/admin/superadmin/onboarding/create` | Create customer + Secretary AI |
 | POST | `/api/admin/superadmin/service-invoices/create` | Create cold-call invoice |
 | GET | `/api/admin/superadmin/call-center/stats` | Call center metrics |
@@ -185,7 +192,7 @@ Homeowner calls roofer → Roofer's Personal Cell
 - `cc_daily_stats` — Daily call metrics cache
 
 ### Migrations
-43 migration files in `migrations/` directory (0001 through 0043)
+44 migration files in `migrations/` directory (0001 through 0044)
 
 ---
 

@@ -2926,3 +2926,64 @@ secretaryRoutes.get('/quick-connect/status', async (c) => {
     has_dispatch: !!config.livekit_dispatch_rule_id,
   })
 })
+
+// ============================================================
+// GET /agent-config/:customerId — Public endpoint for LiveKit agent
+// Returns the secretary configuration for a specific customer.
+// Used by the Python LiveKit agent to load greeting, Q&A, etc.
+// No auth required — called by the agent server, not by users.
+// ============================================================
+secretaryRoutes.get('/agent-config/:customerId', async (c) => {
+  const customerId = parseInt(c.req.param('customerId'), 10)
+  if (!customerId || isNaN(customerId)) {
+    return c.json({ success: false, error: 'Invalid customer ID' }, 400)
+  }
+
+  try {
+    const config = await c.env.DB.prepare(
+      `SELECT customer_id, business_phone, greeting_script, common_qa, general_notes,
+              agent_name, agent_voice, agent_language, secretary_mode,
+              answering_fallback_action, answering_forward_number,
+              full_can_book_appointments, full_can_send_email, full_can_schedule_callback,
+              full_can_answer_faq, full_business_hours, full_services_offered,
+              full_pricing_info, full_service_area
+       FROM secretary_config WHERE customer_id = ?`
+    ).bind(customerId).first<any>()
+
+    if (!config) {
+      return c.json({ success: false, error: 'Secretary not configured for this customer' }, 404)
+    }
+
+    // Load directories
+    const dirResult = await c.env.DB.prepare(
+      `SELECT sc.id as config_id FROM secretary_config sc WHERE sc.customer_id = ?`
+    ).bind(customerId).first<any>()
+
+    let directories: any[] = []
+    if (dirResult?.config_id) {
+      const dirs = await c.env.DB.prepare(
+        `SELECT name, phone_or_action, special_notes FROM secretary_directories WHERE config_id = ? ORDER BY sort_order`
+      ).bind(dirResult.config_id).all<any>()
+      directories = dirs.results || []
+    }
+
+    return c.json({
+      success: true,
+      config: {
+        customer_id: config.customer_id,
+        business_phone: config.business_phone,
+        greeting_script: config.greeting_script || '',
+        common_qa: config.common_qa || '',
+        general_notes: config.general_notes || '',
+        agent_name: config.agent_name || 'Sarah',
+        agent_voice: config.agent_voice || 'alloy',
+        agent_language: config.agent_language || 'en',
+        secretary_mode: config.secretary_mode || 'full',
+        directories,
+      }
+    })
+  } catch (err: any) {
+    console.error('[AgentConfig] Error:', err.message)
+    return c.json({ success: false, error: 'Failed to load agent config' }, 500)
+  }
+})

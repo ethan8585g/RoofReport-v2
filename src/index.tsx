@@ -189,6 +189,96 @@ app.route('/api/crm', crmRoutes)
 app.route('/api/property-imagery', propertyImageryRoutes)
 app.route('/api/blog', blogRoutes)
 app.route('/api/d2d', d2dRoutes)
+// Public agent-config endpoint — called by LiveKit agent worker (no auth)
+app.get('/api/secretary/agent-config/:customerId', async (c) => {
+  const customerId = parseInt(c.req.param('customerId'), 10)
+  if (!customerId || isNaN(customerId)) {
+    return c.json({ success: false, error: 'Invalid customer ID' }, 400)
+  }
+  try {
+    const config = await c.env.DB.prepare(
+      `SELECT customer_id, business_phone, greeting_script, common_qa, general_notes,
+              agent_name, agent_voice, agent_language, secretary_mode,
+              answering_fallback_action, answering_forward_number,
+              full_can_book_appointments, full_can_send_email, full_can_schedule_callback,
+              full_can_answer_faq, full_business_hours, full_services_offered,
+              full_pricing_info, full_service_area, id as config_id
+       FROM secretary_config WHERE customer_id = ?`
+    ).bind(customerId).first<any>()
+    if (!config) return c.json({ success: false, error: 'Not found' }, 404)
+
+    let directories: any[] = []
+    if (config.config_id) {
+      const dirs = await c.env.DB.prepare(
+        `SELECT name, phone_or_action, special_notes FROM secretary_directories WHERE config_id = ? ORDER BY sort_order`
+      ).bind(config.config_id).all<any>()
+      directories = dirs.results || []
+    }
+    return c.json({
+      success: true,
+      config: {
+        customer_id: config.customer_id,
+        business_phone: config.business_phone,
+        greeting_script: config.greeting_script || '',
+        common_qa: config.common_qa || '',
+        general_notes: config.general_notes || '',
+        agent_name: config.agent_name || 'Sarah',
+        agent_voice: config.agent_voice || 'alloy',
+        secretary_mode: config.secretary_mode || 'full',
+        directories,
+      }
+    })
+  } catch (err: any) {
+    return c.json({ success: false, error: 'Server error' }, 500)
+  }
+})
+
+// Secretary webhook endpoints — called by LiveKit agent (no auth required)
+app.post('/api/secretary/webhook/message', async (c) => {
+  try {
+    const body = await c.req.json()
+    const { customer_id, caller_name, caller_phone, message, urgency } = body
+    if (!customer_id) return c.json({ error: 'customer_id required' }, 400)
+    await c.env.DB.prepare(
+      `INSERT INTO secretary_messages (customer_id, caller_name, caller_phone, message_text, urgency, is_read, created_at)
+       VALUES (?, ?, ?, ?, ?, 0, datetime('now'))`
+    ).bind(customer_id, caller_name || '', caller_phone || '', message || '', urgency || 'normal').run()
+    return c.json({ success: true })
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500)
+  }
+})
+
+app.post('/api/secretary/webhook/appointment', async (c) => {
+  try {
+    const body = await c.req.json()
+    const { customer_id, caller_name, caller_phone, property_address, service_type, notes } = body
+    if (!customer_id) return c.json({ error: 'customer_id required' }, 400)
+    await c.env.DB.prepare(
+      `INSERT INTO secretary_appointments (customer_id, caller_name, caller_phone, property_address, service_type, notes, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'pending', datetime('now'))`
+    ).bind(customer_id, caller_name || '', caller_phone || '', property_address || '', service_type || '', notes || '').run()
+    return c.json({ success: true })
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500)
+  }
+})
+
+app.post('/api/secretary/webhook/call-complete', async (c) => {
+  try {
+    const body = await c.req.json()
+    const { customer_id, room_name, caller_name, caller_phone, messages_taken } = body
+    if (!customer_id) return c.json({ error: 'customer_id required' }, 400)
+    await c.env.DB.prepare(
+      `INSERT INTO secretary_call_logs (customer_id, room_name, caller_name, caller_phone, outcome, notes, created_at)
+       VALUES (?, ?, ?, ?, 'completed', ?, datetime('now'))`
+    ).bind(customer_id, room_name || '', caller_name || '', caller_phone || '', JSON.stringify(messages_taken || [])).run()
+    return c.json({ success: true })
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500)
+  }
+})
+
 app.route('/api/secretary', secretaryRoutes)
 app.route('/api/rover', roverRoutes)
 app.route('/api/email-outreach', emailOutreachRoutes)

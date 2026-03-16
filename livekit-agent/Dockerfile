@@ -11,12 +11,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Download model files for noise cancellation and VAD
+# Download model files for VAD
 RUN python -c "from livekit.plugins import silero; silero.VAD.load()"
 
 # Copy agent code
 COPY agent.py .
-COPY .env.local .env.local
 
 # Run the agent in production mode
 CMD ["python", "agent.py", "start"]
