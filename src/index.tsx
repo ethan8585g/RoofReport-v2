@@ -596,6 +596,58 @@ app.get('/signup', (c) => {
   return c.html(getSignupWizardHTML())
 })
 
+// Google OAuth callback for customer sign-in
+app.get('/customer/google-callback', (c) => {
+  return c.html(`<!DOCTYPE html>
+<html><head><title>Google Sign-In</title></head>
+<body>
+<script>
+  // Extract id_token from URL hash
+  var hash = window.location.hash.substring(1);
+  var params = new URLSearchParams(hash);
+  var idToken = params.get('id_token');
+  if (idToken) {
+    fetch('/api/customer/google', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ credential: idToken })
+    }).then(r => r.json()).then(data => {
+      if (data.success) {
+        localStorage.setItem('rc_customer', JSON.stringify(data.customer));
+        localStorage.setItem('rc_customer_token', data.token);
+        window.location.href = '/customer/dashboard';
+      } else {
+        alert('Google sign-in failed: ' + (data.error || 'Unknown error'));
+        window.location.href = '/customer/login';
+      }
+    }).catch(() => {
+      alert('Google sign-in failed. Please try again.');
+      window.location.href = '/customer/login';
+    });
+  } else {
+    alert('Google sign-in failed. No token received.');
+    window.location.href = '/customer/login';
+  }
+</script>
+<div style="display:flex;justify-content:center;align-items:center;min-height:100vh;font-family:sans-serif;color:#666">
+  <div style="text-align:center"><div style="width:40px;height:40px;border:4px solid #ddd;border-top:4px solid #4285f4;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto"></div><p style="margin-top:16px">Signing in with Google...</p></div>
+</div>
+<style>@keyframes spin{to{transform:rotate(360deg)}}</style>
+</body></html>`)
+})
+
+// Google OAuth config endpoint (public - returns client ID only)
+app.get('/api/public/google-oauth-config', (c) => {
+  const clientId = (c.env as any).GOOGLE_OAUTH_CLIENT_ID || (c.env as any).GMAIL_CLIENT_ID || ''
+  return c.json({ client_id: clientId })
+})
+
+// Meta/Facebook App ID endpoint (for FB SDK initialization)
+app.get('/api/public/meta-app-id', (c) => {
+  const appId = (c.env as any).META_APP_ID || ''
+  return c.json({ app_id: appId })
+})
+
 // Customer Dashboard
 app.get('/customer/dashboard', (c) => {
   return c.html(getCustomerDashboardHTML())
@@ -2174,9 +2226,13 @@ function getSuperAdminDashboardHTML() {
           <i class="fas fa-search-plus w-5 text-center"></i>
           <span class="label text-sm font-medium">SEO Manager</span>
         </div>
-        <div class="sa-nav-item rounded-xl px-4 py-3 flex items-center gap-3 text-gray-400" onclick="saSetView('canva', this)">
-          <i class="fas fa-palette w-5 text-center"></i>
-          <span class="label text-sm font-medium">Canva Designs</span>
+        <div class="sa-nav-item rounded-xl px-4 py-3 flex items-center gap-3 text-gray-400" onclick="saSetView('onboarding-config', this)">
+          <i class="fas fa-sliders-h w-5 text-center"></i>
+          <span class="label text-sm font-medium">Onboarding Config</span>
+        </div>
+        <div class="sa-nav-item rounded-xl px-4 py-3 flex items-center gap-3 text-gray-400" onclick="saSetView('phone-marketplace', this)">
+          <i class="fas fa-sim-card w-5 text-center"></i>
+          <span class="label text-sm font-medium">Phone Marketplace</span>
         </div>
         <div class="sa-nav-item rounded-xl px-4 py-3 flex items-center gap-3 text-gray-400" onclick="saSetView('pricing-engine', this)">
           <i class="fas fa-calculator w-5 text-center"></i>
@@ -2285,6 +2341,17 @@ function getSuperAdminDashboardHTML() {
   <script src="/static/super-admin-dashboard.js?v=${BUILD_VERSION}"></script>
   <script src="/static/call-center.js?v=${BUILD_VERSION}"></script>
   <script src="/static/meta-connect.js?v=${BUILD_VERSION}"></script>
+  <!-- Facebook SDK for Meta Connect -->
+  <div id="fb-root"></div>
+  <script>
+    window.fbAsyncInit = function() {
+      FB.init({ appId: '', version: 'v21.0', cookie: true, xfbml: false, status: false });
+      // Try to get app ID from server
+      fetch('/api/public/meta-app-id')
+        .then(r => r.json()).then(d => { if (d.app_id) FB._appId = d.app_id; FB.init({ appId: d.app_id || '', version: 'v21.0', cookie: true, xfbml: false }); }).catch(() => {});
+    };
+    (function(d,s,id){ var js,fjs=d.getElementsByTagName(s)[0]; if(d.getElementById(id)) return; js=d.createElement(s); js.id=id; js.src='https://connect.facebook.net/en_US/sdk.js'; fjs.parentNode.insertBefore(js,fjs); }(document,'script','facebook-jssdk'));
+  </script>
   <script src="/static/heygen.js?v=${BUILD_VERSION}"></script>
   <script src="/static/email-outreach.js?v=${BUILD_VERSION}"></script>
 </body>
@@ -2790,6 +2857,18 @@ function getCustomerLoginHTML() {
           <button onclick="doCustLogin()" class="w-full mt-5 py-3 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-xl transition-all hover:scale-[1.02] shadow-lg shadow-brand-500/25">
             <i class="fas fa-sign-in-alt mr-2"></i>Sign In
           </button>
+
+          <!-- Google Sign-In -->
+          <div class="relative my-5">
+            <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200"></div></div>
+            <div class="relative flex justify-center text-xs"><span class="bg-white px-3 text-gray-400">or continue with</span></div>
+          </div>
+          <div id="googleSignInBtn" class="flex justify-center">
+            <button onclick="signInWithGoogle()" class="w-full flex items-center justify-center gap-3 py-3 border-2 border-gray-200 hover:border-gray-300 rounded-xl transition-all hover:bg-gray-50 group">
+              <svg class="w-5 h-5" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+              <span class="font-semibold text-gray-700 group-hover:text-gray-900 text-sm">Sign in with Google</span>
+            </button>
+          </div>
         </div>
 
         <!-- Register Form - Step 1: Email Verification -->
@@ -3050,6 +3129,41 @@ function getCustomerLoginHTML() {
           err.classList.remove('hidden');
         }
       } catch(e) { err.textContent = 'Network error.'; err.classList.remove('hidden'); }
+    }
+
+    // ============================================================
+    // GOOGLE SIGN-IN — Uses OAuth 2.0 popup flow
+    // ============================================================
+    async function signInWithGoogle() {
+      // Use Google Identity Services (GIS) to get an ID token
+      // Since GIS library may not be loaded, we use the OAuth 2.0 redirect flow
+      try {
+        // Fetch the Google OAuth client ID from the server
+        const configRes = await fetch('/api/public/google-oauth-config');
+        const configData = await configRes.json();
+        const clientId = configData.client_id;
+        
+        if (!clientId) {
+          // Fallback: try a simple popup-based approach
+          alert('Google Sign-In is not yet configured. Please register with email instead, or contact support.');
+          return;
+        }
+        
+        // Use Google's OAuth 2.0 token endpoint with implicit flow
+        const redirectUri = window.location.origin + '/customer/google-callback';
+        const scope = 'openid email profile';
+        const authUrl = 'https://accounts.google.com/o/oauth2/v2/auth?'
+          + 'client_id=' + encodeURIComponent(clientId)
+          + '&redirect_uri=' + encodeURIComponent(redirectUri)
+          + '&response_type=token id_token'
+          + '&scope=' + encodeURIComponent(scope)
+          + '&nonce=' + Date.now()
+          + '&prompt=select_account';
+        
+        window.location.href = authUrl;
+      } catch(e) {
+        alert('Google Sign-In is not available. Please use email/password to sign in.');
+      }
     }
   </script>
   ${getRoverWidget()}

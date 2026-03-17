@@ -112,6 +112,7 @@
         break;
       case 'contact-lists':
         CC.data.contactLists = await ccFetch('/api/call-center/contact-lists');
+        CC.data.emailOutreachLists = await ccFetch('/api/admin/superadmin/email-outreach-lists');
         break;
       case 'phone-setup':
         CC.data.phoneSetup = await ccFetch('/api/call-center/quick-connect/status');
@@ -636,6 +637,86 @@
   }
 
   // ============================================================
+  // EMAIL OUTREACH LISTS IN CALL CENTER
+  // ============================================================
+  function renderEmailOutreachListsInCC() {
+    const eoData = CC.data.emailOutreachLists || {};
+    const eoLists = eoData.lists || [];
+    if (eoLists.length === 0) return '';
+    return `
+      <div class="mt-8">
+        <div class="flex items-center gap-2 mb-4">
+          <div class="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center"><i class="fas fa-envelope text-blue-600 text-sm"></i></div>
+          <div>
+            <h3 class="font-bold text-gray-900 text-sm">Email Outreach Lists</h3>
+            <p class="text-xs text-gray-400">Lists created in Email Outreach are available here for call campaigns</p>
+          </div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          ${eoLists.map(l => `
+            <div class="bg-white rounded-xl border border-blue-100 shadow-sm overflow-hidden hover:shadow-md transition-shadow">
+              <div class="p-5">
+                <div class="flex items-start justify-between">
+                  <div>
+                    <h4 class="font-bold text-gray-900">${l.name || 'Untitled'}</h4>
+                    <p class="text-xs text-blue-500 mt-0.5"><i class="fas fa-envelope mr-1"></i>Email Outreach List</p>
+                  </div>
+                  <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-700">EO</span>
+                </div>
+                ${l.description ? '<p class="text-xs text-gray-500 mt-2 line-clamp-2">' + l.description + '</p>' : ''}
+                <div class="mt-3 flex items-center gap-2">
+                  <div class="flex-1 p-3 bg-blue-50 rounded-lg text-center">
+                    <div class="text-xl font-black text-blue-700">${l.total_contacts || 0}</div>
+                    <div class="text-[10px] text-blue-500 uppercase font-semibold">Total</div>
+                  </div>
+                  <div class="flex-1 p-3 bg-green-50 rounded-lg text-center">
+                    <div class="text-xl font-black text-green-700">${l.active_contacts || 0}</div>
+                    <div class="text-[10px] text-green-500 uppercase font-semibold">Active</div>
+                  </div>
+                </div>
+              </div>
+              <div class="px-5 py-3 bg-blue-50/50 border-t border-blue-100 flex items-center justify-between">
+                <button onclick="window.ccImportFromEOList(${l.id})" class="px-3 py-1.5 bg-orange-600 text-white rounded-lg text-xs font-semibold hover:bg-orange-700"><i class="fas fa-download mr-1"></i>Import to Call Center</button>
+                <span class="text-[10px] text-gray-400">Created ${l.created_at ? new Date(l.created_at).toLocaleDateString('en-CA') : '-'}</span>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>`;
+  }
+
+  window.ccImportFromEOList = async function(listId) {
+    if (!confirm('Import all active contacts from this Email Outreach list as call center prospects?')) return;
+    try {
+      const res = await ccFetch('/api/admin/superadmin/email-outreach-lists/' + listId + '/contacts?limit=500');
+      if (!res) return;
+      const contacts = res.contacts || [];
+      if (contacts.length === 0) { alert('No active contacts in this list.'); return; }
+      // Bulk import to call center prospects
+      const prospects = contacts.filter(c => c.phone || c.email).map(c => ({
+        company_name: c.company_name || c.name || '',
+        contact_name: c.name || c.company_name || '',
+        phone: c.phone || '',
+        email: c.email || '',
+        city: c.city || '',
+        province_state: c.state || c.province || '',
+        source: 'email_outreach_import'
+      }));
+      if (prospects.length === 0) { alert('No contacts with phone or email found.'); return; }
+      const importRes = await ccFetch('/api/call-center/prospects', {
+        method: 'POST',
+        body: JSON.stringify({ prospects })
+      });
+      if (importRes && importRes.success !== false) {
+        alert('Imported ' + prospects.length + ' prospects from Email Outreach list!');
+        ccLoadTab('prospects');
+      } else {
+        alert('Import failed: ' + (importRes?.error || 'Unknown error'));
+      }
+    } catch(e) { alert('Error: ' + e.message); }
+  };
+
+  // ============================================================
   // CONTACT LISTS TAB
   // ============================================================
   function renderContactLists() {
@@ -690,6 +771,9 @@
           </div>
         `).join('')}
       </div>
+
+      <!-- Email Outreach Lists (shared from Email Outreach module) -->
+      ${renderEmailOutreachListsInCC()}
     </div>
 
     <!-- Create List Modal -->

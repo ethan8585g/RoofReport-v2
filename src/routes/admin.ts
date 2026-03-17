@@ -1327,132 +1327,196 @@ adminRoutes.delete('/superadmin/seo/backlinks/:id', async (c) => {
 })
 
 // ============================================================
-// CANVA INTEGRATION — Design templates for invoices/proposals
+// ONBOARDING CONFIGURATION — Fees, packs, discounts, features
+// Super admin can fully configure what new users see on signup
 // ============================================================
 
-// Save Canva API key
-adminRoutes.post('/canva/connect', async (c) => {
-  const { canva_api_key, canva_brand_template_id } = await c.req.json()
-  if (!canva_api_key) return c.json({ error: 'Canva API key is required' }, 400)
-
-  await c.env.DB.prepare(`
-    INSERT OR REPLACE INTO settings (master_company_id, setting_key, setting_value) VALUES (1, 'canva_api_key', ?)
-  `).bind(canva_api_key).run()
-
-  if (canva_brand_template_id) {
-    await c.env.DB.prepare(`
-      INSERT OR REPLACE INTO settings (master_company_id, setting_key, setting_value) VALUES (1, 'canva_brand_template_id', ?)
-    `).bind(canva_brand_template_id).run()
-  }
-
-  return c.json({ success: true, message: 'Canva connected successfully' })
-})
-
-// Get Canva status
-adminRoutes.get('/canva/status', async (c) => {
-  const apiKey = await c.env.DB.prepare(
-    "SELECT setting_value FROM settings WHERE setting_key = 'canva_api_key' AND master_company_id = 1"
-  ).first<any>()
-
-  const templateId = await c.env.DB.prepare(
-    "SELECT setting_value FROM settings WHERE setting_key = 'canva_brand_template_id' AND master_company_id = 1"
-  ).first<any>()
-
-  // Get saved templates
-  const templates = await c.env.DB.prepare(
-    "SELECT setting_value FROM settings WHERE setting_key = 'canva_templates' AND master_company_id = 1"
-  ).first<any>()
-
-  let savedTemplates: any[] = []
-  if (templates?.setting_value) {
-    try { savedTemplates = JSON.parse(templates.setting_value) } catch {}
-  }
-
-  return c.json({
-    connected: !!apiKey?.setting_value,
-    has_brand_template: !!templateId?.setting_value,
-    templates: savedTemplates,
-    canva_design_url: 'https://www.canva.com/design',
-    instructions: {
-      step_1: 'Create a free Canva account at canva.com',
-      step_2: 'Design your invoice/proposal/estimate template',
-      step_3: 'Use Canva Connect API or paste your design URL here',
-      step_4: 'Templates will be used when generating customer documents',
-      note: 'Canva Connect API requires a Canva for Teams subscription for full API access. Free users can paste design URLs for manual integration.'
-    }
-  })
-})
-
-// Save Canva design template URLs
-adminRoutes.post('/canva/templates', async (c) => {
-  const { templates } = await c.req.json()
-  // templates = [{ name: 'Invoice Template', type: 'invoice', canva_url: 'https://...', thumbnail_url: '' }]
-  
-  if (!Array.isArray(templates)) return c.json({ error: 'templates must be an array' }, 400)
-
-  await c.env.DB.prepare(`
-    INSERT OR REPLACE INTO settings (master_company_id, setting_key, setting_value) VALUES (1, 'canva_templates', ?)
-  `).bind(JSON.stringify(templates)).run()
-
-  return c.json({ success: true, count: templates.length })
-})
-
-// Generate a Canva design from template (creates a copy for customization)
-adminRoutes.post('/canva/generate', async (c) => {
-  const { template_type, customer_name, property_address, total_amount } = await c.req.json()
-
-  // Load Canva API key
-  const apiKeyRow = await c.env.DB.prepare(
-    "SELECT setting_value FROM settings WHERE setting_key = 'canva_api_key' AND master_company_id = 1"
-  ).first<any>()
-
-  if (!apiKeyRow?.setting_value) {
-    return c.json({
-      error: 'Canva API not configured',
-      fallback: 'Use the built-in HTML invoice generator or paste a Canva design URL',
-      instructions: 'Go to Admin Settings → Canva Integration → Connect your Canva API key'
-    }, 400)
-  }
-
-  // Try Canva Connect API to create an autofill design
+adminRoutes.get('/superadmin/onboarding/config', async (c) => {
   try {
-    const resp = await fetch('https://api.canva.com/rest/v1/autofills', {
+    const row = await c.env.DB.prepare(
+      "SELECT setting_value FROM settings WHERE setting_key = 'onboarding_config' AND master_company_id = 1"
+    ).first<any>()
+
+    const defaults = {
+      setup_fee_cents: 0,
+      setup_fee_label: 'One-Time Setup Fee',
+      monthly_price_cents: 4999,
+      annual_price_cents: 49999,
+      free_trial_reports: 3,
+      free_trial_days: 14,
+      report_packs: [
+        { name: 'Starter Pack', reports: 5, price_cents: 4500, discount_pct: 10 },
+        { name: 'Pro Pack', reports: 15, price_cents: 11250, discount_pct: 25 },
+        { name: 'Enterprise Pack', reports: 50, price_cents: 30000, discount_pct: 40 }
+      ],
+      features: [
+        { id: 'roof_reports', label: 'AI Roof Measurement Reports', enabled: true, free_tier: true },
+        { id: 'crm', label: 'Customer CRM Suite', enabled: true, free_tier: false },
+        { id: 'proposals', label: 'Proposal Generator', enabled: true, free_tier: false },
+        { id: 'invoicing', label: 'Invoice & Billing', enabled: true, free_tier: false },
+        { id: 'secretary_ai', label: 'Roofer Secretary AI', enabled: true, free_tier: false },
+        { id: 'virtual_tryon', label: 'Virtual Try-On', enabled: true, free_tier: true },
+        { id: 'd2d', label: 'Door-to-Door Sales Tracker', enabled: true, free_tier: false },
+        { id: 'team', label: 'Team Management', enabled: true, free_tier: false },
+        { id: 'branding', label: 'Custom Branding', enabled: true, free_tier: false }
+      ],
+      ad_supported_free_tier: true,
+      admob_banner_id: '',
+      admob_interstitial_id: '',
+      show_pack_discounts_on_signup: true,
+      require_payment_after_trial: false
+    }
+
+    if (row?.setting_value) {
+      try {
+        const saved = JSON.parse(row.setting_value)
+        return c.json({ config: { ...defaults, ...saved } })
+      } catch {}
+    }
+    return c.json({ config: defaults })
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500)
+  }
+})
+
+adminRoutes.put('/superadmin/onboarding/config', async (c) => {
+  try {
+    const config = await c.req.json()
+    await c.env.DB.prepare(`
+      INSERT OR REPLACE INTO settings (master_company_id, setting_key, setting_value)
+      VALUES (1, 'onboarding_config', ?)
+    `).bind(JSON.stringify(config)).run()
+    return c.json({ success: true })
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500)
+  }
+})
+
+// ============================================================
+// PHONE NUMBER MARKETPLACE — Purchase DID numbers via Twilio
+// ============================================================
+
+adminRoutes.get('/superadmin/phone-numbers/available', async (c) => {
+  try {
+    const twilioSid = (c.env as any).TWILIO_ACCOUNT_SID
+    const twilioAuth = (c.env as any).TWILIO_AUTH_TOKEN
+    if (!twilioSid || !twilioAuth) {
+      return c.json({ error: 'Twilio credentials not configured', numbers: [] })
+    }
+    const country = c.req.query('country') || 'CA'
+    const areaCode = c.req.query('area_code') || ''
+    const searchUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/AvailablePhoneNumbers/${country}/Local.json?PageSize=20${areaCode ? '&AreaCode=' + areaCode : ''}&VoiceEnabled=true&SmsEnabled=true`
+    const resp = await fetch(searchUrl, {
+      headers: { 'Authorization': 'Basic ' + btoa(twilioSid + ':' + twilioAuth) }
+    })
+    const data: any = await resp.json()
+    const numbers = (data.available_phone_numbers || []).map((n: any) => ({
+      phone_number: n.phone_number,
+      friendly_name: n.friendly_name,
+      locality: n.locality,
+      region: n.region,
+      country: country,
+      capabilities: { voice: n.capabilities?.voice, sms: n.capabilities?.sms, mms: n.capabilities?.mms }
+    }))
+    return c.json({ numbers })
+  } catch (err: any) {
+    return c.json({ error: err.message, numbers: [] }, 500)
+  }
+})
+
+adminRoutes.post('/superadmin/phone-numbers/purchase', async (c) => {
+  try {
+    const twilioSid = (c.env as any).TWILIO_ACCOUNT_SID
+    const twilioAuth = (c.env as any).TWILIO_AUTH_TOKEN
+    if (!twilioSid || !twilioAuth) return c.json({ error: 'Twilio credentials not configured' }, 400)
+
+    const { phone_number, customer_id, purpose } = await c.req.json()
+    if (!phone_number) return c.json({ error: 'phone_number is required' }, 400)
+
+    // Purchase the number via Twilio
+    const purchaseUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/IncomingPhoneNumbers.json`
+    const resp = await fetch(purchaseUrl, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${apiKeyRow.setting_value}`,
-        'Content-Type': 'application/json'
+        'Authorization': 'Basic ' + btoa(twilioSid + ':' + twilioAuth),
+        'Content-Type': 'application/x-www-form-urlencoded'
       },
-      body: JSON.stringify({
-        brand_template_id: template_type || 'default',
-        data: {
-          customer_name: customer_name || '',
-          property_address: property_address || '',
-          total_amount: total_amount ? `$${parseFloat(total_amount).toFixed(2)}` : '',
-          date: new Date().toLocaleDateString('en-CA'),
-          company_name: 'RoofReporterAI'
-        }
-      })
+      body: new URLSearchParams({ PhoneNumber: phone_number }).toString()
     })
+    const result: any = await resp.json()
+    if (!resp.ok) return c.json({ error: result.message || 'Failed to purchase', details: result }, 400)
 
-    if (resp.ok) {
-      const result = await resp.json()
-      return c.json({ success: true, design: result })
-    } else {
-      const err = await resp.text()
-      return c.json({
-        error: 'Canva API error',
-        details: err,
-        fallback: 'You can manually open your Canva template and customize it'
-      }, 400)
-    }
+    // Store in DB
+    try {
+      await c.env.DB.prepare(`
+        CREATE TABLE IF NOT EXISTS purchased_phone_numbers (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          twilio_sid TEXT, phone_number TEXT UNIQUE, friendly_name TEXT,
+          customer_id INTEGER, purpose TEXT DEFAULT 'secretary',
+          monthly_cost_cents INTEGER DEFAULT 150, status TEXT DEFAULT 'active',
+          created_at TEXT DEFAULT (datetime('now'))
+        )
+      `).run()
+    } catch {}
+
+    await c.env.DB.prepare(`
+      INSERT INTO purchased_phone_numbers (twilio_sid, phone_number, friendly_name, customer_id, purpose)
+      VALUES (?, ?, ?, ?, ?)
+    `).bind(result.sid, result.phone_number, result.friendly_name, customer_id || null, purpose || 'secretary').run()
+
+    return c.json({ success: true, phone_number: result.phone_number, sid: result.sid })
   } catch (err: any) {
-    return c.json({
-      error: 'Canva API unavailable',
-      details: err.message,
-      fallback: 'Use the built-in HTML invoice generator instead'
-    }, 500)
+    return c.json({ error: err.message }, 500)
   }
 })
+
+adminRoutes.get('/superadmin/phone-numbers/owned', async (c) => {
+  try {
+    try {
+      const { results } = await c.env.DB.prepare(
+        'SELECT pn.*, c.name as customer_name, c.email as customer_email FROM purchased_phone_numbers pn LEFT JOIN customers c ON c.id = pn.customer_id ORDER BY pn.created_at DESC'
+      ).all<any>()
+      return c.json({ numbers: results || [] })
+    } catch {
+      return c.json({ numbers: [] })
+    }
+  } catch (err: any) {
+    return c.json({ error: err.message, numbers: [] }, 500)
+  }
+})
+
+// ============================================================
+// EMAIL OUTREACH LISTS — Expose to Call Center
+// ============================================================
+adminRoutes.get('/superadmin/email-outreach-lists', async (c) => {
+  try {
+    const { results } = await c.env.DB.prepare(`
+      SELECT el.*,
+        (SELECT COUNT(*) FROM email_contacts ec WHERE ec.list_id = el.id) as total_contacts,
+        (SELECT COUNT(*) FROM email_contacts ec WHERE ec.list_id = el.id AND ec.status = 'active') as active_contacts
+      FROM email_lists el ORDER BY el.created_at DESC
+    `).all<any>()
+    return c.json({ lists: results || [] })
+  } catch (err: any) {
+    return c.json({ lists: [] })
+  }
+})
+
+adminRoutes.get('/superadmin/email-outreach-lists/:id/contacts', async (c) => {
+  try {
+    const id = parseInt(c.req.param('id'))
+    const limit = parseInt(c.req.query('limit') || '200')
+    const offset = parseInt(c.req.query('offset') || '0')
+    const { results } = await c.env.DB.prepare(
+      'SELECT * FROM email_contacts WHERE list_id = ? AND status = ? ORDER BY company_name ASC LIMIT ? OFFSET ?'
+    ).bind(id, 'active', limit, offset).all<any>()
+    return c.json({ contacts: results || [] })
+  } catch (err: any) {
+    return c.json({ contacts: [] })
+  }
+})
+
+// (Canva integration removed — replaced by Onboarding Config above)
 
 // ============================================================
 // PAYWALL / APP STORE READINESS CHECK

@@ -201,6 +201,18 @@ async function loadView(view) {
           if (ccScriptsRes) SA.data.cc_scripts = await ccScriptsRes.json();
         } catch(e) { SA.data.cc_stats = {}; SA.data.cc_scripts = { scripts: [] }; }
         break;
+      case 'onboarding-config':
+        try {
+          const obcRes = await saFetch('/api/admin/superadmin/onboarding/config');
+          if (obcRes) SA.data.onboarding_config = await obcRes.json();
+        } catch(e) { SA.data.onboarding_config = { config: {} }; }
+        break;
+      case 'phone-marketplace':
+        try {
+          const pnRes = await saFetch('/api/admin/superadmin/phone-numbers/owned');
+          if (pnRes) SA.data.phone_numbers = await pnRes.json();
+        } catch(e) { SA.data.phone_numbers = { numbers: [] }; }
+        break;
     }
   } catch (e) {
     console.error('Load error:', e);
@@ -301,7 +313,8 @@ function renderContent() {
     case 'ai-chat': root.innerHTML = (typeof renderAIChat === 'function') ? renderAIChat() : '<div class="p-8 text-gray-500">AI Chat module not loaded.</div>'; break;
     case 'contact-forms': root.innerHTML = renderContactFormsView(); loadContactForms(); break;
     case 'seo-manager': root.innerHTML = renderSEOManagerView(); break;
-    case 'canva': root.innerHTML = renderCanvaView(); loadCanvaStatus(); break;
+    case 'onboarding-config': root.innerHTML = renderOnboardingConfigView(); loadOnboardingConfig(); break;
+    case 'phone-marketplace': root.innerHTML = renderPhoneMarketplaceView(); loadPhoneNumbers(); break;
     case 'pricing-engine': root.innerHTML = renderPricingEngineView(); loadPricingPresets(); break;
     case 'invoices': root.innerHTML = renderInvoicesView(); break;
     case 'telephony': root.innerHTML = renderTelephonyView(); break;
@@ -2606,137 +2619,261 @@ window.seoLoadPageMeta = function() {
 };
 
 // ============================================================
-// VIEW: CANVA INTEGRATION
+// VIEW: ONBOARDING CONFIGURATION — Fees, Packs, Discounts
 // ============================================================
-function renderCanvaView() {
+var onboardCfg = {};
+
+function renderOnboardingConfigView() {
   return `
   <div class="space-y-6">
     <div class="flex items-center justify-between">
-      <h2 class="text-xl font-bold text-gray-800"><i class="fas fa-palette mr-2 text-purple-500"></i>Canva Design Integration</h2>
-      <span id="canva-status-badge" class="text-xs px-3 py-1 rounded-full bg-gray-100 text-gray-500">Loading...</span>
+      <div>
+        <h2 class="text-2xl font-black text-gray-900"><i class="fas fa-sliders-h mr-2 text-blue-500"></i>Customer Onboarding Configuration</h2>
+        <p class="text-sm text-gray-500 mt-1">Control setup fees, trial length, report packs, feature gating, and ad-supported free tier</p>
+      </div>
+      <button onclick="loadView('onboarding-config')" class="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-xl text-sm font-medium"><i class="fas fa-sync-alt mr-1"></i>Refresh</button>
     </div>
+    <div id="obc-form"></div>
+  </div>`;
+}
 
-    <div class="bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-xl p-6">
-      <h3 class="font-bold text-gray-800 mb-2"><i class="fas fa-info-circle mr-1 text-purple-500"></i>How Canva Integration Works</h3>
-      <ol class="text-sm text-gray-600 space-y-1.5 list-decimal list-inside">
-        <li>Create your invoice/proposal/estimate templates in <a href="https://www.canva.com/design" target="_blank" class="text-purple-600 underline font-medium">Canva</a></li>
-        <li>Save each design URL below — organize by type (Invoice, Proposal, Estimate)</li>
-        <li>When generating customer documents, click "Edit in Canva" to open the template</li>
-        <li>Customize with customer details, save as PDF, and send via Gmail</li>
-      </ol>
-      <p class="text-xs text-gray-400 mt-3"><i class="fas fa-lock mr-1"></i>For full API automation (auto-fill customer data), a Canva for Teams subscription is required.</p>
-    </div>
+async function loadOnboardingConfig() {
+  var el = document.getElementById('obc-form');
+  if (!el) return;
+  var d = SA.data.onboarding_config || {};
+  var c = d.config || {};
+  onboardCfg = JSON.parse(JSON.stringify(c));
 
-    <div class="bg-white border border-gray-200 rounded-xl p-6">
-      <h3 class="font-bold text-gray-800 mb-4">Add Design Template</h3>
-      <div class="grid md:grid-cols-3 gap-4 mb-4">
+  el.innerHTML = `
+    <!-- Pricing & Fees -->
+    <div class="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm mb-6">
+      <h3 class="font-bold text-gray-800 mb-4"><i class="fas fa-dollar-sign mr-2 text-green-500"></i>Pricing & Fees</h3>
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div>
-          <label class="block text-xs font-medium text-gray-500 mb-1">Template Name</label>
-          <input id="canva-tpl-name" type="text" placeholder="e.g. Professional Invoice" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-400 focus:border-transparent">
+          <label class="block text-xs font-medium text-gray-500 mb-1">Setup Fee ($)</label>
+          <input type="number" step="0.01" id="obc-setup-fee" value="${((c.setup_fee_cents||0)/100).toFixed(2)}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
         </div>
         <div>
-          <label class="block text-xs font-medium text-gray-500 mb-1">Type</label>
-          <select id="canva-tpl-type" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-400 focus:border-transparent">
-            <option value="invoice">Invoice</option>
-            <option value="proposal">Proposal</option>
-            <option value="estimate">Estimate</option>
-            <option value="receipt">Receipt</option>
-          </select>
+          <label class="block text-xs font-medium text-gray-500 mb-1">Setup Fee Label</label>
+          <input type="text" id="obc-setup-label" value="${c.setup_fee_label||'One-Time Setup Fee'}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
         </div>
         <div>
-          <label class="block text-xs font-medium text-gray-500 mb-1">Canva Design URL</label>
-          <input id="canva-tpl-url" type="url" placeholder="https://www.canva.com/design/..." class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-400 focus:border-transparent">
+          <label class="block text-xs font-medium text-gray-500 mb-1">Monthly Sub ($)</label>
+          <input type="number" step="0.01" id="obc-monthly" value="${((c.monthly_price_cents||4999)/100).toFixed(2)}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-500 mb-1">Annual Sub ($)</label>
+          <input type="number" step="0.01" id="obc-annual" value="${((c.annual_price_cents||49999)/100).toFixed(2)}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
         </div>
       </div>
-      <button onclick="canvaAddTemplate()" class="bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-purple-700"><i class="fas fa-plus mr-1"></i>Add Template</button>
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-4">
+        <div>
+          <label class="block text-xs font-medium text-gray-500 mb-1">Free Trial Reports</label>
+          <input type="number" id="obc-trial-reports" value="${c.free_trial_reports||3}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-500 mb-1">Free Trial Days</label>
+          <input type="number" id="obc-trial-days" value="${c.free_trial_days||14}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+        </div>
+        <div class="flex items-end">
+          <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="obc-ad-free" ${c.ad_supported_free_tier?'checked':''} class="w-4 h-4 text-blue-600 rounded"><span class="text-sm text-gray-700">Ad-Supported Free Tier</span></label>
+        </div>
+        <div class="flex items-end">
+          <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="obc-req-pay" ${c.require_payment_after_trial?'checked':''} class="w-4 h-4 text-blue-600 rounded"><span class="text-sm text-gray-700">Require Payment After Trial</span></label>
+        </div>
+      </div>
     </div>
 
-    <div id="canva-templates-list" class="space-y-3"></div>
-
-    <div class="bg-white border border-gray-200 rounded-xl p-6">
-      <h3 class="font-bold text-gray-800 mb-3">Canva API Key (Optional — for auto-fill)</h3>
-      <p class="text-xs text-gray-500 mb-3">Required only if you want Canva to auto-fill customer name, address, and amounts. Most users can skip this.</p>
-      <div class="flex gap-3">
-        <input id="canva-api-key" type="password" placeholder="Enter Canva API key..." class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm">
-        <button onclick="canvaSaveApiKey()" class="bg-gray-700 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-800">Save Key</button>
+    <!-- Ad Network IDs -->
+    <div class="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm mb-6">
+      <h3 class="font-bold text-gray-800 mb-4"><i class="fas fa-ad mr-2 text-amber-500"></i>Ad Network (AdMob for iOS)</h3>
+      <p class="text-xs text-gray-500 mb-3">After the free trial, users can either pay $49.99/mo or continue with small non-intrusive ads. These IDs enable Google AdMob on iOS.</p>
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-xs font-medium text-gray-500 mb-1">AdMob Banner Unit ID</label>
+          <input type="text" id="obc-admob-banner" value="${c.admob_banner_id||''}" placeholder="ca-app-pub-xxxxxxxxxx/yyyyyyyyyy" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-500 mb-1">AdMob Interstitial Unit ID</label>
+          <input type="text" id="obc-admob-interstitial" value="${c.admob_interstitial_id||''}" placeholder="ca-app-pub-xxxxxxxxxx/zzzzzzzzzz" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono">
+        </div>
       </div>
+    </div>
+
+    <!-- Report Packs -->
+    <div class="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm mb-6">
+      <h3 class="font-bold text-gray-800 mb-4"><i class="fas fa-box-open mr-2 text-indigo-500"></i>Report Packs (Discounted Bundles on Signup)</h3>
+      <div id="obc-packs-list"></div>
+      <button onclick="obcAddPack()" class="mt-3 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700"><i class="fas fa-plus mr-1"></i>Add Pack</button>
+    </div>
+
+    <!-- Features Toggle -->
+    <div class="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm mb-6">
+      <h3 class="font-bold text-gray-800 mb-4"><i class="fas fa-toggle-on mr-2 text-teal-500"></i>Feature Gating</h3>
+      <p class="text-xs text-gray-500 mb-3">Toggle which features are enabled and which are available on the free/ad-supported tier.</p>
+      <div id="obc-features-list"></div>
+    </div>
+
+    <button onclick="obcSave()" id="obc-save-btn" class="px-6 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl font-semibold text-sm"><i class="fas fa-save mr-1"></i>Save Onboarding Configuration</button>
+  `;
+
+  renderObcPacks();
+  renderObcFeatures();
+}
+
+function renderObcPacks() {
+  var el = document.getElementById('obc-packs-list');
+  if (!el) return;
+  var packs = onboardCfg.report_packs || [];
+  if (packs.length === 0) { el.innerHTML = '<p class="text-gray-400 text-sm">No packs configured. Add one below.</p>'; return; }
+  el.innerHTML = '<div class="grid grid-cols-1 md:grid-cols-3 gap-3">' + packs.map(function(p, i) {
+    return '<div class="border border-gray-200 rounded-xl p-4">' +
+      '<div class="flex items-center justify-between mb-2"><input type="text" value="' + (p.name||'') + '" onchange="obcUpdatePack(' + i + ',\'name\',this.value)" class="text-sm font-bold text-gray-800 border-0 bg-transparent w-full" placeholder="Pack Name">' +
+      '<button onclick="obcRemovePack(' + i + ')" class="text-red-400 hover:text-red-600 text-xs"><i class="fas fa-trash"></i></button></div>' +
+      '<div class="grid grid-cols-3 gap-2">' +
+      '<div><label class="text-[10px] text-gray-400">Reports</label><input type="number" value="' + (p.reports||0) + '" onchange="obcUpdatePack(' + i + ',\'reports\',parseInt(this.value))" class="w-full text-sm border border-gray-200 rounded px-2 py-1"></div>' +
+      '<div><label class="text-[10px] text-gray-400">Price ($)</label><input type="number" step="0.01" value="' + ((p.price_cents||0)/100).toFixed(2) + '" onchange="obcUpdatePack(' + i + ',\'price_cents\',Math.round(parseFloat(this.value)*100))" class="w-full text-sm border border-gray-200 rounded px-2 py-1"></div>' +
+      '<div><label class="text-[10px] text-gray-400">Discount %</label><input type="number" value="' + (p.discount_pct||0) + '" onchange="obcUpdatePack(' + i + ',\'discount_pct\',parseInt(this.value))" class="w-full text-sm border border-gray-200 rounded px-2 py-1"></div>' +
+      '</div></div>';
+  }).join('') + '</div>';
+}
+window.obcUpdatePack = function(i, key, val) { if(onboardCfg.report_packs && onboardCfg.report_packs[i]) onboardCfg.report_packs[i][key] = val; };
+window.obcRemovePack = function(i) { onboardCfg.report_packs.splice(i, 1); renderObcPacks(); };
+window.obcAddPack = function() {
+  if (!onboardCfg.report_packs) onboardCfg.report_packs = [];
+  onboardCfg.report_packs.push({ name: 'New Pack', reports: 10, price_cents: 7500, discount_pct: 25 });
+  renderObcPacks();
+};
+
+function renderObcFeatures() {
+  var el = document.getElementById('obc-features-list');
+  if (!el) return;
+  var features = onboardCfg.features || [];
+  el.innerHTML = '<div class="space-y-2">' + features.map(function(f, i) {
+    return '<div class="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-gray-50 border border-gray-100">' +
+      '<div class="flex items-center gap-3">' +
+        '<label class="flex items-center gap-2"><input type="checkbox" ' + (f.enabled?'checked':'') + ' onchange="obcToggleFeature(' + i + ',\'enabled\',this.checked)" class="w-4 h-4 text-teal-600 rounded"><span class="text-sm font-medium text-gray-800">' + f.label + '</span></label>' +
+      '</div>' +
+      '<label class="flex items-center gap-2 text-xs text-gray-500"><input type="checkbox" ' + (f.free_tier?'checked':'') + ' onchange="obcToggleFeature(' + i + ',\'free_tier\',this.checked)" class="w-3 h-3 text-amber-500 rounded"> Free/Ad Tier</label>' +
+    '</div>';
+  }).join('') + '</div>';
+}
+window.obcToggleFeature = function(i, key, val) { if(onboardCfg.features && onboardCfg.features[i]) onboardCfg.features[i][key] = val; };
+
+window.obcSave = async function() {
+  var btn = document.getElementById('obc-save-btn');
+  btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>Saving...';
+  try {
+    onboardCfg.setup_fee_cents = Math.round(parseFloat(document.getElementById('obc-setup-fee').value) * 100);
+    onboardCfg.setup_fee_label = document.getElementById('obc-setup-label').value;
+    onboardCfg.monthly_price_cents = Math.round(parseFloat(document.getElementById('obc-monthly').value) * 100);
+    onboardCfg.annual_price_cents = Math.round(parseFloat(document.getElementById('obc-annual').value) * 100);
+    onboardCfg.free_trial_reports = parseInt(document.getElementById('obc-trial-reports').value);
+    onboardCfg.free_trial_days = parseInt(document.getElementById('obc-trial-days').value);
+    onboardCfg.ad_supported_free_tier = document.getElementById('obc-ad-free').checked;
+    onboardCfg.require_payment_after_trial = document.getElementById('obc-req-pay').checked;
+    onboardCfg.admob_banner_id = document.getElementById('obc-admob-banner').value;
+    onboardCfg.admob_interstitial_id = document.getElementById('obc-admob-interstitial').value;
+
+    var res = await saFetch('/api/admin/superadmin/onboarding/config', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(onboardCfg)
+    });
+    if (res && res.ok) {
+      btn.innerHTML = '<i class="fas fa-check mr-1"></i>Saved!'; btn.classList.replace('bg-red-600','bg-green-600');
+      setTimeout(function(){ loadView('onboarding-config'); }, 1500);
+    } else { alert('Save failed'); btn.disabled = false; btn.innerHTML = '<i class="fas fa-save mr-1"></i>Save'; }
+  } catch(e) { alert('Error: ' + e.message); btn.disabled = false; btn.innerHTML = '<i class="fas fa-save mr-1"></i>Save'; }
+};
+
+// ============================================================
+// VIEW: PHONE NUMBER MARKETPLACE — Twilio DID Purchase
+// ============================================================
+function renderPhoneMarketplaceView() {
+  return `
+  <div class="space-y-6">
+    <div class="flex items-center justify-between">
+      <div>
+        <h2 class="text-2xl font-black text-gray-900"><i class="fas fa-phone-volume mr-2 text-green-500"></i>Phone Number Marketplace</h2>
+        <p class="text-sm text-gray-500 mt-1">Purchase and manage DID phone numbers for Roofer Secretary AI via Twilio</p>
+      </div>
+      <button onclick="loadView('phone-marketplace')" class="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-xl text-sm font-medium"><i class="fas fa-sync-alt mr-1"></i>Refresh</button>
+    </div>
+
+    <!-- Search for Numbers -->
+    <div class="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm">
+      <h3 class="font-bold text-gray-800 mb-4"><i class="fas fa-search mr-2 text-blue-500"></i>Search Available Numbers</h3>
+      <div class="flex gap-3 mb-4">
+        <select id="pn-country" class="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+          <option value="CA">Canada</option>
+          <option value="US">United States</option>
+        </select>
+        <input type="text" id="pn-area-code" placeholder="Area code (e.g. 780, 403)" class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm">
+        <button onclick="pnSearch()" id="pn-search-btn" class="px-6 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700"><i class="fas fa-search mr-1"></i>Search</button>
+      </div>
+      <div id="pn-results" class="text-gray-400 text-sm">Enter an area code and search to find available numbers.</div>
+    </div>
+
+    <!-- Owned Numbers -->
+    <div class="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm">
+      <h3 class="font-bold text-gray-800 mb-4"><i class="fas fa-phone mr-2 text-green-500"></i>Owned Numbers</h3>
+      <div id="pn-owned"></div>
     </div>
   </div>`;
 }
 
-var canvaTemplates = [];
-
-async function loadCanvaStatus() {
-  try {
-    var resp = await saFetch('/api/admin/canva/status');
-    var data = await resp.json();
-    var badge = document.getElementById('canva-status-badge');
-    if (data.connected) {
-      badge.className = 'text-xs px-3 py-1 rounded-full bg-green-100 text-green-700';
-      badge.textContent = 'API Connected';
-    } else {
-      badge.className = 'text-xs px-3 py-1 rounded-full bg-yellow-100 text-yellow-700';
-      badge.textContent = 'URL-only Mode';
-    }
-    canvaTemplates = data.templates || [];
-    renderCanvaTemplatesList();
-  } catch (e) {}
-}
-
-function renderCanvaTemplatesList() {
-  var el = document.getElementById('canva-templates-list');
+async function loadPhoneNumbers() {
+  var el = document.getElementById('pn-owned');
   if (!el) return;
-  if (canvaTemplates.length === 0) {
-    el.innerHTML = '<div class="text-center py-8 text-gray-400"><i class="fas fa-palette text-3xl mb-2"></i><p>No templates yet. Add your first Canva design above.</p></div>';
-    return;
-  }
-  el.innerHTML = canvaTemplates.map(function(t, i) {
-    var typeColor = {invoice:'blue',proposal:'green',estimate:'amber',receipt:'purple'}[t.type] || 'gray';
-    return '<div class="bg-white border border-gray-200 rounded-lg p-4 flex items-center justify-between">' +
-      '<div class="flex items-center gap-3">' +
-        '<span class="text-xs px-2 py-0.5 rounded-full bg-' + typeColor + '-100 text-' + typeColor + '-700 font-medium uppercase">' + t.type + '</span>' +
-        '<div><p class="font-medium text-gray-800">' + t.name + '</p><p class="text-xs text-gray-400">' + (t.canva_url || '').substring(0, 50) + '...</p></div>' +
-      '</div>' +
-      '<div class="flex gap-2">' +
-        '<a href="' + t.canva_url + '" target="_blank" class="text-xs bg-purple-50 text-purple-700 px-3 py-1.5 rounded-lg hover:bg-purple-100"><i class="fas fa-external-link-alt mr-1"></i>Open in Canva</a>' +
-        '<button onclick="canvaRemoveTemplate(' + i + ')" class="text-xs bg-red-50 text-red-600 px-2 py-1.5 rounded-lg hover:bg-red-100"><i class="fas fa-trash"></i></button>' +
-      '</div></div>';
-  }).join('');
+  var d = SA.data.phone_numbers || {};
+  var numbers = d.numbers || [];
+  if (numbers.length === 0) { el.innerHTML = '<p class="text-gray-400 text-sm">No numbers purchased yet. Search and buy one above.</p>'; return; }
+  el.innerHTML = '<div class="space-y-2">' + numbers.map(function(n) {
+    return '<div class="flex items-center justify-between py-3 px-4 rounded-xl border border-gray-100 hover:bg-gray-50">' +
+      '<div class="flex items-center gap-3"><div class="w-10 h-10 bg-green-100 rounded-xl flex items-center justify-center"><i class="fas fa-phone text-green-600"></i></div>' +
+        '<div><p class="font-mono font-bold text-gray-800">' + n.phone_number + '</p><p class="text-xs text-gray-400">' + (n.friendly_name||'') + ' · ' + (n.purpose||'secretary') + '</p></div></div>' +
+      '<div class="text-right"><span class="px-2 py-1 text-xs rounded-full font-medium ' + (n.status==='active'?'bg-green-100 text-green-700':'bg-gray-100 text-gray-500') + '">' + (n.status||'active') + '</span>' +
+        (n.customer_name ? '<p class="text-xs text-gray-400 mt-1">Assigned: ' + n.customer_name + '</p>' : '') + '</div></div>';
+  }).join('') + '</div>';
 }
 
-window.canvaAddTemplate = async function() {
-  var name = document.getElementById('canva-tpl-name').value.trim();
-  var type = document.getElementById('canva-tpl-type').value;
-  var url = document.getElementById('canva-tpl-url').value.trim();
-  if (!name || !url) return alert('Name and URL are required');
-  canvaTemplates.push({ name: name, type: type, canva_url: url });
-  await saFetch('/api/admin/canva/templates', {
-    method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ templates: canvaTemplates })
-  });
-  document.getElementById('canva-tpl-name').value = '';
-  document.getElementById('canva-tpl-url').value = '';
-  renderCanvaTemplatesList();
+window.pnSearch = async function() {
+  var btn = document.getElementById('pn-search-btn');
+  var el = document.getElementById('pn-results');
+  btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>Searching...';
+  try {
+    var country = document.getElementById('pn-country').value;
+    var areaCode = document.getElementById('pn-area-code').value.trim();
+    var res = await saFetch('/api/admin/superadmin/phone-numbers/available?country=' + country + (areaCode ? '&area_code=' + areaCode : ''));
+    if (!res) { el.innerHTML = '<p class="text-red-500 text-sm">Auth error</p>'; return; }
+    var data = await res.json();
+    var numbers = data.numbers || [];
+    if (data.error) { el.innerHTML = '<p class="text-red-500 text-sm">' + data.error + '</p>'; return; }
+    if (numbers.length === 0) { el.innerHTML = '<p class="text-gray-400 text-sm">No numbers available for that area code. Try a different one.</p>'; return; }
+    el.innerHTML = '<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">' + numbers.map(function(n) {
+      return '<div class="border border-gray-200 rounded-xl p-4 hover:border-green-300 hover:shadow-md transition-all cursor-pointer" onclick="pnPurchase(\'' + n.phone_number + '\')">' +
+        '<p class="font-mono font-bold text-gray-900 text-lg">' + n.phone_number + '</p>' +
+        '<p class="text-xs text-gray-500">' + (n.locality||'') + (n.region ? ', ' + n.region : '') + '</p>' +
+        '<div class="mt-2 flex items-center justify-between"><span class="text-xs text-gray-400"><i class="fas fa-phone mr-1"></i>Voice + SMS</span>' +
+        '<span class="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">~$1.50/mo</span></div>' +
+        '<button class="mt-2 w-full text-center bg-green-600 text-white rounded-lg py-1.5 text-sm font-semibold hover:bg-green-700"><i class="fas fa-cart-plus mr-1"></i>Purchase</button></div>';
+    }).join('') + '</div>';
+  } catch(e) { el.innerHTML = '<p class="text-red-500 text-sm">Error: ' + e.message + '</p>'; }
+  btn.disabled = false; btn.innerHTML = '<i class="fas fa-search mr-1"></i>Search';
 };
 
-window.canvaRemoveTemplate = async function(index) {
-  canvaTemplates.splice(index, 1);
-  await saFetch('/api/admin/canva/templates', {
-    method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ templates: canvaTemplates })
-  });
-  renderCanvaTemplatesList();
-};
-
-window.canvaSaveApiKey = async function() {
-  var key = document.getElementById('canva-api-key').value.trim();
-  if (!key) return alert('Enter a Canva API key');
-  await saFetch('/api/admin/canva/connect', {
-    method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ canva_api_key: key })
-  });
-  alert('Canva API key saved!');
-  loadCanvaStatus();
+window.pnPurchase = async function(phoneNumber) {
+  if (!confirm('Purchase ' + phoneNumber + '? This will charge your Twilio account ~$1.50/mo.')) return;
+  try {
+    var res = await saFetch('/api/admin/superadmin/phone-numbers/purchase', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone_number: phoneNumber, purpose: 'secretary' })
+    });
+    if (!res) return;
+    var data = await res.json();
+    if (data.success) { alert('Number purchased: ' + data.phone_number); loadView('phone-marketplace'); }
+    else alert('Purchase failed: ' + (data.error || 'Unknown error'));
+  } catch(e) { alert('Error: ' + e.message); }
 };
 
 // ============================================================
