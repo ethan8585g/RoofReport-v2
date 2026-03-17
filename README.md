@@ -2,13 +2,13 @@
 
 ## Project Overview
 - **Name**: RoofReporterAI
-- **Version**: 9.5 (Secretary AI Call Center Dashboard + Agent Persona Selection)
+- **Version**: 9.6 (Onboarding Config, Phone Marketplace, Google OAuth, Meta Connect Fix)
 - **Domain**: www.roofreporterai.com
 - **Production**: https://roofing-measurement-tool.pages.dev
 - **GitHub**: https://github.com/ethan8585g/roofreporter-ai-good-copy
 - **Platform**: Cloudflare Pages + Workers + D1
 - **Status**: Active
-- **Last Updated**: 2026-03-16 (v9.5)
+- **Last Updated**: 2026-03-17 (v9.6)
 
 ## Core Platform Features
 
@@ -383,7 +383,27 @@ Homeowner calls roofer → Roofer's Personal Cell
 ## Recommended Next Steps (v9.6)
 
 ### Phase 1 — Immediate Priority (Next 1-2 Days)
-1. **Deploy LiveKit Agent to LiveKit Cloud (READY)** — Deployment package is complete in `livekit-agent/`. Run from your local machine:
+1. **Configure Google OAuth** — Set `GOOGLE_OAUTH_CLIENT_ID` in Cloudflare Pages secrets
+   - Create OAuth 2.0 Client at https://console.cloud.google.com/apis/credentials
+   - Add authorized redirect URI: `https://www.roofreporterai.com/customer/google-callback`
+   - Add `https://roofing-measurement-tool.pages.dev/customer/google-callback` too
+   - Set `GOOGLE_OAUTH_CLIENT_ID` env var in Cloudflare dashboard
+2. **Configure Meta/Facebook App** — Set `META_APP_ID` and `META_APP_SECRET` in Cloudflare Pages secrets
+   - Create app at https://developers.facebook.com/apps/
+   - Add "Facebook Login" product, set redirect URI to your domain
+   - Copy App ID and App Secret to Cloudflare env vars
+3. **Configure Twilio for Phone Marketplace** — Set `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN` in Cloudflare secrets
+   - Sign up at https://www.twilio.com/
+   - Get Account SID and Auth Token from Console dashboard
+4. **Configure AdMob for iOS App Store** — In Super Admin → Onboarding Config:
+   - Create AdMob account at https://admob.google.com/
+   - Create a Banner ad unit and an Interstitial ad unit
+   - Paste both Unit IDs into the Onboarding Config panel
+5. **Set Onboarding Pricing** — Visit Super Admin → Onboarding Config
+   - Configure setup fee (if any), monthly sub ($49.99), annual sub ($499.99)
+   - Create report pack discounts for signup (e.g., 5-pack at 10% off, 15-pack at 25% off)
+   - Toggle feature gating for free vs paid tiers
+6. **Deploy LiveKit Agent to LiveKit Cloud (READY)** — Deployment package is complete in `livekit-agent/`. Run from your local machine:
    ```bash
    git clone https://github.com/ethan8585g/roofreporter-ai-good-copy.git
    cd roofreporter-ai-good-copy/livekit-agent
@@ -445,6 +465,34 @@ Homeowner calls roofer → Roofer's Personal Cell
 ## Version History
 
 ### v9.6 (Current — 2026-03-17)
+- **Customer Onboarding Configuration** — Super Admin can fully customize signup experience
+  - Configurable setup fees, monthly/annual subscription pricing
+  - Report pack discounts (bundles offered during signup)
+  - Feature gating: toggle features on/off, configure free tier vs paid
+  - AdMob banner + interstitial ID fields for iOS ad-supported tier
+  - Ad-supported free tier: users choose $49.99/mo subscription OR ads after trial
+  - Free trial reports count and trial period (days) fully adjustable
+- **Phone Number Marketplace** — Purchase DID numbers via Twilio
+  - Search available numbers by country (CA/US) and area code
+  - One-click purchase via Twilio API
+  - Owned numbers management with customer assignment
+  - Ideal for Roofer Secretary AI number provisioning
+- **Google Sign-In** — Customer login page now has Google OAuth button
+  - OAuth 2.0 implicit flow with ID token verification
+  - `/customer/google-callback` handles token exchange
+  - `/api/public/google-oauth-config` (public) returns client ID
+  - Requires `GOOGLE_OAUTH_CLIENT_ID` env var
+- **Meta Connect Fix** — Facebook OAuth now functional
+  - Facebook SDK (connect.facebook.net) dynamically loaded on super admin page
+  - `/api/public/meta-app-id` provides META_APP_ID for FB.init()
+  - FB.login() works with loaded SDK + manual token fallback
+- **Email Outreach Lists in Call Center** — Cross-module data sharing
+  - Call Center Contact Lists tab shows Email Outreach lists
+  - Import button converts email contacts into call center prospects
+- **Canva Integration Removed** from super admin (replaced by Onboarding Config + Phone Marketplace)
+- **Post-Trial Subscription Model**:
+  - Option 1: $49.99/month subscription (full access)
+  - Option 2: Ad-supported free tier (AdMob for iOS App Store eligibility)
 - **Customer Cold Call Center** — Full AI outbound dialer dashboard for each customer
   - Page route: `/customer/cold-calls`
   - Dashboard tile added to customer navigation grid (orange, "Cold Call Center")
