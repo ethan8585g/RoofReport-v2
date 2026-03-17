@@ -126,6 +126,43 @@ agentsRoutes.get('/leads', async (c) => {
   return c.json({ leads: results, total: countRow?.cnt || 0, page, limit })
 })
 
+// POST /track — Public analytics event tracker (no auth required)
+agentsRoutes.post('/track', async (c) => {
+  try {
+    const body = await c.req.json()
+    const { event, ...data } = body
+    if (!event) return c.json({ ok: true }) // silently ignore
+    
+    // Ensure analytics_events table exists
+    try {
+      await c.env.DB.prepare(`
+        CREATE TABLE IF NOT EXISTS analytics_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          event TEXT NOT NULL,
+          data TEXT,
+          url TEXT,
+          user_agent TEXT,
+          ip TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `).run()
+    } catch(e) {}
+    
+    await c.env.DB.prepare(
+      'INSERT INTO analytics_events (event, data, url, user_agent) VALUES (?,?,?,?)'
+    ).bind(
+      event,
+      JSON.stringify(data),
+      data.url || '',
+      c.req.header('user-agent') || ''
+    ).run()
+    
+    return c.json({ ok: true })
+  } catch(e) {
+    return c.json({ ok: true }) // silently fail
+  }
+})
+
 // ============================================================
 // AUTO-EMAIL PREFERENCE
 // ============================================================

@@ -1976,42 +1976,34 @@ function getContactFormHTML(sourcePage: string = 'unknown') {
       <div class="text-center mb-10">
         <span class="inline-block bg-cyan-500/20 text-cyan-300 text-xs font-bold px-3 py-1 rounded-full mb-4">GET IN TOUCH</span>
         <h2 class="text-3xl md:text-4xl font-bold text-white mb-3">Ready to Transform Your Roofing Business?</h2>
-        <p class="text-gray-300 max-w-xl mx-auto">Fill out the form below and our team will reach out within 24 hours to get you set up with AI-powered roof measurement reports.</p>
+        <p class="text-gray-300 max-w-xl mx-auto">Fill out the form below and our team will reach out within 24 hours to get you set up.</p>
       </div>
       <form id="lead-capture-form" onsubmit="return submitLeadForm(event, '${sourcePage}')" class="bg-white/10 backdrop-blur-lg border border-white/20 rounded-2xl p-8 space-y-5">
         <div class="grid md:grid-cols-2 gap-5">
           <div>
-            <label class="block text-sm font-medium text-gray-200 mb-1.5">First Name <span class="text-red-400">*</span></label>
-            <input type="text" id="lead-first-name" required placeholder="John" class="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:ring-2 focus:ring-cyan-400 focus:border-transparent outline-none">
+            <label class="block text-sm font-medium text-gray-200 mb-1.5">Full Name <span class="text-red-400">*</span></label>
+            <input type="text" id="lead-first-name" required placeholder="John Smith" class="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:ring-2 focus:ring-cyan-400 focus:border-transparent outline-none min-h-[48px]">
           </div>
           <div>
-            <label class="block text-sm font-medium text-gray-200 mb-1.5">Last Name <span class="text-red-400">*</span></label>
-            <input type="text" id="lead-last-name" required placeholder="Smith" class="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:ring-2 focus:ring-cyan-400 focus:border-transparent outline-none">
+            <label class="block text-sm font-medium text-gray-200 mb-1.5">Email Address <span class="text-red-400">*</span></label>
+            <input type="email" id="lead-email" required placeholder="john@abcroofing.com" class="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:ring-2 focus:ring-cyan-400 focus:border-transparent outline-none min-h-[48px]">
           </div>
         </div>
         <div class="grid md:grid-cols-2 gap-5">
           <div>
             <label class="block text-sm font-medium text-gray-200 mb-1.5">Company Name</label>
-            <input type="text" id="lead-company" placeholder="ABC Roofing Ltd." class="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:ring-2 focus:ring-cyan-400 focus:border-transparent outline-none">
+            <input type="text" id="lead-company" placeholder="ABC Roofing Ltd." class="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:ring-2 focus:ring-cyan-400 focus:border-transparent outline-none min-h-[48px]">
           </div>
           <div>
             <label class="block text-sm font-medium text-gray-200 mb-1.5">Phone Number</label>
-            <input type="tel" id="lead-phone" placeholder="(780) 555-1234" class="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:ring-2 focus:ring-cyan-400 focus:border-transparent outline-none">
+            <input type="tel" id="lead-phone" placeholder="(780) 555-1234" class="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:ring-2 focus:ring-cyan-400 focus:border-transparent outline-none min-h-[48px]">
           </div>
         </div>
-        <div>
-          <label class="block text-sm font-medium text-gray-200 mb-1.5">Email Address <span class="text-red-400">*</span></label>
-          <input type="email" id="lead-email" required placeholder="john@abcroofing.com" class="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:ring-2 focus:ring-cyan-400 focus:border-transparent outline-none">
-        </div>
-        <div>
-          <label class="block text-sm font-medium text-gray-200 mb-1.5">How can we help?</label>
-          <textarea id="lead-message" rows="3" placeholder="Tell us about your roofing business and what you're looking for..." class="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:ring-2 focus:ring-cyan-400 focus:border-transparent outline-none resize-none"></textarea>
-        </div>
         <div id="lead-form-msg" class="hidden text-sm font-medium px-4 py-3 rounded-lg"></div>
-        <button type="submit" id="lead-submit-btn" class="w-full bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-bold py-4 px-8 rounded-xl shadow-lg transition-all hover:scale-[1.01] text-lg">
-          <i class="fas fa-paper-plane mr-2"></i>Get Started — It's Free
+        <button type="submit" id="lead-submit-btn" class="w-full bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-400 hover:to-red-400 text-white font-bold py-4 px-8 rounded-xl shadow-lg transition-all hover:scale-[1.01] text-lg min-h-[56px]">
+          <i class="fas fa-rocket mr-2"></i>Get Started — 3 Free Reports
         </button>
-        <p class="text-center text-gray-400 text-xs">No credit card required. 3 free reports included.</p>
+        <p class="text-center text-gray-400 text-xs">No credit card required. Setup in 2 minutes.</p>
       </form>
     </div>
   </section>
@@ -2023,20 +2015,22 @@ function getContactFormHTML(sourcePage: string = 'unknown') {
     btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Submitting...';
     msg.className = 'hidden';
     try {
-      var firstName = document.getElementById('lead-first-name').value.trim();
-      var lastName = document.getElementById('lead-last-name').value.trim();
+      var fullName = document.getElementById('lead-first-name').value.trim();
+      var nameParts = fullName.split(' ');
+      var firstName = nameParts[0] || '';
+      var lastName = nameParts.slice(1).join(' ') || '';
       var res = await fetch('/api/agents/leads', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: firstName + ' ' + lastName,
+          name: fullName,
           first_name: firstName,
           last_name: lastName,
           company_name: document.getElementById('lead-company').value.trim(),
-          phone: document.getElementById('lead-phone').value.trim(),
+          phone: (document.getElementById('lead-phone') || {}).value ? document.getElementById('lead-phone').value.trim() : '',
           email: document.getElementById('lead-email').value.trim(),
           source_page: source,
-          message: document.getElementById('lead-message').value.trim()
+          message: ''
         })
       });
       var data = await res.json();
@@ -2052,7 +2046,7 @@ function getContactFormHTML(sourcePage: string = 'unknown') {
       msg.className = 'text-sm font-medium px-4 py-3 rounded-lg bg-red-500/20 text-red-300 border border-red-500/30';
       msg.innerHTML = '<i class="fas fa-exclamation-circle mr-2"></i>Network error. Please try again.';
     }
-    btn.disabled = false; btn.innerHTML = '<i class="fas fa-paper-plane mr-2"></i>Get Started — It\\'s Free';
+    btn.disabled = false; btn.innerHTML = '<i class="fas fa-rocket mr-2"></i>Get Started — 3 Free Reports';
   }
   </script>`
 }
@@ -2647,6 +2641,36 @@ function getLandingPageHTML() {
       backdrop-filter: blur(16px);
       box-shadow: 0 4px 30px rgba(0,0,0,0.3);
     }
+    /* Mobile touch targets */
+    @media (max-width: 768px) {
+      button, a.inline-flex, input[type="submit"] {
+        min-height: 44px;
+      }
+    }
+    /* Range slider styling */
+    input[type="range"] {
+      -webkit-appearance: none;
+      height: 6px;
+      border-radius: 3px;
+      background: rgba(255,255,255,0.1);
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #22d3ee;
+      cursor: pointer;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
+    input[type="range"]::-moz-range-thumb {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #22d3ee;
+      cursor: pointer;
+      border: none;
+    }
   </style>
 </head>
 <body class="bg-white min-h-screen">
@@ -2662,15 +2686,15 @@ function getLandingPageHTML() {
       </a>
 
       <!-- Desktop nav -->
-      <div class="hidden md:flex items-center gap-6">
+      <div class="hidden md:flex items-center gap-5">
         <a href="#how-it-works" class="text-gray-300 hover:text-white text-sm font-medium transition-colors">How It Works</a>
         <a href="#features" class="text-gray-300 hover:text-white text-sm font-medium transition-colors">Platform</a>
         <a href="#pricing" class="text-gray-300 hover:text-white text-sm font-medium transition-colors">Pricing</a>
         <a href="/blog" class="text-gray-300 hover:text-white text-sm font-medium transition-colors">Blog</a>
-        <a href="/lander" class="text-gray-300 hover:text-white text-sm font-medium transition-colors">Get Started</a>
         <a href="#faq" class="text-gray-300 hover:text-white text-sm font-medium transition-colors">FAQ</a>
-        <a href="/signup" class="bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-semibold py-2 px-5 rounded-lg text-sm transition-all hover:scale-105 shadow-lg shadow-cyan-500/25">
-          <i class="fas fa-sign-in-alt mr-1"></i>Login
+        <a href="/customer/login" class="text-gray-300 hover:text-white text-sm font-medium transition-colors">Login</a>
+        <a href="/signup" class="bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-400 hover:to-red-400 text-white font-bold py-2.5 px-5 rounded-lg text-sm transition-all hover:scale-105 shadow-lg shadow-orange-500/25 min-h-[40px] flex items-center gap-1">
+          <i class="fas fa-rocket mr-1"></i>Start Free
         </a>
       </div>
 
@@ -2683,13 +2707,13 @@ function getLandingPageHTML() {
     <!-- Mobile menu -->
     <div id="mobile-menu" class="hidden md:hidden bg-slate-900/98 backdrop-blur-xl border-t border-white/10">
       <div class="max-w-7xl mx-auto px-4 py-4 flex flex-col gap-1">
-        <a href="#how-it-works" class="text-gray-300 hover:text-white text-sm py-2.5 px-3 rounded-lg hover:bg-white/5 transition-all" onclick="document.getElementById('mobile-menu').classList.add('hidden')">How It Works</a>
-        <a href="#features" class="text-gray-300 hover:text-white text-sm py-2.5 px-3 rounded-lg hover:bg-white/5 transition-all" onclick="document.getElementById('mobile-menu').classList.add('hidden')">Platform</a>
-        <a href="#pricing" class="text-gray-300 hover:text-white text-sm py-2.5 px-3 rounded-lg hover:bg-white/5 transition-all" onclick="document.getElementById('mobile-menu').classList.add('hidden')">Pricing</a>
-        <a href="/blog" class="text-gray-300 hover:text-white text-sm py-2.5 px-3 rounded-lg hover:bg-white/5 transition-all" onclick="document.getElementById('mobile-menu').classList.add('hidden')">Blog</a>
-        <a href="/lander" class="text-gray-300 hover:text-white text-sm py-2.5 px-3 rounded-lg hover:bg-white/5 transition-all" onclick="document.getElementById('mobile-menu').classList.add('hidden')">Get Started</a>
-        <a href="#faq" class="text-gray-300 hover:text-white text-sm py-2.5 px-3 rounded-lg hover:bg-white/5 transition-all" onclick="document.getElementById('mobile-menu').classList.add('hidden')">FAQ</a>
-        <a href="/signup" class="bg-gradient-to-r from-cyan-500 to-blue-500 text-white font-semibold py-2.5 px-5 rounded-lg text-sm text-center mt-2"><i class="fas fa-sign-in-alt mr-1"></i>Login / Sign Up</a>
+        <a href="#how-it-works" class="text-gray-300 hover:text-white text-sm py-3 px-3 rounded-lg hover:bg-white/5 transition-all min-h-[44px] flex items-center" onclick="document.getElementById('mobile-menu').classList.add('hidden')">How It Works</a>
+        <a href="#features" class="text-gray-300 hover:text-white text-sm py-3 px-3 rounded-lg hover:bg-white/5 transition-all min-h-[44px] flex items-center" onclick="document.getElementById('mobile-menu').classList.add('hidden')">Platform</a>
+        <a href="#pricing" class="text-gray-300 hover:text-white text-sm py-3 px-3 rounded-lg hover:bg-white/5 transition-all min-h-[44px] flex items-center" onclick="document.getElementById('mobile-menu').classList.add('hidden')">Pricing</a>
+        <a href="/blog" class="text-gray-300 hover:text-white text-sm py-3 px-3 rounded-lg hover:bg-white/5 transition-all min-h-[44px] flex items-center" onclick="document.getElementById('mobile-menu').classList.add('hidden')">Blog</a>
+        <a href="#faq" class="text-gray-300 hover:text-white text-sm py-3 px-3 rounded-lg hover:bg-white/5 transition-all min-h-[44px] flex items-center" onclick="document.getElementById('mobile-menu').classList.add('hidden')">FAQ</a>
+        <a href="/customer/login" class="text-gray-300 hover:text-white text-sm py-3 px-3 rounded-lg hover:bg-white/5 transition-all min-h-[44px] flex items-center" onclick="document.getElementById('mobile-menu').classList.add('hidden')"><i class="fas fa-sign-in-alt mr-2"></i>Login</a>
+        <a href="/signup" class="bg-gradient-to-r from-orange-500 to-red-500 text-white font-bold py-3 px-5 rounded-lg text-sm text-center mt-2 min-h-[48px] flex items-center justify-center gap-2"><i class="fas fa-rocket"></i>Start Free — 3 Reports On Us</a>
       </div>
     </div>
   </nav>
@@ -2715,6 +2739,12 @@ function getLandingPageHTML() {
             <a href="#" class="text-gray-500 hover:text-cyan-400 transition-colors"><i class="fab fa-instagram text-lg"></i></a>
             <a href="#" class="text-gray-500 hover:text-cyan-400 transition-colors"><i class="fab fa-linkedin text-lg"></i></a>
           </div>
+          <!-- Trust badges -->
+          <div class="flex items-center gap-3 mt-6 flex-wrap">
+            <span class="text-[10px] text-gray-600 bg-gray-800 px-2 py-1 rounded"><i class="fas fa-shield-alt text-green-500 mr-1"></i>PCI DSS</span>
+            <span class="text-[10px] text-gray-600 bg-gray-800 px-2 py-1 rounded"><i class="fas fa-lock text-blue-500 mr-1"></i>SSL</span>
+            <span class="text-[10px] text-gray-600 bg-gray-800 px-2 py-1 rounded"><i class="fas fa-maple-leaf text-red-500 mr-1"></i>Canadian</span>
+          </div>
         </div>
         <div>
           <h4 class="text-white font-semibold mb-4 text-sm uppercase tracking-wider">Product</h4>
@@ -2723,7 +2753,8 @@ function getLandingPageHTML() {
             <li><a href="#features" class="hover:text-cyan-400 transition-colors">AI Roofer Secretary</a></li>
             <li><a href="#features" class="hover:text-cyan-400 transition-colors">CRM & Invoicing</a></li>
             <li><a href="#features" class="hover:text-cyan-400 transition-colors">Virtual Roof Try-On</a></li>
-            <li><a href="#pricing" class="hover:text-cyan-400 transition-colors">Pricing</a></li>
+            <li><a href="#pricing" class="hover:text-cyan-400 transition-colors">Pricing & Plans</a></li>
+            <li><a href="#pricing" class="hover:text-cyan-400 transition-colors">B2B Volume Pricing</a></li>
           </ul>
         </div>
         <div>
@@ -2733,15 +2764,19 @@ function getLandingPageHTML() {
             <li><a href="#how-it-works" class="hover:text-cyan-400 transition-colors">How It Works</a></li>
             <li><a href="#faq" class="hover:text-cyan-400 transition-colors">FAQ</a></li>
             <li><a href="/lander" class="hover:text-cyan-400 transition-colors">Get Started Guide</a></li>
-            <li><a href="mailto:reports@reusecanada.ca" class="hover:text-cyan-400 transition-colors">Contact</a></li>
+            <li><a href="mailto:reports@reusecanada.ca" class="hover:text-cyan-400 transition-colors">Contact Us</a></li>
           </ul>
         </div>
         <div>
-          <h4 class="text-white font-semibold mb-4 text-sm uppercase tracking-wider">Get Started</h4>
-          <p class="text-sm text-gray-500 mb-4">Start with 3 free reports. No credit card required.</p>
-          <a href="/signup" class="inline-block bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-semibold py-2.5 px-6 rounded-lg text-sm transition-all shadow-lg">
-            Sign Up Free
-          </a>
+          <h4 class="text-white font-semibold mb-4 text-sm uppercase tracking-wider">Get Started Free</h4>
+          <p class="text-sm text-gray-500 mb-4">3 free reports. Full CRM. No credit card.</p>
+          <form onsubmit="return footerQuickSignup(event)" class="space-y-2.5">
+            <input type="email" id="footer-email" required placeholder="you@company.com" class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-white text-sm placeholder-gray-500 focus:ring-2 focus:ring-cyan-400 focus:border-transparent outline-none">
+            <input type="text" id="footer-company" placeholder="Company name" class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-white text-sm placeholder-gray-500 focus:ring-2 focus:ring-cyan-400 focus:border-transparent outline-none">
+            <button type="submit" class="w-full bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-400 hover:to-red-400 text-white font-bold py-2.5 px-4 rounded-lg text-sm transition-all hover:scale-[1.02] shadow-lg min-h-[44px]">
+              <i class="fas fa-rocket mr-1"></i>Start Free
+            </button>
+          </form>
         </div>
       </div>
       <div class="border-t border-gray-800 mt-12 pt-8 flex flex-col md:flex-row items-center justify-between gap-4">
@@ -2753,6 +2788,20 @@ function getLandingPageHTML() {
       </div>
     </div>
   </footer>
+
+  <!-- Footer quick signup -->
+  <script>
+  function footerQuickSignup(e) {
+    e.preventDefault();
+    var email = document.getElementById('footer-email').value.trim();
+    if (!email) return false;
+    var params = new URLSearchParams({ email: email });
+    var company = document.getElementById('footer-company').value.trim();
+    if (company) params.set('company', company);
+    window.location.href = '/signup?' + params.toString();
+    return false;
+  }
+  </script>
 
   <!-- Navbar scroll effect -->
   <script>
